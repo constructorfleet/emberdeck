@@ -1,0 +1,58 @@
+name: Release
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+  pull-requests: write
+  pages: write
+  id-token: write
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      created: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+  publish:
+    needs: release
+    if: needs.release.outputs.created == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: sh scripts/check.sh
+      - name: Build portable binaries
+        env:
+          VERSION: ${{ needs.release.outputs.tag }}
+        run: |
+          mkdir -p dist/bin
+          for target in linux/amd64 linux/arm64 linux/arm darwin/amd64 darwin/arm64 windows/amd64; do
+            export GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 GOARM=7
+            suffix=""; [ "$GOOS" != windows ] || suffix=.exe
+            go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "dist/bin/emberdeck-$GOOS-$GOARCH$suffix" ./cmd/emberdeck
+          done
+          cd dist/bin && sha256sum * > SHA256SUMS
+      - name: Attach binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release.outputs.tag }}
+        run: gh release upload "$TAG" dist/bin/*
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/docs
+      - uses: actions/deploy-pages@v4
+        id: deployment

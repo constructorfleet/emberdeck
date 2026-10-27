@@ -1,0 +1,5 @@
+{
+  "packages": {
+    ".": {"release-type": "simple", "package-name": "emberdeck", "include-v-in-tag": true}
+  }
+}
