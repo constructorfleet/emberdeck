@@ -477,6 +477,10 @@ func TestGenerateCreatesValidatedQueuedJobWithImmutableSourceSnapshots(t *testin
 	if job.Provenance.GeneratorVersion != "rectangle-v1" || job.Provenance.Project.ID != project.ID || job.Provenance.Project.Revision != 1 || job.Provenance.Profile.ID != profileID || job.Provenance.Profile.Revision != 1 {
 		t.Fatalf("incomplete provenance: %+v", job.Provenance)
 	}
+	review := request(t, s, "GET", "/api/v1/jobs/"+job.ID+"/review", "", "test-key")
+	if review.Code != http.StatusOK || !strings.Contains(review.Body.String(), `"bounds_status":"unknown"`) || !strings.Contains(review.Body.String(), `"program":{"segments"`) {
+		t.Fatalf("generated program review response is incomplete: %d %s", review.Code, review.Body.String())
+	}
 	expectedProject := server.DesignerProject{SchemaVersion: 1, ID: project.ID, Revision: 1, Name: "Panel outline", ProfileID: profileID, ProfileRevision: 1,
 		Rectangle: server.Rectangle{XMM: 10, YMM: 20, WidthMM: 30, HeightMM: 20}, Operation: server.DesignerOperation{Type: "vector-engrave", FeedMMMin: 600, PowerPercent: 25}}
 	expectedProfile := server.MachineProfile{SchemaVersion: 1, ID: profileID, Revision: 1, Name: "Declared GRBL", Controller: "grbl-1.1", Units: "mm", Origin: "lower-left", WidthMM: 300, HeightMM: 200, MinS: 0, MaxS: 1000, MinFeed: 1, MaxFeed: 6000, MaxPowerPct: 100, LaserMode: true}
@@ -486,7 +490,7 @@ func TestGenerateCreatesValidatedQueuedJobWithImmutableSourceSnapshots(t *testin
 	if _, err := driver.Validate(job.Gcode); err != nil {
 		t.Fatalf("generated job fails controller validation: %v", err)
 	}
-	if w := request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"missing","confirmed":true}`, "test-key"); w.Code != http.StatusConflict {
+	if w := request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"missing","confirmed":true,"bounds_override":true}`, "test-key"); w.Code != http.StatusConflict {
 		t.Fatalf("generation unexpectedly changed job lifecycle: start returned %d", w.Code)
 	}
 	w = request(t, s, "PUT", "/api/v1/projects/"+project.ID, `{"schema_version":1,"name":"Changed source","profile_id":"`+profileID+`","profile_revision":1,"rectangle":{"x_mm":11,"y_mm":20,"width_mm":30,"height_mm":20},"operation":{"type":"vector-engrave","feed_mm_min":600,"power_percent":25},"revision":1}`, "test-key")

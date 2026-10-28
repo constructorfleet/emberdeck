@@ -40,8 +40,8 @@ select **Reopen** to continue editing.
 | --- | --- | --- |
 | Machine profiles | **New profile**, **Edit profile**, **Delete profile** | Store the declared GRBL work area and limits used by the rectangle editor. |
 | Design projects | **New rectangle project** or **New vector project**, **Reopen**, **Save**, **Generate queued job**, **Delete** | Edit a v1 rectangle engraving source or a v2 multi-path design with ordered engraving/cutting layers, preview its declared envelope, or create a separate queued program. |
-| Add a program | File chooser, display name, **Add to library** | Upload plain-text G-code (up to 4 MiB) for inspection and dispatch. |
-| Stored programs | Driver selector, readiness checkbox, **View**, **Start**, **Pause**, **Resume**, **Cancel**, **Delete** | Inspect and manage jobs through the existing explicit-confirmation workflow. Available controls depend on job state and driver capabilities. |
+| Add a program | File chooser, display name, profile selector, **Add to library** | Upload plain-text G-code (up to 4 MiB), validate line limits, and review its known path against the selected profile. |
+| Stored programs | Driver selector, readiness checkbox, bounds override, **View**, **Start**, **Pause**, **Resume**, **Cancel**, **Delete** | Inspect and manage jobs through explicit bounds override and readiness confirmation. Available controls depend on job state and driver capabilities. |
 
 The profile and project lists remain separate from generated jobs: deleting a
 source project does not delete a generated program, and editing a source does
@@ -49,10 +49,21 @@ not change an existing program.
 
 ## Add and inspect a program
 
-Choose a G-code file, enter a display name, and add it to the library. Use
-**View** to inspect the program text before dispatch. Review the program and
-machine setup, verify the machine's interlocks, and check the supervision box
-before selecting **Start**. The checkbox is cleared after dispatch.
+Choose a G-code file, enter a display name, select the declared machine profile,
+and add it to the library. Upload rejects driver line-limit errors with their
+source line before the job is queued. The job row shows known XY bounds and a
+static path preview against the profile work area. Arcs, incremental positioning,
+machine-coordinate moves, work-coordinate writes, an unknown starting position,
+or a stale/missing profile keep the overall bounds status **unknown**. The
+preview cannot establish the current head position or physical machine safety.
+
+An **in bounds** review does not replace checking the program and machine. For
+**out of bounds** or **unknown** jobs, inspect the warnings, path, and profile;
+the per-job override checkbox must be selected before **Start** is enabled.
+Then verify the machine's interlocks and check the supervision box. Both
+confirmations are explicit and the bounds override is cleared after dispatch.
+
+![Uploaded G-code with an out-of-bounds profile review, path bounds, and explicit override control](assets/screenshots/operator-console-uploaded-bounds-review.png)
 
 ## Declare a machine profile and design a rectangle
 

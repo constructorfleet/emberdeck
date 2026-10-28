@@ -35,8 +35,11 @@ type Job struct {
 	Gcode           string              `json:"gcode"`
 	State           string              `json:"state"`
 	Created         time.Time           `json:"created"`
+	ProfileID       string              `json:"profile_id,omitempty"`
+	ProfileRevision int                 `json:"profile_revision,omitempty"`
 	Provenance      *JobProvenance      `json:"provenance,omitempty"`
 	Execution       *toolpath.Execution `json:"execution,omitempty"`
+	Review          *ProgramReview      `json:"program_review,omitempty"`
 }
 
 // Server serializes durable mutations before acknowledging API requests.
@@ -111,6 +114,9 @@ func Open(dir, key string) (*Server, error) {
 			return nil, errors.New("invalid designer project library entry")
 		}
 	}
+	if err := s.populateMissingReviews(); err != nil {
+		return nil, err
+	}
 	if err := s.recoverInterrupted(); err != nil {
 		return nil, err
 	}
@@ -123,6 +129,7 @@ func Open(dir, key string) (*Server, error) {
 	s.mux.HandleFunc("POST /api/v1/jobs", s.upload)
 	s.mux.HandleFunc("GET /api/v1/jobs", s.list)
 	s.mux.HandleFunc("GET /api/v1/jobs/{id}/toolpath", s.getToolpath)
+	s.mux.HandleFunc("GET /api/v1/jobs/{id}/review", s.getJobReview)
 	s.mux.HandleFunc("GET /api/v1/jobs/{id}", s.get)
 	s.mux.HandleFunc("DELETE /api/v1/jobs/{id}", s.delete)
 	s.mux.HandleFunc("GET /api/v1/profiles", s.listProfiles)
@@ -138,6 +145,30 @@ func Open(dir, key string) (*Server, error) {
 	s.mux.HandleFunc("POST /api/v1/projects/{id}/generate", s.generateProject)
 	opened = true
 	return s, nil
+}
+
+func (s *Server) populateMissingReviews() error {
+	jobs := s.copyJobs()
+	changed := false
+	for id, job := range jobs {
+		if job.Provenance != nil || job.Review != nil {
+			continue
+		}
+		var profile *MachineProfile
+		stale := false
+		if selected, ok := s.profiles[job.ProfileID]; ok {
+			profile = &selected
+			stale = selected.Revision != job.ProfileRevision
+		}
+		review := reviewProgram(job.Gcode, profile, stale)
+		job.Review = &review
+		jobs[id] = job
+		changed = true
+	}
+	if changed {
+		return s.save(jobs)
+	}
+	return nil
 }
 
 func validHexID(id string) bool {
@@ -231,8 +262,9 @@ func (s *Server) copyJobs() map[string]Job {
 }
 func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Name  string `json:"name"`
-		Gcode string `json:"gcode"`
+		Name      string `json:"name"`
+		Gcode     string `json:"gcode"`
+		ProfileID string `json:"profile_id"`
 	}
 	body := http.MaxBytesReader(w, r.Body, 4<<20)
 	decoder := json.NewDecoder(body)
@@ -250,7 +282,8 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "name and text G-code are required")
 		return
 	}
-	if _, err := driver.Validate(input.Gcode); err != nil {
+	total, err := driver.Validate(input.Gcode)
+	if err != nil {
 		fail(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
@@ -259,9 +292,22 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "could not allocate job ID")
 		return
 	}
-	job := Job{ID: hex.EncodeToString(id), Name: input.Name, Gcode: input.Gcode, State: "queued", Created: time.Now().UTC()}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	job := Job{ID: hex.EncodeToString(id), Name: input.Name, Gcode: input.Gcode, State: "queued", Created: time.Now().UTC(), Total: total}
+	if input.ProfileID != "" {
+		profile, exists := s.profiles[input.ProfileID]
+		if !exists {
+			fail(w, http.StatusBadRequest, "selected profile does not exist")
+			return
+		}
+		job.ProfileID, job.ProfileRevision = profile.ID, profile.Revision
+		review := reviewProgram(job.Gcode, &profile, false)
+		job.Review = &review
+	} else {
+		review := reviewProgram(job.Gcode, nil, false)
+		job.Review = &review
+	}
 	jobs := s.copyJobs()
 	jobs[job.ID] = job
 	if err := s.save(jobs); err != nil {
@@ -288,6 +334,9 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 		}
 		return jobs[i].Created.Before(jobs[j].Created)
 	})
+	for i := range jobs {
+		jobs[i].Review = s.currentReview(jobs[i])
+	}
 	respond(w, 200, jobs)
 }
 func (s *Server) get(w http.ResponseWriter, r *http.Request) {
@@ -302,6 +351,7 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "job not found")
 		return
 	}
+	job.Review = s.currentReview(job)
 	respond(w, 200, job)
 }
 

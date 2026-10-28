@@ -20,7 +20,7 @@ func TestPauseAndResumeFollowConfirmedControllerState(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("register capable worker: %d %s", w.Code, w.Body.String())
 	}
-	w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true}`, "test-key")
+	w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true,"bounds_override":true}`, "test-key")
 	var assignment struct{ Lease string }
 	if err := json.Unmarshal(w.Body.Bytes(), &assignment); err != nil {
 		t.Fatal(err)
@@ -93,7 +93,7 @@ func assignControlJob(t *testing.T, s http.Handler, capable bool) (string, strin
 	if w.Code != 200 {
 		t.Fatalf("register: %d %s", w.Code, w.Body.String())
 	}
-	w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true}`, "test-key")
+	w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true,"bounds_override":true}`, "test-key")
 	if w.Code != 200 {
 		t.Fatalf("start: %d %s", w.Code, w.Body.String())
 	}

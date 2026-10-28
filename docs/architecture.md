@@ -49,6 +49,14 @@ or heartbeat expiry clears active correlation and marks confidence unknown,
 retaining only the completed lower bound. This is a visualization estimate,
 not a measurement of beam output or material removal.
 
+Uploaded jobs retain a compact profile-review summary and profile revision.
+Line-length validation runs before upload succeeds. Known path bounds are
+compared with the selected lower-left work envelope; unsupported or incomplete
+motion, a missing starting position, or a stale profile leaves the whole-program
+bounds status unknown. Dispatch requires an explicit bounds override for
+uploaded jobs whose status is not in bounds. Designer-generated jobs retain
+their separate validated provenance and profile checks.
+
 ## Controller boundary
 
 GRBL 1.1 send/response sends one line and awaits its acknowledgment. A readiness

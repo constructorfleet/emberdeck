@@ -103,8 +103,9 @@ func (s *Server) listDrivers(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		DriverID  string `json:"driver_id"`
-		Confirmed bool   `json:"confirmed"`
+		DriverID       string `json:"driver_id"`
+		Confirmed      bool   `json:"confirmed"`
+		BoundsOverride bool   `json:"bounds_override"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -113,6 +114,27 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "operator must confirm supervision and machine readiness")
 		return
 	}
+	s.mu.Lock()
+	preflightJob, exists := s.jobs[r.PathValue("id")]
+	if !exists {
+		s.mu.Unlock()
+		fail(w, 404, "job not found")
+		return
+	}
+	if preflightJob.State != "queued" {
+		s.mu.Unlock()
+		fail(w, 409, "only queued jobs can start")
+		return
+	}
+	if preflightJob.Provenance == nil {
+		review := s.currentReview(preflightJob)
+		if (review == nil || review.BoundsStatus != "in_bounds") && !in.BoundsOverride {
+			s.mu.Unlock()
+			fail(w, 409, "program bounds are unknown or outside the selected profile; explicit bounds_override confirmation is required")
+			return
+		}
+	}
+	s.mu.Unlock()
 	if err := s.preflight(r.Context(), r.PathValue("id")); err != nil {
 		fail(w, 422, err.Error())
 		return
@@ -131,6 +153,13 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 	if j.State != "queued" {
 		fail(w, 409, "only queued jobs can start")
 		return
+	}
+	if j.Provenance == nil {
+		review := s.currentReview(j)
+		if (review == nil || review.BoundsStatus != "in_bounds") && !in.BoundsOverride {
+			fail(w, 409, "program bounds are unknown or outside the selected profile; explicit bounds_override confirmation is required")
+			return
+		}
 	}
 	d, ok := s.drivers[in.DriverID]
 	if !ok || d.Busy {

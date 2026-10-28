@@ -13,15 +13,23 @@ Requests and responses are JSON, except successful deletion (204). Errors return
 
 ## Job library
 
-`POST /jobs` accepts `{"name":"square.gcode","gcode":"G21\nG90\nM5"}` and
+`POST /jobs` accepts `{"name":"square.gcode","gcode":"G21\nG90\nM5","profile_id":"optional-profile-id"}` and
 returns 201, the job, and its Location. The full JSON upload is limited to 4 MiB;
 names are 1–200 bytes. Control bytes other than tabs and line endings are rejected.
-Uploading stores a program; it does not execute it or certify its machine safety.
+Driver line validation runs at upload; an invalid line returns 422 with its line
+number. An optional `profile_id` binds a declared profile revision for the
+program bounds review. Uploading stores a program; it does not execute it or
+certify its machine safety.
 
 `GET /jobs` returns jobs in creation order. `GET /jobs/{id}` returns the uploaded
-program, current state, and optional live `execution` telemetry. `GET
-/jobs/{id}/toolpath` returns a derived 2D path for visualization; it does not
-change or validate the uploaded source. `DELETE /jobs/{id}` removes a queued or terminal job;
+program, current state, optional live `execution` telemetry, and optional
+`program_review` summary. `GET /jobs/{id}/review` returns the selected profile's
+revision, program bounds, profile envelope, bounds status (`in_bounds`,
+`out_of_bounds`, or `unknown`), warnings, and derived path. A partial path can
+show known bounds while its status remains `unknown`. A changed/deleted profile
+also makes the status unknown. `GET /jobs/{id}/toolpath` returns a derived 2D
+path for visualization; it does not change or validate the uploaded source.
+`DELETE /jobs/{id}` removes a queued or terminal job;
 a running or canceling job must first stop. These operations persist to the
 private data directory. Run one server per directory; file locking enforces it.
 
@@ -39,8 +47,12 @@ separate.
 
 `GET /drivers` returns online workers, their last heartbeat time, and busy status.
 
-`POST /jobs/{id}/start` takes `{"driver_id":"bench","confirmed":true}`. The
-operator must supervise work and confirm physical readiness. A queued job can
+`POST /jobs/{id}/start` takes `{"driver_id":"bench","confirmed":true,"bounds_override":true}`.
+For uploaded jobs, `bounds_override:true` is required when the profile review is
+unknown or out of bounds; review results do not replace the existing supervision
+confirmation. Designer-generated jobs keep their profile-bound generation
+validation and do not require this override. The operator must supervise work
+and confirm physical readiness. A queued job can
 start only on an online, idle worker. The server validates the complete program
 and runs all configured preflight plugins before assignment. A plugin rejection,
 error, or timeout prevents dispatch (422). No automatic queue advancement occurs.

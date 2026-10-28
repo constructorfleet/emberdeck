@@ -16,7 +16,7 @@ where indicated. This is an early foundation, not a production certification.
 - [x] Verify hosted cross-platform/container checks and v0.1.0 release deployment
 - [x] Pause/resume with explicit controller state reporting
 - [x] Declared GRBL profiles and envelope validation/preview for rectangle projects
-- [ ] Profile-aware parsing and coordinate preview for uploaded machine programs
+- [ ] [#54: Profile-aware parsing and coordinate preview for uploaded machine programs](https://github.com/constructorfleet/emberdeck/issues/54)
 - [ ] Job history metadata, filtering, pagination, and large-library storage
 - [ ] Separate operator/worker credentials and multi-user permissions
 - [ ] Camera monitoring with authenticated access
@@ -73,6 +73,13 @@ their implementation status and evidence:
   separately from acknowledged lines. The issue remains open for broader motion
   coverage, machine-bound visualization, and additional interruption/controller
   validation.
+- [ ] [#54: Profile-aware bounds review for uploaded G-code](https://github.com/constructorfleet/emberdeck/issues/54).
+  The first slice now validates driver line limits during upload, stores a
+  selected profile revision, reports known bounds and unsupported/incomplete
+  motion, renders a static profile-envelope preview, and requires an explicit
+  override when uploaded-job bounds are unknown or outside the profile. Keep the
+  issue open for broader parser coverage and a review state that can establish
+  fully known in-bounds programs without guessing an initial head position.
 - [x] [#8: Categorized documentation navigation and UX cleanup](https://github.com/constructorfleet/emberdeck/issues/8).
   Review the deployed documentation and record a content grouping; implement
   categorized navigation and presentation improvements across the site while

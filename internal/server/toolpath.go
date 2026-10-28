@@ -19,6 +19,93 @@ func (s *Server) getToolpath(w http.ResponseWriter, r *http.Request) {
 	respond(w, http.StatusOK, toolpath.Parse(job.Gcode))
 }
 
+type ProgramReview struct {
+	ProfileID       string           `json:"profile_id,omitempty"`
+	ProfileRevision int              `json:"profile_revision,omitempty"`
+	BoundsStatus    string           `json:"bounds_status"`
+	Bounds          *toolpath.Bounds `json:"bounds,omitempty"`
+	ProfileBounds   *toolpath.Bounds `json:"profile_bounds,omitempty"`
+	Warnings        []string         `json:"warnings"`
+}
+
+func reviewProgram(source string, profile *MachineProfile, stale bool) ProgramReview {
+	program := toolpath.Parse(source)
+	review := ProgramReview{BoundsStatus: "unknown", Warnings: append([]string{}, program.Warnings...)}
+	if bounds, ok := toolpath.ProgramBounds(program); ok {
+		review.Bounds = &bounds
+	}
+	if profile == nil {
+		review.Warnings = append(review.Warnings, "no current machine profile is selected")
+		return review
+	}
+	review.ProfileID, review.ProfileRevision = profile.ID, profile.Revision
+	review.ProfileBounds = &toolpath.Bounds{Min: toolpath.Point{}, Max: toolpath.Point{X: profile.WidthMM, Y: profile.HeightMM}}
+	if stale {
+		review.Warnings = append(review.Warnings, "the selected machine profile changed or was deleted after upload")
+		return review
+	}
+	if review.Bounds == nil {
+		review.Warnings = append(review.Warnings, "no complete 2D path bounds could be determined")
+		return review
+	}
+	if !program.Supported {
+		review.Warnings = append(review.Warnings, "unsupported motion prevents a reliable profile comparison")
+		return review
+	}
+	if review.Bounds.Min.X < 0 || review.Bounds.Min.Y < 0 || review.Bounds.Max.X > profile.WidthMM || review.Bounds.Max.Y > profile.HeightMM {
+		review.BoundsStatus = "out_of_bounds"
+		return review
+	}
+	if program.Supported && program.Complete {
+		review.BoundsStatus = "in_bounds"
+	} else {
+		review.Warnings = append(review.Warnings, "program contains unsupported or incomplete motion; full bounds are unknown")
+	}
+	return review
+}
+
+func (s *Server) currentReview(job Job) *ProgramReview {
+	if job.Provenance != nil {
+		return nil
+	}
+	copy := ProgramReview{BoundsStatus: "unknown", Warnings: []string{"program review is unavailable"}}
+	if job.Review != nil {
+		copy = *job.Review
+	}
+	if job.ProfileID == "" {
+		return &copy
+	}
+	profile, exists := s.profiles[job.ProfileID]
+	if !exists || profile.Revision != job.ProfileRevision {
+		copy.BoundsStatus = "unknown"
+		copy.Warnings = append(copy.Warnings, "the selected machine profile changed or was deleted after upload")
+	}
+	return &copy
+}
+
+func (s *Server) getJobReview(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	job, exists := s.jobs[r.PathValue("id")]
+	if !exists {
+		s.mu.Unlock()
+		fail(w, http.StatusNotFound, "job not found")
+		return
+	}
+	review := s.currentReview(job)
+	if review == nil && job.Provenance != nil {
+		profile := job.Provenance.Profile
+		generatedReview := reviewProgram(job.Gcode, &profile, false)
+		review = &generatedReview
+	}
+	gcode := job.Gcode
+	s.mu.Unlock()
+	program := toolpath.Parse(gcode)
+	respond(w, http.StatusOK, struct {
+		*ProgramReview
+		Program toolpath.Program `json:"program"`
+	}{review, program})
+}
+
 func validExecution(execution toolpath.Execution, gcode string, previous *toolpath.Execution, jobState string) bool {
 	progress := execution.Progress
 	total := len(toolpath.Parse(gcode).Segments)

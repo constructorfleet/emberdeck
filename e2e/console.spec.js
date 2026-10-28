@@ -119,6 +119,11 @@ async function startJob(page, row) {
   const start = row.getByRole('button', { name: 'Start' });
   await expect(start).toBeDisabled();
   await page.locator('#operator-confirmation').check();
+  const boundsOverride = row.getByRole('checkbox', { name: /Override .* bounds review/ });
+  if (await boundsOverride.count()) {
+    await expect(start).toBeDisabled();
+    await boundsOverride.check();
+  }
   await expect(start).toBeEnabled();
   await start.click();
   await expect(row).toContainText(/running/i);
@@ -194,7 +199,17 @@ test('running uploaded G-code shows a fitted camera-free toolpath with estimated
   await page.getByRole('button', { name: /Add to library/ }).click();
   const row = page.locator('#job-list li').filter({ hasText: name });
   await expect(row).toContainText(/queued/i);
-  const progress = await startJob(page, row);
+  await expect(row.locator('.toolpath-summary')).toContainText('Static program review · bounds unknown');
+  const boundsOverride = row.getByRole('checkbox', { name: /Override unknown bounds review/ });
+  await expect(boundsOverride).toBeVisible();
+  const start = row.getByRole('button', { name: 'Start' });
+  await page.locator('#operator-confirmation').check();
+  await expect(start).toBeDisabled();
+  await boundsOverride.check();
+  await expect(start).toBeEnabled();
+  await start.click();
+  await expect(row).toContainText(/running/i);
+  const progress = row.locator('progress');
   await expect(row.locator('.toolpath-live')).toBeVisible({ timeout: 10000 });
   await expect(row.locator('.toolpath-summary')).toContainText(/estimated/i, { timeout: 10000 });
   await expect(row.locator('.toolpath-svg .path-active')).toHaveCount(1, { timeout: 10000 });
