@@ -10,7 +10,7 @@ test('editable monoline text saves, reopens, generates engraving geometry, and d
   page.on('request', (request) => {
     if (request.method() === 'POST' && /\/api\/v1\/jobs\/[^/]+\/start$/.test(new URL(request.url()).pathname)) startRequests.push(request);
   });
-  await page.goto('/');
+  await page.goto('/designer');
   await page.locator('#api-key').fill(apiKey);
   await page.getByRole('button', { name: /Connect/ }).click();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
@@ -58,9 +58,11 @@ test('editable monoline text saves, reopens, generates engraving geometry, and d
   await expect(page.locator('#generate-vector-project')).toBeEnabled();
   await page.locator('#generate-vector-project').click();
   expect(startRequests).toHaveLength(0);
+  await page.getByRole('link', { name: 'Job library' }).click();
   await expect(page.locator('#operator-confirmation')).not.toBeChecked();
   const row = page.locator('#job-list li').filter({ hasText: `${projectName}.gcode` });
   await expect(row).toContainText(/queued/i);
+  await row.getByRole('button', { name: /^View / }).click();
   await expect(page.locator('#program-code')).toContainText('G0 X11 Y10\nM4 S0\nG1 X10 Y11 F600 S250');
   await expect(row.getByRole('button', { name: /^Start / })).toBeDisabled();
   expect(startRequests).toHaveLength(0);
@@ -74,7 +76,7 @@ test('editable monoline text saves, reopens, generates engraving geometry, and d
 test('invalid text stays blocked when another text object is edited', async ({ page }) => {
   test.setTimeout(30000);
   const attempt = `${test.info().retry}-${Date.now()}`;
-  await page.goto('/');
+  await page.goto('/designer');
   await page.locator('#api-key').fill(apiKey);
   await page.getByRole('button', { name: /Connect/ }).click();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');

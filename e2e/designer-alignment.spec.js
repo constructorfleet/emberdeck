@@ -11,7 +11,7 @@ test('keyboard multi-selection aligns transformed shapes and persists the new pl
     if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/v1/projects') savedPayload = request.postDataJSON();
   });
 
-  await page.goto('/');
+  await page.goto('/designer');
   await page.locator('#api-key').fill(apiKey);
   await page.getByRole('button', { name: /Connect/ }).click();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');

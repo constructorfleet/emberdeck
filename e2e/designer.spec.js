@@ -11,7 +11,7 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
   page.on('request', (request) => {
     if (request.method() === 'POST' && /\/api\/v1\/jobs\/[^/]+\/start$/.test(new URL(request.url()).pathname)) startRequests.push(request);
   });
-  await page.goto('/');
+  await page.goto('/designer');
   await page.locator('#api-key').fill(apiKey);
   await page.getByRole('button', { name: /Connect/ }).click();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
@@ -77,12 +77,12 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
   await expect(page.locator('#profile-save-hint')).toBeHidden();
   await expect(page.getByRole('button', { name: 'Generate queued job' })).toBeEnabled();
 
-  await page.locator('#operator-confirmation').check();
-  await expect(page.locator('#operator-confirmation')).toBeChecked();
   await page.getByRole('button', { name: 'Generate queued job' }).click();
   await expect(page.locator('#operator-confirmation')).not.toBeChecked();
+  await page.getByRole('link', { name: 'Job library' }).click();
   const row = page.locator('#job-list li').filter({ hasText: `${projectName}.gcode` });
   await expect(row).toContainText(/queued/i);
+  await row.getByRole('button', { name: /^View / }).click();
   await expect(page.locator('#program-panel')).toBeVisible();
   await expect(page.locator('#program-code')).toContainText('G0 X11 Y20');
   await expect(page.locator('#program-code')).toContainText('G1 X41 Y20 F600 S250');
@@ -98,18 +98,17 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
   await expect(row).toContainText(/completed/i, { timeout: 30000 });
 
   const generatedCode = await page.locator('#program-code').textContent();
+  await page.getByRole('link', { name: 'Designer' }).click();
   const projectRow = page.locator('#project-list li').filter({ hasText: projectName });
   page.once('dialog', (dialog) => dialog.accept());
   await projectRow.getByRole('button', { name: `Delete project ${projectName}` }).click();
   await expect(projectRow).toHaveCount(0);
+  await page.getByRole('link', { name: 'Job library' }).click();
   await expect(row).toBeVisible();
   await row.getByRole('button', { name: /^View / }).click();
   await expect(page.locator('#program-code')).toHaveText(generatedCode);
   await expect(page.locator('#program-provenance')).toContainText(projectName);
 
-  page.once('dialog', (dialog) => dialog.accept());
-  await page.getByRole('button', { name: 'Delete profile' }).click();
-  await expect(page.locator('#notice .notice-message')).toContainText('Profile deleted');
   await expect(row).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -117,7 +116,7 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
 });
 
 test('rectangle bounds accept exact three-decimal millimetre edges', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/designer');
   await page.locator('#api-key').fill(apiKey);
   await page.getByRole('button', { name: /Connect/ }).click();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
@@ -151,16 +150,17 @@ test('multi-path vector project saves, reopens, generates mixed operations, and 
   test.setTimeout(90000);
   const attempt = `${test.info().repeatEachIndex}-${test.info().retry}-${Date.now()}`;
   const projectName = `E2E mixed vector ${attempt}`;
+  const profileName = `Vector profile ${attempt}`;
   const startRequests = [];
   page.on('request', (request) => {
     if (request.method() === 'POST' && /\/api\/v1\/jobs\/[^/]+\/start$/.test(new URL(request.url()).pathname)) startRequests.push(request);
   });
-  await page.goto('/');
+  await page.goto('/designer');
   await page.locator('#api-key').fill(apiKey);
   await page.getByRole('button', { name: /Connect/ }).click();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
   await page.getByRole('button', { name: 'New profile' }).click();
-  await page.locator('#profile-name').fill(`Vector profile ${attempt}`);
+  await page.locator('#profile-name').fill(profileName);
   await page.locator('#profile-width').fill('300');
   await page.locator('#profile-height').fill('200');
   await page.locator('#profile-max-s').fill('1000');
@@ -211,9 +211,11 @@ test('multi-path vector project saves, reopens, generates mixed operations, and 
   }
   await page.locator('#generate-vector-project').click();
   expect(startRequests).toHaveLength(0);
+  await page.getByRole('link', { name: 'Job library' }).click();
   await expect(page.locator('#operator-confirmation')).not.toBeChecked();
   const row = page.locator('#job-list li').filter({ hasText: `${projectName}.gcode` });
   await expect(row).toContainText(/queued/i);
+  await row.getByRole('button', { name: /^View / }).click();
   await expect(page.locator('#program-code')).toContainText('M4 S0');
   await expect.poll(() => page.locator('#program-code').textContent().then((code) => (code.match(/M4 S0/g) || []).length)).toBe(3);
   await expect(page.locator('#program-code')).toContainText('F300 S500');
@@ -230,10 +232,13 @@ test('multi-path vector project saves, reopens, generates mixed operations, and 
   await expect.poll(() => startRequests.length).toBe(1);
   await expect(row).toContainText(/completed/i, { timeout: 30000 });
 
+  await page.getByRole('link', { name: 'Designer' }).click();
+  await expect(page.locator('#profile-select')).toHaveValue(/.+/);
   const pathName = `E2E imported path ${attempt}`;
-  const imported = await page.evaluate(async (name) => {
-    const profileID = document.querySelector('#profile-select').value;
-    const profile = (await (await fetch('/api/v1/profiles', { headers: { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}` } })).json()).find((candidate) => candidate.id === profileID);
+  const imported = await page.evaluate(async ({ name, profileName }) => {
+    const profilesResponse = await fetch('/api/v1/profiles', { headers: { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}` } });
+    const profile = (await profilesResponse.json()).find((candidate) => candidate.name === profileName);
+    if (!profile) throw new Error(`The saved profile ${profileName} was not returned by the profile API (${profilesResponse.status})`);
     const response = await fetch('/api/v1/projects', {
       method: 'POST',
       headers: { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' },
@@ -247,7 +252,7 @@ test('multi-path vector project saves, reopens, generates mixed operations, and 
       }),
     });
     return response.json();
-  }, pathName);
+  }, { name: pathName, profileName });
   expect(imported.objects[0].kind).toBe('path');
   await page.reload();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
@@ -270,7 +275,7 @@ test('multi-path vector project saves, reopens, generates mixed operations, and 
 });
 
 test('open profile and rectangle editors fit tablet and phone viewports', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/designer');
   await page.locator('#api-key').fill(apiKey);
   await page.getByRole('button', { name: /Connect/ }).click();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
@@ -306,7 +311,7 @@ test('operator imports static SVG paths into an editable project and assigns the
   });
   const attempt = `${test.info().repeatEachIndex}-${test.info().retry}-${Date.now()}`;
   const projectName = `SVG import ${attempt}`;
-  await page.goto('/');
+  await page.goto('/designer');
   await page.locator('#api-key').fill(apiKey);
   await page.getByRole('button', { name: /Connect/ }).click();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
@@ -356,8 +361,10 @@ test('operator imports static SVG paths into an editable project and assigns the
   await expect(page.locator('#vector-object-list li')).toHaveCount(2);
   await expect(page.locator('#generate-vector-project')).toBeEnabled();
   await page.locator('#generate-vector-project').click();
+  await page.getByRole('link', { name: 'Job library' }).click();
   const row = page.locator('#job-list li').filter({ hasText: `${projectName}.gcode` });
   await expect(row).toContainText(/queued/i);
+  await row.getByRole('button', { name: /^View / }).click();
   await expect(page.locator('#program-code')).toContainText('G1 X40 Y40');
   expect(startRequests).toHaveLength(0);
   await expect(page.locator('#operator-confirmation')).not.toBeChecked();

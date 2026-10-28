@@ -45,12 +45,20 @@ do not replace it.
 
 ![Connected operator console with a queued program, driver selector, and safety check](assets/screenshots/operator-console-library.png)
 
-## Find the main controls
+## Open the designer
 
-The console groups design sources, G-code intake, and stored programs on one
-page. The overview below shows a saved profile and project alongside the upload
-and job controls. Close the project editor to return to the saved-project list;
-select **Reopen** to continue editing.
+Choose **Designer** in the top navigation to open the dedicated design page.
+Machine profiles, rectangle projects, and multi-path vector projects live on
+that page. Choose **Job library** to return to G-code intake and stored
+programs. Generating a design creates a separate queued job; inspect and
+explicitly dispatch it from the job library.
+
+![The dedicated designer page with profile and project editing separated from the job library](assets/screenshots/designer-dedicated-page.png)
+
+## Find the job library controls
+
+The job library contains G-code intake and stored programs. The overview below
+shows these controls independently from design sources.
 
 ![Console overview with a saved machine profile, saved project, G-code intake, and job library](assets/screenshots/designer-console-overview.png)
 
@@ -214,9 +222,11 @@ confirmation and **Start** control when ready.
 ## Create a multi-path vector project
 
 Select **New vector project** to add multiple rectangle, ellipse, and line
-shapes. Select a shape to edit its source X/Y position and width/height, then
-translate, scale, or rotate it around its source bounding-box center. The preview
-and profile bounds check use the transformed geometry. Assign the shape to an
+shapes. Click a path in the workspace to select it; drag the path to translate
+it, or drag the corner handle to scale it in X and Y. The numeric fields remain
+available for exact translation, nonuniform scaling, and rotation around the
+source bounding-box center. The preview and profile bounds check use the
+transformed geometry. Assign the shape to an
 operation layer or remove it. Add engraving or cutting layers, set each
 layer's feed and commanded power, and move layers to change execution order.
 Every path must be assigned before generation. Lines can be engraved; cutting

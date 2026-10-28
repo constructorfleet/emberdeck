@@ -395,6 +395,32 @@ select:focus-visible,
   gap: var(--space-4);
 }
 
+.app-nav {
+  display: flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.app-nav a {
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.app-nav a:hover,
+.app-nav a[aria-current="page"] {
+  border-color: var(--border);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}
+
+body.designer-page > main > .intro,
+body.designer-page > main > .workspace,
+body.designer-page > main > #program-panel { display: none; }
+body:not(.designer-page) #designer-panel { display: none; }
+
 .upload-panel,
 .jobs-panel {
   min-height: 306px;
@@ -1103,6 +1129,23 @@ footer {
   fill: none;
   stroke-width: 2.8;
   vector-effect: non-scaling-stroke;
+  cursor: move;
+  pointer-events: stroke;
+}
+
+#vector-preview { touch-action: none; }
+
+.vector-resize-handle {
+  fill: var(--surface-panel);
+  stroke: var(--accent);
+  stroke-width: 2;
+  cursor: nwse-resize;
+}
+
+.vector-resize-handle:focus-visible,
+.vector-path:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 4px;
 }
 
 .vector-path.engrave-path {
