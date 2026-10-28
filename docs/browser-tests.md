@@ -83,5 +83,10 @@ The static site navigation is grouped by reader task:
 
 `e2e/docs-navigation.spec.js` builds and opens the public rendered HTML. It
 checks each page for one current link, all four groups and their links, working
-local page links and images, desktop/mobile overflow, keyboard access, visible
-focus, and touch activation. It also covers generated API Routes and CLI pages.
+local page links and images, menu bounds at 320–1920 px (including 800 and 900
+px), compact closed navigation at 375 px, and alignment with the content column
+at 1920 px. It also verifies exclusive dropdowns, Escape and focus return,
+outside-click and focus-leave dismissal, keyboard access, visible focus, and
+touch activation. On narrow screens a single **Menu** disclosure reveals all
+groups; on wider screens the groups remain visible. Generated API Routes, CLI,
+and 404 pages use the same navigation.
