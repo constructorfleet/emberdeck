@@ -76,3 +76,57 @@ func TestParseSerialModemBitsRejectsUnknownValues(t *testing.T) {
 		t.Fatal("invalid RTS policy was accepted")
 	}
 }
+
+func TestLoggerHonorsLevelAndFormat(t *testing.T) {
+	var out strings.Builder
+	logger, err := newLogger(&out, "warn", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger.Info("hidden")
+	logger.Warn("shown", "job_id", "abc")
+	if got := out.String(); strings.Contains(got, "hidden") || !strings.Contains(got, `"msg":"shown"`) || !strings.Contains(got, `"job_id":"abc"`) {
+		t.Fatalf("warn/json logger wrote %q", got)
+	}
+	out.Reset()
+	logger, err = newLogger(&out, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger.Debug("debug hidden by default")
+	logger.Info("info shown by default")
+	if got := out.String(); strings.Contains(got, "debug hidden") || !strings.Contains(got, "level=INFO msg=\"info shown by default\"") {
+		t.Fatalf("default logger wrote %q", got)
+	}
+	for _, bad := range [][2]string{{"verbose", "text"}, {"info", "xml"}} {
+		if _, err := newLogger(&out, bad[0], bad[1]); err == nil {
+			t.Errorf("newLogger(%q, %q) accepted an invalid setting", bad[0], bad[1])
+		}
+	}
+}
+
+func TestLogFlagsFallBackToEnvironment(t *testing.T) {
+	t.Setenv("EMBERDECK_LOG_LEVEL", "debug")
+	t.Setenv("EMBERDECK_LOG_FORMAT", "json")
+	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
+	level, format := addLogFlags(flags)
+	if err := flags.Parse(nil); err != nil {
+		t.Fatal(err)
+	}
+	if *level != "debug" || *format != "json" {
+		t.Fatalf("environment defaults = %q/%q", *level, *format)
+	}
+	if err := flags.Parse([]string{"-log-level", "error", "-log-format", "text"}); err != nil {
+		t.Fatal(err)
+	}
+	if *level != "error" || *format != "text" {
+		t.Fatalf("flags did not override environment: %q/%q", *level, *format)
+	}
+}
+
+func TestServeRejectsInvalidLogLevelBeforeOpeningLibrary(t *testing.T) {
+	t.Setenv("EMBERDECK_API_KEY", "key")
+	if err := runServe([]string{"-log-level", "loud", "-data", t.TempDir()}); err == nil || !strings.Contains(err.Error(), "-log-level") {
+		t.Fatalf("invalid log level accepted: %v", err)
+	}
+}

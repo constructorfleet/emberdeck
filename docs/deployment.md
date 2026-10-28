@@ -111,6 +111,41 @@ authenticated HTTP connection. See
 [the API credential contract](api.md#credential-roles-and-lifecycle) for roles,
 rotation, revocation, and recovery.
 
+## Logs
+
+`emberdeck serve` and `emberdeck driver` write structured logs to standard
+error, so `docker logs`, `docker compose logs`, and `journalctl` collect them.
+Choose the detail and format with flags or environment variables; flags win:
+
+| Flag | Environment | Values | Default |
+| --- | --- | --- | --- |
+| `-log-level` | `EMBERDECK_LOG_LEVEL` | `debug`, `info`, `warn`, `error` | `info` |
+| `-log-format` | `EMBERDECK_LOG_FORMAT` | `text`, `json` | `text` |
+
+At `info`, the server logs its version, data and plugin directories, listen
+addresses, local-driver start and restarts, shutdown, every job state change
+(with job ID, name, driver, acknowledged lines, and error), and each API request
+that changes data. Failed and interrupted jobs and rejected requests (4xx) are
+`warn`; server errors (5xx) and storage failures that disable the API are
+`error`. Successful reads, console assets, and worker polls repeat every few
+seconds, so they are logged only at `debug`. Request records include the method,
+path, status, duration, and remote address; query strings, headers, and API keys
+are never logged. A driver process logs its connection, each job it runs and the
+job's outcome, poll retries, and reconnections.
+
+For example, with Docker Compose:
+
+```sh
+EMBERDECK_LOG_LEVEL=debug docker compose up -d
+docker compose logs -f emberdeck
+```
+
+A server log line in the default text format looks like:
+
+```text
+time=2026-10-28T12:00:00.000Z level=INFO msg="job state changed" job_id=4f0c... name=panel.gcode from=queued to=running driver_id=bench acked=0 total=412
+```
+
 ## Docker Compose
 
 Requires Docker with Compose v2 and a source checkout (see

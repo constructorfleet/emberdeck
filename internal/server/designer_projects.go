@@ -121,7 +121,7 @@ func (s *Server) saveProjects(projects map[string]DesignerProject) error {
 	}
 	published, err := durableJSON(filepath.Join(s.dir, "designs.json"), projects)
 	if published && err != nil {
-		s.storageErr = err
+		s.failStorage(err)
 	}
 	if err != nil {
 		return err

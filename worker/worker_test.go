@@ -1039,3 +1039,45 @@ func TestRunReportsExternalHoldAndWaitsForExplicitResume(t *testing.T) {
 		t.Fatalf("pausing=%v paused=%v completed=%v", sawPausing, sawPaused, completed)
 	}
 }
+
+func TestRunLogsConnectionAndJobOutcome(t *testing.T) {
+	var mu sync.Mutex
+	polls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := pollSession(t, r)
+		mu.Lock()
+		defer mu.Unlock()
+		if body["state"] != nil {
+			io.WriteString(w, `{"command":"idle"}`)
+			return
+		}
+		polls++
+		if polls == 1 {
+			io.WriteString(w, `{"command":"run","lease":"lease-1","job":{"id":"job-1","gcode":"M5"}}`)
+			return
+		}
+		io.WriteString(w, `{"command":"idle"}`)
+	}))
+	defer server.Close()
+	logs := &logRecorder{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- RunWithOptions(ctx, server.URL, "key", "laser", func(context.Context) (io.ReadWriteCloser, error) { return driver.NewSimulator(), nil }, fastOptions(logs))
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(logs.matching("job job-1 completed")) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if len(logs.matching("worker laser: connected to "+server.URL)) != 1 {
+		t.Errorf("connection not logged once: %v", logs.lines)
+	}
+	if len(logs.matching("worker laser: running job job-1")) != 1 {
+		t.Errorf("job start not logged: %v", logs.lines)
+	}
+	if len(logs.matching("worker laser: job job-1 completed")) != 1 {
+		t.Errorf("job outcome not logged: %v", logs.lines)
+	}
+}

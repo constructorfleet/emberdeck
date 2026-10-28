@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -41,6 +42,7 @@ type Server struct {
 	projects      map[string]DesignerProject
 	mux           *http.ServeMux
 	metrics       *serverMetrics
+	logger        *slog.Logger
 }
 
 // Open owns the data directory and loads its job, profile, and project libraries.
@@ -65,7 +67,7 @@ func Open(dir, key string) (*Server, error) {
 			_ = lock.Close()
 		}
 	}()
-	s := &Server{lock: lock, drivers: make(map[string]Driver), dir: dir, key: key, profiles: make(map[string]MachineProfile), projects: make(map[string]DesignerProject), mux: http.NewServeMux()}
+	s := &Server{lock: lock, drivers: make(map[string]Driver), dir: dir, key: key, profiles: make(map[string]MachineProfile), projects: make(map[string]DesignerProject), mux: http.NewServeMux(), logger: slog.New(slog.DiscardHandler)}
 	s.metrics = newServerMetrics(s)
 	if err := s.loadJobs(); err != nil {
 		return nil, err
@@ -198,7 +200,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if status == 0 {
 			status = http.StatusOK
 		}
-		s.metrics.observeHTTP(r.Method, status, time.Since(started))
+		elapsed := time.Since(started)
+		s.metrics.observeHTTP(r.Method, status, elapsed)
+		s.logRequest(r, status, elapsed)
 	}()
 	w = tracked
 	w.Header().Set("Cache-Control", "no-store")

@@ -1,5 +1,14 @@
 # Troubleshooting
 
+## Server or worker shows no useful logs
+
+Logs go to standard error. Read them with `docker compose logs -f emberdeck`,
+`docker logs <container>`, or `journalctl -u emberdeck -f`. The default `info`
+level omits successful reads and worker polls; set `EMBERDECK_LOG_LEVEL=debug`
+(or `-log-level debug`) to see every request, and `EMBERDECK_LOG_FORMAT=json`
+for a log collector. See [Deployment](deployment.md#logs) for what each level
+records.
+
 ## Driver is not listed
 
 The console lists drivers that have registered and are currently online. Check

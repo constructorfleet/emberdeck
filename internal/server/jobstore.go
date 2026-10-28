@@ -278,7 +278,7 @@ func (s *Server) save(jobs map[string]jobRecord) error {
 	if err := syncDirectory(s.dir); err != nil {
 		// Rename is already visible. Reject all subsequent API work so no uncertain
 		// assignment can be dispatched from either old or new in-memory state.
-		s.storageErr = err
+		s.failStorage(err)
 		return err
 	}
 	for id, job := range jobs {
@@ -286,6 +286,9 @@ func (s *Server) save(jobs map[string]jobRecord) error {
 		from := "new"
 		if exists {
 			from = previous.State
+		}
+		if from != job.State {
+			s.logJobTransition(from, job.Job)
 		}
 		if from != job.State && (from == "new" || isMetricJobState(from)) && isMetricJobState(job.State) {
 			s.metrics.transitions.WithLabelValues(from, job.State).Inc()
