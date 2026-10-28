@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -141,6 +142,135 @@ func TestGenerateRoundsExactHalfPowerUp(t *testing.T) {
 	w = request(t, s, "POST", "/api/v1/projects/"+created.ID+"/generate", `{"revision":1}`, "test-key")
 	if w.Code != http.StatusCreated || !strings.Contains(w.Body.String(), `F600 S5`) {
 		t.Fatalf("half-up power should emit S5: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestVectorProjectCreatesOrderedCutAndEngraveJob(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	profileID := createTestProfile(t, s)
+	project := `{"schema_version":2,"name":"Mixed paths","units":"mm","profile_id":"` + profileID + `","profile_revision":1,"objects":[{"kind":"rectangle","id":"engrave-panel","operation_id":"engrave","subpaths":[{"points":[{"x_mm":10,"y_mm":10},{"x_mm":20,"y_mm":10},{"x_mm":20,"y_mm":20},{"x_mm":10,"y_mm":20}],"closed":true}]},{"kind":"rectangle","id":"cut-panel","operation_id":"cut","subpaths":[{"points":[{"x_mm":30,"y_mm":10},{"x_mm":40,"y_mm":10},{"x_mm":40,"y_mm":20},{"x_mm":30,"y_mm":20}],"closed":true}]}],"operations":[{"id":"cut","type":"vector-cut","feed_mm_min":300,"power_percent":80},{"id":"engrave","type":"vector-engrave","feed_mm_min":600,"power_percent":25}]}`
+	w := request(t, s, "POST", "/api/v1/projects", project, "test-key")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create vector project: %d %s", w.Code, w.Body.String())
+	}
+	var saved struct {
+		ID       string `json:"id"`
+		Revision int    `json:"revision"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &saved); err != nil || saved.Revision != 1 {
+		t.Fatalf("decode saved vector project: %+v %v", saved, err)
+	}
+	w = request(t, s, "POST", "/api/v1/projects/"+saved.ID+"/generate", `{"revision":1}`, "test-key")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("generate vector project: %d %s", w.Code, w.Body.String())
+	}
+	var job struct {
+		State      string `json:"state"`
+		Gcode      string `json:"gcode"`
+		Provenance struct {
+			GeneratorVersion string `json:"generator_version"`
+			Project          struct {
+				SchemaVersion int `json:"schema_version"`
+				Objects       []struct {
+					ID string `json:"id"`
+				} `json:"objects"`
+				Operations []struct {
+					ID string `json:"id"`
+				} `json:"operations"`
+			} `json:"project"`
+		} `json:"provenance"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	const expected = "M5\nG21\nG90\nG94\nG0 X30 Y10\nM4 S0\nG1 X40 Y10 F300 S800\nG1 X40 Y20\nG1 X30 Y20\nG1 X30 Y10\nM5\nG0 X10 Y10\nM4 S0\nG1 X20 Y10 F600 S250\nG1 X20 Y20\nG1 X10 Y20\nG1 X10 Y10\nM5\n"
+	if job.State != "queued" || job.Gcode != expected {
+		t.Fatalf("unexpected queued vector job: state=%q gcode=%q", job.State, job.Gcode)
+	}
+	if job.Provenance.GeneratorVersion != "vector-v1" || job.Provenance.Project.SchemaVersion != 2 || len(job.Provenance.Project.Objects) != 2 || len(job.Provenance.Project.Operations) != 2 {
+		t.Fatalf("vector job provenance is incomplete: %+v", job.Provenance)
+	}
+	if _, err := driver.Validate(job.Gcode); err != nil {
+		t.Fatalf("generated vector job is not valid GRBL input: %v", err)
+	}
+}
+
+func TestVectorProjectRejectsOpenCutAndOutOfEnvelopePoints(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	profileID := createTestProfile(t, s)
+	for _, project := range []string{
+		`{"schema_version":2,"name":"Open cut","units":"mm","profile_id":"` + profileID + `","profile_revision":1,"objects":[{"kind":"path","id":"path","operation_id":"cut","subpaths":[{"points":[{"x_mm":10,"y_mm":10},{"x_mm":20,"y_mm":10},{"x_mm":20,"y_mm":20}],"closed":false}]}],"operations":[{"id":"cut","type":"vector-cut","feed_mm_min":300,"power_percent":80}]}`,
+		`{"schema_version":2,"name":"Outside","units":"mm","profile_id":"` + profileID + `","profile_revision":1,"objects":[{"kind":"path","id":"path","operation_id":"engrave","subpaths":[{"points":[{"x_mm":301,"y_mm":10},{"x_mm":20,"y_mm":10}],"closed":false}]}],"operations":[{"id":"engrave","type":"vector-engrave","feed_mm_min":600,"power_percent":25}]}`,
+		`{"schema_version":2,"name":"Degenerate cut","units":"mm","profile_id":"` + profileID + `","profile_revision":1,"objects":[{"kind":"path","id":"path","operation_id":"cut","subpaths":[{"points":[{"x_mm":10,"y_mm":10},{"x_mm":20,"y_mm":10},{"x_mm":30,"y_mm":10}],"closed":true}]}],"operations":[{"id":"cut","type":"vector-cut","feed_mm_min":300,"power_percent":80}]}`,
+		`{"schema_version":2,"name":"Unassigned outside","units":"mm","profile_id":"` + profileID + `","profile_revision":1,"objects":[{"kind":"path","id":"path","subpaths":[{"points":[{"x_mm":301,"y_mm":10},{"x_mm":302,"y_mm":10}],"closed":false}]}],"operations":[]}`,
+	} {
+		if w := request(t, s, "POST", "/api/v1/projects", project, "test-key"); w.Code != http.StatusBadRequest {
+			t.Errorf("accepted unsafe vector geometry: %d %s", w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestVectorProjectCanSaveUnassignedGeometryButCannotGenerateIt(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	profileID := createTestProfile(t, s)
+	project := `{"schema_version":2,"name":"Unassigned import source","units":"mm","profile_id":"` + profileID + `","profile_revision":1,"objects":[{"kind":"path","id":"path","subpaths":[{"points":[{"x_mm":10,"y_mm":10},{"x_mm":20,"y_mm":10}],"closed":false}]}],"operations":[]}`
+	w := request(t, s, "POST", "/api/v1/projects", project, "test-key")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("save unassigned design source: %d %s", w.Code, w.Body.String())
+	}
+	var saved struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if w := request(t, s, "POST", "/api/v1/projects/"+saved.ID+"/generate", `{"revision":1}`, "test-key"); w.Code != http.StatusConflict {
+		t.Fatalf("generated design with implicit operation: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSavedVectorProjectRoundTripsAcrossServerRestart(t *testing.T) {
+	dir := t.TempDir()
+	s, err := server.Open(dir, "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profileID := createTestProfile(t, s)
+	project := `{"schema_version":2,"name":"Saved vectors","units":"mm","profile_id":"` + profileID + `","profile_revision":1,"objects":[{"kind":"line","id":"line-a","operation_id":"engrave","subpaths":[{"points":[{"x_mm":1.125,"y_mm":2},{"x_mm":4,"y_mm":5}],"closed":false}]}],"operations":[{"id":"engrave","type":"vector-engrave","feed_mm_min":600,"power_percent":25}]}`
+	w := request(t, s, "POST", "/api/v1/projects", project, "test-key")
+	var saved struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &saved); err != nil || w.Code != http.StatusCreated {
+		t.Fatalf("create vector source: %d %s %v", w.Code, w.Body.String(), err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = server.Open(dir, "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	w = request(t, s, "GET", "/api/v1/projects/"+saved.ID, "", "test-key")
+	var reopened server.DesignerProject
+	if err := json.Unmarshal(w.Body.Bytes(), &reopened); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("read reopened project: %d %s %v", w.Code, w.Body.String(), err)
+	}
+	if reopened.SchemaVersion != 2 || reopened.Units != "mm" || len(reopened.Objects) != 1 || reopened.Objects[0].Subpaths[0].Points[0] != (server.VectorPoint{XMM: 1.125, YMM: 2}) || reopened.Operations[0].ID != "engrave" {
+		t.Fatalf("vector source changed after restart: %+v", reopened)
 	}
 }
 
@@ -350,7 +480,7 @@ func TestGenerateCreatesValidatedQueuedJobWithImmutableSourceSnapshots(t *testin
 	expectedProject := server.DesignerProject{SchemaVersion: 1, ID: project.ID, Revision: 1, Name: "Panel outline", ProfileID: profileID, ProfileRevision: 1,
 		Rectangle: server.Rectangle{XMM: 10, YMM: 20, WidthMM: 30, HeightMM: 20}, Operation: server.DesignerOperation{Type: "vector-engrave", FeedMMMin: 600, PowerPercent: 25}}
 	expectedProfile := server.MachineProfile{SchemaVersion: 1, ID: profileID, Revision: 1, Name: "Declared GRBL", Controller: "grbl-1.1", Units: "mm", Origin: "lower-left", WidthMM: 300, HeightMM: 200, MinS: 0, MaxS: 1000, MinFeed: 1, MaxFeed: 6000, MaxPowerPct: 100, LaserMode: true}
-	if job.Provenance.Project != expectedProject || job.Provenance.Profile != expectedProfile {
+	if !reflect.DeepEqual(job.Provenance.Project, expectedProject) || job.Provenance.Profile != expectedProfile {
 		t.Fatalf("provenance did not retain full source/profile snapshots: %+v", job.Provenance)
 	}
 	if _, err := driver.Validate(job.Gcode); err != nil {
@@ -391,7 +521,7 @@ func TestGenerateCreatesValidatedQueuedJobWithImmutableSourceSnapshots(t *testin
 	if err := json.Unmarshal(persisted.Provenance, &finalProv); err != nil {
 		t.Fatal(err)
 	}
-	if persisted.Gcode != expectedProgram || finalProv.Project != expectedProject || finalProv.Profile != expectedProfile {
+	if persisted.Gcode != expectedProgram || !reflect.DeepEqual(finalProv.Project, expectedProject) || finalProv.Profile != expectedProfile {
 		t.Fatalf("source mutation changed immutable generated job: %+v", persisted)
 	}
 }

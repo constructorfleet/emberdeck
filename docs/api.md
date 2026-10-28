@@ -134,18 +134,18 @@ Example profile creation body (updates also include the expected `revision`):
 {"schema_version":1,"name":"Declared GRBL","controller":"grbl-1.1","units":"mm","origin":"lower-left","width_mm":300,"height_mm":200,"min_s":0,"max_s":1000,"min_feed_mm_min":1,"max_feed_mm_min":6000,"max_power_percent":100,"laser_mode_enabled":true}
 ```
 
-## Editable rectangle projects
+## Editable design projects
 
-Projects are saved independently in the durable `designs.json` library. This
-initial project schema supports one rectangle and one `vector-engrave`
-operation. Geometry uses millimetres from the lower-left declared work origin.
-The profile reference includes its revision. `profile_stale` is computed on
-reads and is true after the profile revision changes; save the project with the
+Projects are saved independently in the durable `designs.json` library. Schema
+version 1 remains supported for the original single rectangle/vector-engraving
+editor. Schema version 2 stores multiple ordered line paths and operation
+layers. Both use millimetres from the lower-left declared work origin. The
+profile reference includes its revision. `profile_stale` is computed on reads
+and is true after the profile revision changes; save the project with the
 current reviewed profile revision before generation. Project creation and
-updates require the referenced profile to exist at the submitted revision,
-reject out-of-envelope rectangles, and validate feed and power against that
-profile. Missing or changed profiles return 409. Profile deletion returns 409
-while a project references it.
+updates require the referenced profile to exist at the submitted revision.
+Missing or changed profiles return 409. Profile deletion returns 409 while a
+project references it.
 
 `GET /projects` returns projects in ID order. `POST /projects` creates an
 editable project and returns 201 with a Location header. `GET /projects/{id}`
@@ -153,7 +153,7 @@ reads one project. `PUT /projects/{id}` requires its current positive `revision`
 and increments it on success; stale writes return 409. `DELETE /projects/{id}`
 requires `{"revision":N}` and returns 204. Missing projects return 404.
 
-The request shape is `{"schema_version":1,"name":"Panel outline",
+Version 1 request shape is `{"schema_version":1,"name":"Panel outline",
 "profile_id":"PROFILE_ID","profile_revision":1,"rectangle":{"x_mm":10,
 "y_mm":20,"width_mm":30,"height_mm":20},"operation":{"type":"vector-engrave",
 "feed_mm_min":600,"power_percent":25}}`. Updates also include `revision`.
@@ -163,14 +163,41 @@ rectangle dimensions are positive, and the full rectangle must fit the profile
 envelope. Coordinates, dimensions, feed, and power accept at most three decimal
 places. Feed must fit the profile range; power must be above zero and at most
 the profile maximum, and must round to at least one GRBL S unit. Other operation
-types and SVG, text, raster, and cut workflows are not supported by this API.
+types are not supported by version 1.
+
+Version 2 geometry is an ordered list of objects, each with an ID, a `kind`
+(`rectangle`, `ellipse`, `line`, or generic `path`), and one or more subpaths.
+A subpath is a list of `{x_mm,y_mm}` points plus a `closed` boolean. Paths are
+already in absolute work coordinates; no transform, SVG style, or machine
+setting is inferred. Operations are ordered independently
+from the objects. Each object names its operation with `operation_id`; saving
+an unassigned path is allowed so future importers can preserve editable source,
+but generation requires every path to be assigned. An engraving path can be
+open or closed. A cutting path must be closed and enclose nonzero area.
+
+```json
+{"schema_version":2,"name":"Mixed vector design","units":"mm","profile_id":"PROFILE_ID","profile_revision":1,"objects":[{"id":"outline","operation_id":"cut","subpaths":[{"points":[{"x_mm":10,"y_mm":10},{"x_mm":40,"y_mm":10},{"x_mm":40,"y_mm":30},{"x_mm":10,"y_mm":30}],"closed":true}]},{"id":"mark","operation_id":"engrave","subpaths":[{"points":[{"x_mm":15,"y_mm":15},{"x_mm":35,"y_mm":25}],"closed":false}]}],"operations":[{"id":"cut","type":"vector-cut","feed_mm_min":300,"power_percent":80},{"id":"engrave","type":"vector-engrave","feed_mm_min":600,"power_percent":25}]}
+```
+
+The `operations` array defines execution order; paths within an operation keep
+their object and subpath order. IDs are 1–64 ASCII letters, digits, `_`, or `-`.
+Version 2 accepts at most 500 objects, 100 operations, and 4,000 points across
+all subpaths. Points must be finite, nonnegative, within 10,000 mm, use at most
+three decimal places, and fit the declared workspace. Operation feed/power
+limits are checked against the profile. All requests remain strict JSON with a
+64 KiB body limit.
 
 `POST /projects/{id}/generate` accepts `{"revision":N}` and returns 201 with a
 Location pointing to a normal queued job. It requires the current project
 revision and the exact current profile revision. The full G-code is checked by
 the existing GRBL driver validator before persistence. The generated program is
 an immutable job named `<project name>.gcode`; it contains deterministic
-rectangle vector engraving moves, and is never dispatched automatically.
+rectangle vector engraving moves for version 1, or ordered vector cut/engrave
+path moves for version 2, and is never dispatched automatically. Version 2
+generation emits laser-off rapid positioning and GRBL dynamic laser mode
+(`M4`) for both operation types so output is disabled when motion is stopped or
+held. Cutting paths are closed contours; no kerf compensation, tabs, pass
+count, or raster engraving is implemented.
 Generated jobs include `provenance` with `generator_version`, and complete
 `project` and `profile` value snapshots including IDs and revisions. Later
 project edits, project deletion, and profile deletion do not alter those job
