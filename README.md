@@ -137,4 +137,5 @@ execution telemetry. It can also save declared machine profiles and vector
 design projects and generate separate queued jobs for review. It does not start
 generated jobs automatically. See the [operator guide](docs/operator-guide.md)
 for the implemented console workflow and [Safety & Limitations](docs/safety.md)
-for important operating constraints.
+for important operating constraints. No physical controller or cutter setup is
+qualified yet; see the [hardware qualification matrix](docs/hardware-qualification.md).
