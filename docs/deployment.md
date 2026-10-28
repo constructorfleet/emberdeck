@@ -56,8 +56,9 @@ published release image, replace the Compose service's `build: .` with:
 image: ghcr.io/constructorfleet/emberdeck:vX.Y.Z
 ```
 
-The registry publication workflow has been configured but has not yet been
-verified by a completed release.
+The v0.1.0 release verified native assets, GitHub Pages, and anonymous image
+manifest access for all three container architectures. Physical machine and
+platform installation qualification remain separate from these software checks.
 
 ## Linux server or Raspberry Pi
 
