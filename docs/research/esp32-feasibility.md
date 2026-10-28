@@ -1,6 +1,6 @@
 # ESP32 worker feasibility
 
-**Evidence checked:** 2026-10-28. ESP-IDF references are pinned to v6.1; GitHub source and ESPHome documentation references use commit IDs.
+**Evidence checked:** 2026-10-28. ESP-IDF references are pinned to v6.1. The Espressif ESP32-S3-WROOM-2 datasheet reviewed was revision v1.7, dated 2026-03-02. GitHub source and ESPHome documentation references use commit IDs.
 
 **Decision: conditionally feasible as a worker that forwards EmberDeck's existing GRBL byte protocol to an already qualified controller.** A standalone ESP-IDF implementation is the best fit. Do not claim support for direct laser/motion control or ESPHome integration today.
 
@@ -45,7 +45,7 @@ The server caps program content at 4 MiB and serves protocol 2 content in 64 KiB
 
 ESP32-S3 has 512 KiB internal SRAM, insufficient for a full 4 MiB staging buffer. Espressif lists modules with up to 16 MiB PSRAM and DevKitC-1 N8R8 with 8 MiB octal PSRAM. That makes a streamed/PSRAM prototype plausible but does not prove available headroom under TLS.
 
-See the [ESP32-S3 chip series comparison in ESP-IDF v6.1](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/hw-reference/chip-series-comparison.html), [WROOM-2 datasheet](https://documentation.espressif.com/esp32-s3-wroom-2_datasheet_en.html), and [DevKitC-1 user guide v1.1 at commit `bd4d4ac`](https://github.com/espressif/esp-dev-kits/blob/bd4d4ac18657e73583af3d7c0b0a23c3cddf3735/docs/en/esp32-s3-devkitc-1/user_guide_v1.1.rst).
+See the [ESP32-S3 chip series comparison in ESP-IDF v6.1](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/hw-reference/chip-series-comparison.html), the [ESP32-S3-WROOM-2 datasheet v1.7](https://documentation.espressif.com/esp32-s3-wroom-2_datasheet_en.pdf), and the [DevKitC-1 user guide v1.1 at commit `bd4d4ac`](https://github.com/espressif/esp-dev-kits/blob/bd4d4ac18657e73583af3d7c0b0a23c3cddf3735/docs/en/esp32-s3-devkitc-1/user_guide_v1.1.rst).
 
 Prototype against **bounded chunks or a streaming response**, with the server preserving a single lease and the device validating before the first controller byte. Prefer a two-phase job fetch with immutable content digest/size, chunk range or chunk sequence, and a final verify step; keep server-side whole-program validation authoritative.
 
@@ -73,7 +73,7 @@ ESP32 GPIO is a 3.3 V domain; no board spec establishes the target controller's 
 
 The chosen controller link is UART TX/RX. The S3's native USB Serial/JTAG CDC works directly to a PC for console/flashing without a USB-UART bridge. Hosting a USB CDC controller as USB host is a separate, unqualified design and is not implied by native USB Serial/JTAG.
 
-See the [WROOM-2 datasheet](https://documentation.espressif.com/esp32-s3-wroom-2_datasheet_en.html), [ESP-IDF v6.1 USB Serial/JTAG guide](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/api-guides/usb-serial-jtag-console.html), and [UART-to-PC connection options](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/get-started/establish-serial-connection.html).
+See the [ESP32-S3-WROOM-2 datasheet v1.7](https://documentation.espressif.com/esp32-s3-wroom-2_datasheet_en.pdf), the [ESP-IDF v6.1 USB Serial/JTAG guide](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/api-guides/usb-serial-jtag-console.html), and [UART-to-PC connection options](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/get-started/establish-serial-connection.html).
 
 No common board is supported yet. The N8R8 is a practical resource-rich prototype candidate; a no-PSRAM ESP32-S3 or another ESP32 variant should not be accepted until the selected streaming/buffer design passes RAM and TLS stress tests. Board-specific safety outputs, interlocks, and emergency-stop circuits remain external and independent of firmware.
 
