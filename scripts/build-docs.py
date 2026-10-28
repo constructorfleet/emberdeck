@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import markdown
 from urllib.parse import urlsplit, unquote
+from docs_validation import validate_rendered_docs
 
 out = Path('dist/docs')
 if out.exists():
@@ -270,21 +271,4 @@ assets = Path('docs/assets')
 if assets.exists():
     shutil.copytree(assets, out / 'assets')
 
-# Broken internal links and screenshot references fail CI instead of reaching the release site.
-class LinkChecker(HTMLParser):
-    def handle_starttag(self, tag, attrs):
-        if tag not in ('a', 'img'):
-            return
-        values = dict(attrs)
-        if tag == 'img' and not values.get('alt', '').strip():
-            raise SystemExit(f'Documentation screenshot needs alt text in {self.page}')
-        href = values.get('src' if tag == 'img' else 'href', '')
-        if not href or href.startswith(('#', 'https://', 'http://', 'mailto:')):
-            return
-        target = href.split('#', 1)[0]
-        if not (out / target).is_file():
-            raise SystemExit(f'Broken documentation link in {self.page}: {href}')
-checker = LinkChecker()
-for path in out.glob('*.html'):
-    checker.page = path.name
-    checker.feed(path.read_text(encoding='utf-8'))
+validate_rendered_docs(out)

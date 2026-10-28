@@ -1,5 +1,12 @@
 # Deployment
 
+## Documentation publishing
+
+The published documentation is rebuilt from the source revision attached to
+each release. Changes merged to `main` appear on GitHub Pages with the next
+release; they are not published immediately. Every page displays the version
+that was used to build it.
+
 ## Download a release
 
 Install the published executable from

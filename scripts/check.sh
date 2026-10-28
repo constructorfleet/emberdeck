@@ -16,4 +16,5 @@ cmake --build "$firmware_build_dir" --config Release
 ctest --test-dir "$firmware_build_dir" --build-config Release --output-on-failure
 python3 scripts/artifact-smoke.py "bin/emberdeck$(go env GOEXE)" --expected-version dev
 python3 scripts/check-notices.py
+python3 -m unittest discover -s scripts/tests
 python3 scripts/build-docs.py
