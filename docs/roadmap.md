@@ -130,7 +130,7 @@ designer's remaining capabilities are delivered.
   and mobile layouts, focus and menu semantics, links, images, and rendered
   release docs; capture before/after screenshots. The shared renderer and
   rendered-browser tests implement this navigation; see the
-  [review and before/after captures](browser-tests.md#documentation-navigation-review).
+  [navigation browser test](browser-tests.md#documentation-navigation-test).
   Verify the published release before closing the GitHub issue.
 - [ ] [#15: Driver-adapter plugins for network cutters](https://github.com/constructorfleet/emberdeck/issues/15).
   Define and implement a versioned adapter lifecycle, discovery/configuration,

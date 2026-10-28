@@ -1,0 +1,17 @@
+name: External documentation links
+on:
+  schedule:
+    - cron: '23 7 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check external links in documentation
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --verbose --no-progress './README.md' './CONTRIBUTING.md' './docs/**/*.md'
+          fail: true
