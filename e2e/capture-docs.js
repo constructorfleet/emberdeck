@@ -164,7 +164,10 @@ async function main() {
     await page.getByRole('button', { name: /Connect/ }).click();
     await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
     await expect(page.locator('#driver-select')).toHaveValue('simulator');
+    await expect(page.locator('#empty-state')).toContainText('Add a G-code file to get started.');
     await page.goto(`${baseURL}/designer`);
+    await expect(page.locator('#project-empty')).toContainText('New rectangle project');
+    await expect(page.locator('#vector-project-empty')).toContainText('New vector project');
 
     await page.getByRole('button', { name: 'New profile' }).click();
     await page.getByLabel('Profile name').fill('Documented GRBL');
@@ -203,11 +206,11 @@ async function main() {
     await page.getByRole('button', { name: 'Save project' }).click();
     await expect(page.locator('#notice .notice-message')).toContainText('Project saved');
     await page.getByRole('button', { name: 'Close editor' }).click();
-    await expect(page.getByRole('button', { name: 'Reopen Panel outline' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Reopen project Panel outline' })).toBeVisible();
     await capture(page, 'designer-console-overview.png');
     await captureElement(page, 'section[aria-labelledby="profiles-title"]', 'designer-console-overview-profile-detail.png');
     await captureElement(page, 'section[aria-labelledby="projects-title"]', 'designer-console-overview-project-detail.png');
-    await page.getByRole('button', { name: 'Reopen Panel outline' }).click();
+    await page.getByRole('button', { name: 'Reopen project Panel outline' }).click();
     await page.getByRole('button', { name: 'Edit profile' }).click();
     await page.getByLabel('Work area width (mm)').fill('290');
     await page.getByRole('button', { name: 'Save profile' }).click();
@@ -266,7 +269,7 @@ async function main() {
     await expect(page.locator('#program-provenance')).toContainText('2. Cut');
     await captureElement(page, '#program-provenance', 'designer-vector-review.png');
     await page.getByRole('link', { name: 'Designer' }).click();
-    await page.getByRole('button', { name: 'Reopen vector Three shapes, two operations' }).click();
+    await page.getByRole('button', { name: 'Reopen vector project Three shapes, two operations' }).click();
     await page.setViewportSize({ width: 375, height: 812 });
     await captureElement(page, '#vector-object-list', 'designer-vector-mobile.png');
     await page.setViewportSize({ width: 1440, height: 1000 });

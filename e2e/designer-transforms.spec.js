@@ -50,7 +50,7 @@ test('selected vector object transform is previewed, saved, reopened, and applie
 
   await page.reload();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
-  await page.getByRole('button', { name: `Reopen vector ${projectName}` }).click();
+  await page.getByRole('button', { name: `Reopen vector project ${projectName}` }).click();
   await expect(page.getByLabel('Translate X (mm)')).toHaveValue('5');
   await expect(page.getByLabel('Translate Y (mm)')).toHaveValue('20');
   await expect(page.getByLabel('Scale X')).toHaveValue('2');

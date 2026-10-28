@@ -47,10 +47,16 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
   await page.locator('#rect-width').fill('30');
   await page.getByRole('button', { name: 'Save project' }).click();
   await expect(page.locator('#notice .notice-message')).toContainText('Project saved');
+  const projectRowBeforeReview = page.locator('#project-list li').filter({ hasText: projectName });
+  await expect(projectRowBeforeReview).toContainText(profileName);
+  await expect(projectRowBeforeReview).toContainText('r1');
+  const reopenProject = projectRowBeforeReview.getByRole('button', { name: `Reopen project ${projectName}` });
+  await expect(reopenProject).toHaveText('Reopen');
+  await expect(projectRowBeforeReview.getByRole('button', { name: `Reopen ${projectName}` })).toHaveCount(0);
 
   await page.reload();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
-  await page.getByRole('button', { name: `Reopen ${projectName}` }).click();
+  await page.getByRole('button', { name: `Reopen project ${projectName}` }).click();
   await expect(page.locator('#rect-width')).toHaveValue('30');
   await page.locator('#rect-x').fill('11');
   await expect(page.getByRole('button', { name: 'Generate queued job' })).toBeDisabled();
@@ -65,6 +71,11 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
   await page.getByRole('button', { name: 'Save profile' }).click();
   await expect(page.locator('#notice .notice-message')).toContainText('Profile saved');
   await expect(page.locator('#stale-profile-warning')).toBeVisible();
+  await expect(projectRowBeforeReview).toContainText('Needs review');
+  await page.locator('#profile-select').evaluate((select) => { select.value = ''; });
+  await projectRowBeforeReview.getByRole('button', { name: `Reopen project ${projectName}` }).click();
+  await expect(page.locator('#designer-status')).toContainText(/switched.*profile/i);
+  await expect(page.locator('#profile-select')).toHaveValue(await projectRowBeforeReview.getAttribute('data-profile-id'));
   await expect(page.getByRole('button', { name: 'Generate queued job' })).toBeDisabled();
   await page.getByRole('button', { name: 'Save project' }).click();
   await expect(page.locator('#notice .notice-message')).toContainText('Project saved');
@@ -190,10 +201,14 @@ test('multi-path vector project saves, reopens, generates mixed operations, and 
   await expect(page.locator('#generate-vector-project')).toBeDisabled();
   await page.getByRole('button', { name: 'Save vector project' }).click();
   await expect(page.locator('#notice .notice-message')).toContainText('Vector project saved');
+  const vectorRow = page.locator('#vector-project-list li').filter({ hasText: projectName });
+  await expect(vectorRow).toContainText(profileName);
+  await expect(vectorRow).toContainText('r1');
+  await expect(vectorRow.getByRole('button', { name: `Reopen vector project ${projectName}` })).toHaveText('Reopen');
 
   await page.reload();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
-  await page.getByRole('button', { name: `Reopen vector ${projectName}` }).click();
+  await page.getByRole('button', { name: `Reopen vector project ${projectName}` }).click();
   await expect(page.locator('#vector-name')).toHaveValue(projectName);
   await expect(page.locator('#vector-object-list li')).toHaveCount(3);
   await expect(page.getByRole('button', { name: '2. ellipse' })).toBeVisible();
@@ -215,6 +230,9 @@ test('multi-path vector project saves, reopens, generates mixed operations, and 
   await expect(page.locator('#operator-confirmation')).not.toBeChecked();
   const row = page.locator('#job-list li').filter({ hasText: `${projectName}.gcode` });
   await expect(row).toContainText(/queued/i);
+  await expect(row).toContainText(/created/i);
+  await expect(row).toContainText(/bytes/i);
+  await expect(row).toContainText('Generated');
   await row.getByRole('button', { name: /^View / }).click();
   await expect(page.locator('#program-code')).toContainText('M4 S0');
   await expect.poll(() => page.locator('#program-code').textContent().then((code) => (code.match(/M4 S0/g) || []).length)).toBe(3);
@@ -256,7 +274,7 @@ test('multi-path vector project saves, reopens, generates mixed operations, and 
   expect(imported.objects[0].kind).toBe('path');
   await page.reload();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
-  await page.getByRole('button', { name: `Reopen vector ${pathName}` }).click();
+  await page.getByRole('button', { name: `Reopen vector project ${pathName}` }).click();
   await expect(page.getByRole('button', { name: '1. path' })).toBeVisible();
   await page.locator('#vector-width').fill('20');
   await page.locator('#vector-height').fill('20');
@@ -365,7 +383,7 @@ test('operator imports SVG paths and bounded text into an editable project and d
   await expect(page.locator('#notice .notice-message')).toContainText('Vector project saved');
   await page.reload();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
-  await page.getByRole('button', { name: `Reopen vector ${projectName}` }).click();
+  await page.getByRole('button', { name: `Reopen vector project ${projectName}` }).click();
   await expect(page.locator('#vector-object-list li')).toHaveCount(3);
   await expect(page.locator('#generate-vector-project')).toBeEnabled();
   await page.locator('#generate-vector-project').click();

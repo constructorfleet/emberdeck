@@ -271,6 +271,9 @@ test('operator uploads, confirms, monitors, views, completes, and deletes a job'
   const lines = 1200;
   const name = `operator-completion-${test.info().retry}.gcode`;
   const row = await uploadJob(page, name, lines);
+  await expect(row).toContainText('Uploaded');
+  await expect(row).toContainText(/created/i);
+  await expect(row).toContainText(/bytes/i);
   const progress = await startJob(page, row);
   await waitForProgress(progress, lines);
 

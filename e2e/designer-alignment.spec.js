@@ -86,7 +86,7 @@ test('keyboard multi-selection aligns transformed shapes and persists the new pl
 
   await page.reload();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
-  await page.getByRole('button', { name: `Reopen vector ${projectName}` }).click();
+  await page.getByRole('button', { name: `Reopen vector project ${projectName}` }).click();
   await page.getByRole('button', { name: '2. ellipse' }).click();
   await expect(page.getByLabel('Translate X (mm)')).toHaveValue('-10');
   await expect(page.getByLabel('Rotation (degrees)')).toHaveValue('90');
