@@ -123,7 +123,9 @@ Uploaded programs are not blocked. Their row warns when the selected driver
 reports `$32=0` (laser mode off) or the program uses `M3` (constant power). In
 both cases the laser stays at its commanded power while motion stops, including
 during a feed hold, so a pause does not turn it off. Soft limits and travel are
-shown for reference only; profiles do not declare them.
+shown for reference only; profiles do not declare them. The **Start**
+confirmation dialog repeats the driver's controller settings and any of these
+warnings before you confirm.
 
 ![Driver controller settings read with $$, a generated job refused for a $30 mismatch, and an uploaded M3 program warning](assets/screenshots/operator-console-controller-settings.png)
 
