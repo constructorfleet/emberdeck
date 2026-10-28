@@ -513,8 +513,18 @@
     const dirty = schemaVersion === 1 ? projectDraftIsDirty() : vectorDraftIsDirty();
     if (!opened) return;
     if (dirty && !confirmDiscardChanges()) return;
+    const approvedDraft = schemaVersion === 1
+      ? projectFormState()
+      : vectorFormState(selectedProfile());
     try {
       const latest = await api(`/api/v1/projects/${encodeURIComponent(opened.id)}`);
+      const stillOpen = schemaVersion === 1 ? openProject?.id === opened.id : openVectorProject?.id === opened.id;
+      if (!stillOpen) return;
+      const currentDraft = schemaVersion === 1
+        ? projectFormState()
+        : vectorFormState(selectedProfile());
+      const currentDirty = schemaVersion === 1 ? projectDraftIsDirty() : vectorDraftIsDirty();
+      if (currentDirty && currentDraft !== approvedDraft && !confirmDiscardChanges()) return;
       const profile = profiles.find((candidate) => candidate.id === latest.profile_id);
       if (profile) $("#profile-select").value = profile.id;
       if (schemaVersion === 1) {

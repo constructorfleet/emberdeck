@@ -158,6 +158,120 @@ test('concurrent editors retain local work, reject a racing stale save, and reco
   }
 });
 
+test('reload keeps edits made while the latest project request is pending in both editors', async ({ page }) => {
+  test.setTimeout(90000);
+  const attempt = `${test.info().repeatEachIndex}-${Date.now()}`;
+  const profileName = `E2E reload race profile ${attempt}`;
+  const rectangleName = `E2E reload race rectangle ${attempt}`;
+  const vectorName = `E2E reload race vector ${attempt}`;
+  await page.goto('/designer');
+  await page.locator('#api-key').fill(apiKey);
+  await page.getByRole('button', { name: /Connect/ }).click();
+  await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
+  await page.getByRole('button', { name: 'New profile' }).click();
+  await page.getByLabel('Profile name').fill(profileName);
+  await page.getByLabel('Work area width (mm)').fill('300');
+  await page.getByLabel('Work area height (mm)').fill('200');
+  await page.getByLabel('Maximum spindle value ($30)').fill('1000');
+  await page.getByLabel('Minimum feed (mm/min)').fill('1');
+  await page.getByLabel('Maximum feed (mm/min)').fill('6000');
+  await page.getByLabel('Maximum commanded power (%)').fill('100');
+  await page.getByRole('button', { name: 'Save profile' }).click();
+  await expect(page.locator('#notice .notice-message')).toContainText('Profile saved');
+
+  await page.getByRole('button', { name: 'New rectangle project' }).click();
+  await page.locator('#project-name').fill(rectangleName);
+  await page.getByRole('button', { name: 'Save project' }).click();
+  await expect(page.locator('#notice .notice-message')).toContainText('Project saved');
+  const rectangleRow = page.locator('#project-list li').filter({ hasText: rectangleName });
+  const rectangleID = await rectangleRow.getByRole('button', { name: `Reopen project ${rectangleName}` }).getAttribute('data-project-id');
+  const vector = await page.evaluate(async (name) => {
+    const headers = { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' };
+    const profileID = document.querySelector('#profile-select').value;
+    const result = await fetch('/api/v1/projects', { method: 'POST', headers, body: JSON.stringify({
+      schema_version: 2, name, units: 'mm', profile_id: profileID, profile_revision: 1,
+      objects: [{ id: 'race-shape', kind: 'path', operation_id: 'engrave', subpaths: [{
+        points: [{ x_mm: 10, y_mm: 10 }, { x_mm: 30, y_mm: 10 }, { x_mm: 30, y_mm: 30 }, { x_mm: 10, y_mm: 30 }], closed: true,
+      }] }],
+      operations: [{ id: 'engrave', type: 'vector-engrave', feed_mm_min: 600, power_percent: 25 }],
+    }) });
+    if (!result.ok) throw new Error(`Could not create vector race fixture: ${result.status}`);
+    return result.json();
+  }, vectorName);
+
+  await page.reload();
+  await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
+
+  async function publishNewerRevision(projectID) {
+    const result = await page.evaluate(async (id) => {
+      const headers = { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' };
+      const current = await (await fetch(`/api/v1/projects/${id}`, { headers })).json();
+      const body = {
+        schema_version: current.schema_version, name: current.name, profile_id: current.profile_id,
+        profile_revision: current.profile_revision, revision: current.revision,
+      };
+      if (current.schema_version === 1) {
+        body.rectangle = { ...current.rectangle, x_mm: current.rectangle.x_mm + 2 };
+        body.operation = current.operation;
+      } else {
+        body.units = current.units;
+        body.objects = current.objects.map((object) => ({ ...object, subpaths: object.subpaths.map((path) => ({
+          ...path, points: path.points.map((point) => ({ ...point, x_mm: point.x_mm + 2 })),
+        })) }));
+        body.operations = current.operations;
+      }
+      const response = await fetch(`/api/v1/projects/${id}`, { method: 'PUT', headers, body: JSON.stringify(body) });
+      if (!response.ok) throw new Error(`Could not publish newer revision: ${response.status}`);
+      document.dispatchEvent(new Event('visibilitychange'));
+      return response.json();
+    }, projectID);
+    return result;
+  }
+
+  async function editDuringReload(projectID, reloadName, field, localValue, noticeSelector) {
+    let unblock;
+    let requestStarted;
+    const gate = new Promise((resolve) => { unblock = resolve; });
+    const arrived = new Promise((resolve) => { requestStarted = resolve; });
+    const routePattern = `**/api/v1/projects/${projectID}`;
+    await page.route(routePattern, async (route) => {
+      if (route.request().method() === 'GET') {
+        requestStarted();
+        await gate;
+      }
+      await route.continue();
+    });
+    await page.getByRole('button', { name: reloadName }).click();
+    await arrived;
+    await page.locator(field).fill(localValue);
+    let prompt = '';
+    const dialogClosed = new Promise((resolve) => page.once('dialog', async (dialog) => {
+      prompt = dialog.message();
+      await dialog.dismiss();
+      resolve();
+    }));
+    unblock();
+    await dialogClosed;
+    expect(prompt).toBe('Discard unsaved changes?');
+    await expect(page.locator(field)).toHaveValue(localValue);
+    await expect(page.locator(noticeSelector)).toBeVisible();
+    await page.unroute(routePattern);
+  }
+
+  await page.getByRole('button', { name: `Reopen project ${rectangleName}` }).click();
+  await publishNewerRevision(rectangleID);
+  await expect(page.locator('#project-remote-change')).toBeVisible();
+  await editDuringReload(rectangleID, 'Reload latest', '#rect-x', '13', '#project-remote-change');
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Close editor' }).click();
+
+  await page.getByRole('button', { name: `Reopen vector project ${vectorName}` }).click();
+  await publishNewerRevision(vector.id);
+  await expect(page.locator('#vector-remote-change')).toBeVisible();
+  await editDuringReload(vector.id, 'Reload latest', '#vector-x', '13', '#vector-remote-change');
+  await expect(page.locator('#vector-x')).toHaveValue('13');
+});
+
 test('operator saves a declared profile, edits a bounded rectangle, and reviews a queued generated job', async ({ page }) => {
   test.setTimeout(90000);
   const attempt = `${test.info().repeatEachIndex}-${test.info().retry}-${Date.now()}`;
