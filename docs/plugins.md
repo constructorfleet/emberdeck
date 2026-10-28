@@ -39,7 +39,9 @@ same operating-system permissions as the EmberDeck server, so a plugin can read
 or change anything that account can access. Install only code you trust. The
 example G-code preflight checks basic text shape only; it does not certify
 safety, machine compatibility, or successful execution. This protocol does not
-claim OctoPrint compatibility.
+claim OctoPrint compatibility. Controller transport extensions use a separate
+contract; see [driver adapter API](#driver-adapter-api-prototype). The current adapter API is
+a trusted in-process prototype and is not loaded by the server or worker.
 
 ## Build and install the example
 
@@ -86,3 +88,62 @@ Configured preflight invocations contribute bounded `ok`, `error`, and `rejected
 outcomes and duration histograms to the optional server metrics endpoint. No
 plugin names, messages, G-code, or raw errors are exported. See
 [metrics and monitoring](metrics.md) for the contract and deployment guidance.
+
+## Driver adapter API prototype
+
+Preflight plugins only allow or veto a dispatch. Controller-specific network
+protocols need a separate lifecycle and capability contract; they must not be
+added to the preflight request. The `driveradapter` Go package defines the
+current version 1 in-process API prototype. It is not loaded by `serve` or
+`emberdeck driver`, so it does not provide runtime adapter discovery, operator
+configuration, or machine support yet.
+
+An adapter implements `driveradapter.Adapter` and declares protocol version,
+name, version, transport, and its maximum capabilities. `Discover` returns
+concrete devices; each device may advertise a subset of those capabilities.
+`Configure` receives a device ID and at most 1 MiB of JSON, then returns one
+controller session:
+
+```text
+Discover -> Configure(device, config) -> Start(assignment) -> Status* -> Close
+                                                   |-> Pause / Resume (capability-gated)
+                                                   |-> Cancel (capability-gated)
+```
+
+A `Start` assignment includes one job ID, lease ID, exact G-code bytes, size, and
+SHA-256. The shared wrapper rejects unsupported versions, invalid identifiers,
+size mismatch, digest mismatch, and programs larger than 4 MiB before calling
+adapter code. Invalid input does not consume the session; any start attempt does,
+even when it returns an error, because the controller may have accepted work
+before the transport failed. The wrapper permits at most one start per session.
+The server and worker must still enforce lease ownership and must not create a
+replacement session to replay work after disconnect or reboot.
+
+`Status` separates accepted lines from optional executed lines and may provide
+controller state and position with `confirmed`, `estimated`, `unknown`, or
+`unavailable` confidence. Acceptance is not execution evidence. Accepted and
+executed counters cannot regress during a lease. Controls return an unsupported
+error unless the device declares that capability. Adapters must honor context
+cancellation, return bounded errors, and identify uncertainty after connection
+loss. This API does not establish physical safety or replace machine interlocks.
+
+The API is trusted in-process Go code, not an isolated plugin process. The
+software-only simulator example and public contract tests live in
+[`driveradapter/simulator`](../driveradapter/simulator/simulator.go) and
+[`driveradapter/contract_test.go`](../driveradapter/contract_test.go):
+
+```sh
+go test ./driveradapter/...
+```
+
+A later non-built-in network target is the Ruida RDC6445G Ethernet interface;
+[Ruida lists Ethernet and USB for that model](https://www.rdacs.com/en/product-detail/rdc6445g.html).
+EmberDeck has not implemented or qualified its wire protocol. Protocol details,
+authentication, transfer and cancellation semantics, firmware variants, and
+licensing need verification first. Built-in GRBL-over-TCP remains limited to
+compatible GRBL endpoints; Wi-Fi does not imply protocol compatibility.
+
+The prototype does not yet integrate adapters with server/worker assignment,
+monitoring, sessions or leases; provide a dynamic plugin loader, distributed
+host installation, or operator workflow; or verify adapter reconnect/failure
+behavior end to end. Issue #15 remains open for those items and any UI evidence.
