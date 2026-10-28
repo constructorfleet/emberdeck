@@ -150,6 +150,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.serveUI(w, r) {
 		return
 	}
+	// Only the API namespace is authenticated. Unknown pages are ordinary
+	// misses so a mistyped URL never looks like a rejected API key.
+	if !strings.HasPrefix(r.URL.Path, "/api/") {
+		fail(w, http.StatusNotFound, "not found")
+		return
+	}
 	if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.key)) != 1 {
 		fail(w, 401, "authentication required")
 		return
