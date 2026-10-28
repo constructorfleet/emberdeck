@@ -2,10 +2,12 @@ package server
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
+	"reflect"
 	"regexp"
 	"time"
 
@@ -344,6 +346,40 @@ type pollAssignment struct {
 	chunked bool
 }
 
+type terminalReceiptFields struct {
+	State           string              `json:"state"`
+	Acked           int                 `json:"acked"`
+	Total           int                 `json:"total"`
+	ControllerState string              `json:"controller_state"`
+	Error           string              `json:"error"`
+	Execution       *toolpath.Execution `json:"execution"`
+}
+
+func terminalReceiptDigest(in *pollReport) string {
+	encoded, _ := json.Marshal(terminalReceiptFields{
+		State: in.State, Acked: in.Acked, Total: in.Total,
+		ControllerState: in.ControllerState, Error: in.Error, Execution: in.Execution,
+	})
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:])
+}
+
+func matchesTerminalReceipt(job jobRecord, in *pollReport) bool {
+	if job.TerminalReceiptDigest != "" {
+		return job.TerminalReceiptDigest == terminalReceiptDigest(in)
+	}
+
+	// Older persisted jobs predate receipt digests. Compare the fields that were
+	// stored so their original terminal reports can still be retried safely.
+	errorText := in.Error
+	if len(errorText) > 1000 {
+		errorText = errorText[:1000]
+	}
+	return job.State == in.State && job.Acked == in.Acked && job.Total == in.Total &&
+		job.ControllerState == in.ControllerState && job.Error == errorText &&
+		reflect.DeepEqual(job.Execution, in.Execution)
+}
+
 func sameCapabilities(left, right []string) bool {
 	if len(left) != len(right) {
 		return false
@@ -428,7 +464,7 @@ func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCa
 		previousState := j.State
 		if !activeJob(j.State) {
 			// Repeated terminal receipts are idempotent after response loss.
-			if j.State != in.State {
+			if j.State != in.State || !matchesTerminalReceipt(j, in) {
 				fail(w, 409, "job is already terminal")
 				return nil, false, false
 			}
@@ -476,6 +512,9 @@ func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCa
 			default:
 				fail(w, 400, "invalid worker state")
 				return nil, false, false
+			}
+			if !activeJob(j.State) {
+				j.TerminalReceiptDigest = terminalReceiptDigest(in)
 			}
 			j.ControllerState = in.ControllerState
 			j.Acked = in.Acked

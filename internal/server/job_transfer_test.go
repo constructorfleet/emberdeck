@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/ConstructorFleet/emberdeck/internal/server"
 	"github.com/ConstructorFleet/emberdeck/jobtransfer"
 )
 
@@ -168,5 +171,205 @@ func TestLegacyAssignmentRespectsOldWorkerResponseLimit(t *testing.T) {
 	}
 	if err := json.Unmarshal(stored.Body.Bytes(), &state); err != nil || state.State != "queued" {
 		t.Fatalf("legacy worker size rejection changed queued job state: %s (%v)", stored.Body.String(), err)
+	}
+}
+
+func TestChunkedWorkerCannotDecreaseAcknowledgedProgress(t *testing.T) {
+	s := openChunkedWorkerServer(t)
+	jobID, lease, workerKey := startChunkedWorkerJob(t, s, "G21\nG90\nM5\n")
+
+	progress := func(acked int) *httptest.ResponseRecorder {
+		t.Helper()
+		body := fmt.Sprintf(`{"session":"device-session","job_id":%q,"lease":%q,"state":"running","controller_state":"Run","acked":%d,"total":3}`, jobID, lease, acked)
+		return request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll", body, workerKey)
+	}
+	if got := progress(2); got.Code != http.StatusOK {
+		t.Fatalf("initial progress: %d %s", got.Code, got.Body.String())
+	}
+	if got := progress(1); got.Code != http.StatusBadRequest {
+		t.Fatalf("decreasing progress: %d %s, want 400", got.Code, got.Body.String())
+	}
+	page := listChunkedJobs(t, s, "?state=running")
+	if page.Total != 1 || page.Jobs[0]["acked"] != float64(2) || page.Jobs[0]["total"] != float64(3) {
+		t.Fatalf("rejected decreasing receipt changed latest progress: %+v", page.Jobs)
+	}
+}
+
+func TestChunkedWorkerTerminalReceiptRetryIsIdempotentAndConflictsWhenChanged(t *testing.T) {
+	s := openChunkedWorkerServer(t)
+	jobID, lease, workerKey := startChunkedWorkerJob(t, s, "G21\nG90\nM5\n")
+	terminal := func(state string, acked, total int, controllerState, errorText, execution string) *httptest.ResponseRecorder {
+		t.Helper()
+		body := fmt.Sprintf(`{"session":"device-session","job_id":%q,"lease":%q,"state":%q,"acked":%d,"total":%d,"controller_state":%q,"error":%q,"execution":%s}`, jobID, lease, state, acked, total, controllerState, errorText, execution)
+		return request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll", body, workerKey)
+	}
+	const (
+		state           = "failed"
+		acked           = 1
+		total           = 3
+		controllerState = "Alarm:1"
+		errorText       = "controller alarm"
+		execution       = `{"path_progress":{"completed":0,"total":0,"confidence":"unknown"}}`
+	)
+
+	// Treat the first response as lost; retrying the identical receipt must succeed.
+	if got := terminal(state, acked, total, controllerState, errorText, execution); got.Code != http.StatusOK {
+		t.Fatalf("first terminal receipt: %d %s", got.Code, got.Body.String())
+	}
+	if got := terminal(state, acked, total, controllerState, errorText, execution); got.Code != http.StatusOK {
+		t.Fatalf("identical terminal receipt retry: %d %s", got.Code, got.Body.String())
+	}
+	changed := []struct {
+		name, state, controllerState, errorText, execution string
+		acked, total                                       int
+	}{
+		{"state", "completed", controllerState, errorText, execution, acked, total},
+		{"acknowledgement", state, controllerState, errorText, execution, 2, total},
+		{"total", state, controllerState, errorText, execution, acked, 4},
+		{"controller state", state, "Alarm:2", errorText, execution, acked, total},
+		{"error", state, controllerState, "different alarm", execution, acked, total},
+		{"execution omitted", state, controllerState, errorText, "null", acked, total},
+		{"execution telemetry", state, controllerState, errorText, `{"path_progress":{"completed":0,"total":0,"confidence":"ambiguous"}}`, acked, total},
+	}
+	for _, test := range changed {
+		t.Run(test.name, func(t *testing.T) {
+			if got := terminal(test.state, test.acked, test.total, test.controllerState, test.errorText, test.execution); got.Code != http.StatusConflict {
+				t.Fatalf("changed terminal receipt: %d %s, want 409", got.Code, got.Body.String())
+			}
+		})
+	}
+	page := listChunkedJobs(t, s, "?state=failed")
+	if page.Total != 1 || page.Jobs[0]["acked"] != float64(acked) || page.Jobs[0]["total"] != float64(total) || page.Jobs[0]["error"] != errorText || page.Jobs[0]["controller_state"] != controllerState {
+		t.Fatalf("terminal receipt retry changed the committed result: %+v", page.Jobs)
+	}
+}
+
+func TestLegacyTerminalReceiptRetryRejectsRemovedExecutionTelemetry(t *testing.T) {
+	dir := t.TempDir()
+	s := openChunkedWorkerServerAt(t, dir)
+	jobID, lease, workerKey := startChunkedWorkerJob(t, s, "G21\nG90\nM5\n")
+	const original = `{"session":"device-session","job_id":%q,"lease":%q,"state":"failed","acked":1,"total":3,"controller_state":"Alarm:1","error":"controller alarm","execution":{"path_progress":{"completed":0,"total":0,"confidence":"unknown"}}}`
+	receipt := fmt.Sprintf(original, jobID, lease)
+	if got := request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll", receipt, workerKey); got.Code != http.StatusOK {
+		t.Fatalf("first terminal receipt: %d %s", got.Code, got.Body.String())
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	removeTerminalReceiptDigest(t, dir, jobID)
+
+	restarted := openChunkedWorkerServerAt(t, dir)
+	workerPoll := `{"session":"device-session","capabilities":["` + jobtransfer.Capability + `"]}`
+	if got := request(t, restarted, http.MethodPost, "/api/v1/drivers/bench/poll", workerPoll, workerKey); got.Code != http.StatusOK {
+		t.Fatalf("register worker after restart: %d %s", got.Code, got.Body.String())
+	}
+	if got := request(t, restarted, http.MethodPost, "/api/v1/drivers/bench/poll", receipt, workerKey); got.Code != http.StatusOK {
+		t.Fatalf("identical legacy terminal receipt retry: %d %s", got.Code, got.Body.String())
+	}
+	withoutExecution := fmt.Sprintf(`{"session":"device-session","job_id":%q,"lease":%q,"state":"failed","acked":1,"total":3,"controller_state":"Alarm:1","error":"controller alarm"}`, jobID, lease)
+	if got := request(t, restarted, http.MethodPost, "/api/v1/drivers/bench/poll", withoutExecution, workerKey); got.Code != http.StatusConflict {
+		t.Fatalf("legacy terminal receipt without stored execution telemetry: %d %s, want 409", got.Code, got.Body.String())
+	}
+}
+
+func startChunkedWorkerJob(t *testing.T, s http.Handler, source string) (jobID, lease, workerKey string) {
+	t.Helper()
+	worker := createCredential(t, s, "chunk transfer worker", "worker", []string{"bench"})
+	payload, err := json.Marshal(map[string]string{"name": "receipt-contract.gcode", "gcode": source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upload := request(t, s, http.MethodPost, "/api/v1/jobs", string(payload), bootstrapKey)
+	if upload.Code != http.StatusCreated {
+		t.Fatalf("upload job: %d %s", upload.Code, upload.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(upload.Body.Bytes(), &created); err != nil || created.ID == "" {
+		t.Fatalf("uploaded job: %s (%v)", upload.Body.String(), err)
+	}
+	jobID = created.ID
+	workerPoll := `{"session":"device-session","capabilities":["` + jobtransfer.Capability + `"]}`
+	if got := request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll", workerPoll, worker.Key); got.Code != http.StatusOK {
+		t.Fatalf("register chunked worker: %d %s", got.Code, got.Body.String())
+	}
+	started := request(t, s, http.MethodPost, "/api/v1/jobs/"+jobID+"/start", `{"driver_id":"bench","confirmed":true,"bounds_override":true}`, bootstrapKey)
+	if started.Code != http.StatusOK {
+		t.Fatalf("start job: %d %s", started.Code, started.Body.String())
+	}
+	pickup := request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll", workerPoll, worker.Key)
+	if pickup.Code != http.StatusOK {
+		t.Fatalf("pick up job: %d %s", pickup.Code, pickup.Body.String())
+	}
+	var assignment struct {
+		Lease string `json:"lease"`
+		Job   struct {
+			ID string `json:"id"`
+		} `json:"job"`
+	}
+	if err := json.Unmarshal(pickup.Body.Bytes(), &assignment); err != nil || assignment.Job.ID != jobID || assignment.Lease == "" {
+		t.Fatalf("chunked assignment: %s (%v)", pickup.Body.String(), err)
+	}
+	return jobID, assignment.Lease, worker.Key
+}
+
+func openChunkedWorkerServer(t *testing.T) *server.Server {
+	return openChunkedWorkerServerAt(t, t.TempDir())
+}
+
+func openChunkedWorkerServerAt(t *testing.T, dir string) *server.Server {
+	t.Helper()
+	s, err := server.OpenWithPlugins(dir, bootstrapKey, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s
+}
+
+func listChunkedJobs(t *testing.T, h http.Handler, query string) jobPage {
+	t.Helper()
+	response := request(t, h, http.MethodGet, "/api/v1/jobs"+query, "", bootstrapKey)
+	if response.Code != http.StatusOK {
+		t.Fatalf("list jobs: %d %s", response.Code, response.Body.String())
+	}
+	var page jobPage
+	if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	return page
+}
+
+func removeTerminalReceiptDigest(t *testing.T, dir, jobID string) {
+	t.Helper()
+	path := filepath.Join(dir, "jobs.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var index struct {
+		Version  int                        `json:"version"`
+		EventSeq int64                      `json:"event_seq"`
+		Jobs     map[string]json.RawMessage `json:"jobs"`
+	}
+	if err := json.Unmarshal(data, &index); err != nil {
+		t.Fatal(err)
+	}
+	var record map[string]json.RawMessage
+	if err := json.Unmarshal(index.Jobs[jobID], &record); err != nil {
+		t.Fatal(err)
+	}
+	delete(record, "terminal_receipt_digest")
+	index.Jobs[jobID], err = json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err = json.Marshal(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
 	}
 }
