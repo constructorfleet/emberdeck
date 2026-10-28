@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.18.0](https://github.com/constructorfleet/emberdeck/compare/v0.17.0...v0.18.0) (2026-10-28)
+
+
+### Features
+
+* add searchable documentation navigation ([#119](https://github.com/constructorfleet/emberdeck/issues/119)) ([ea2050e](https://github.com/constructorfleet/emberdeck/commit/ea2050e93af970d424e403a7039f0ff90b6f4d8a))
+* **importer:** add versioned import contract ([#136](https://github.com/constructorfleet/emberdeck/issues/136)) ([fe85965](https://github.com/constructorfleet/emberdeck/commit/fe859657e8456aa88d54577d579b1ff633482441))
+* notify stale designer project editors ([#148](https://github.com/constructorfleet/emberdeck/issues/148)) ([69a5c4e](https://github.com/constructorfleet/emberdeck/commit/69a5c4e462c759f94441dac6007428fe5d019ea8))
+
+
+### Bug Fixes
+
+* make generated docs accessible on mobile ([#127](https://github.com/constructorfleet/emberdeck/issues/127)) ([722ca55](https://github.com/constructorfleet/emberdeck/commit/722ca55788c854efee8c4fbd6fa2eede5a57fd14))
+
 ## [0.17.0](https://github.com/constructorfleet/emberdeck/compare/v0.16.0...v0.17.0) (2026-10-28)
 
 
