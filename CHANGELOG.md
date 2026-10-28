@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.7.0](https://github.com/constructorfleet/emberdeck/compare/v0.6.0...v0.7.0) (2026-10-28)
+
+
+### Features
+
+* add editable vector object transforms ([#85](https://github.com/constructorfleet/emberdeck/issues/85)) ([9d9c6c7](https://github.com/constructorfleet/emberdeck/commit/9d9c6c74a883c2c4054823b17f031f9e439d13ca))
+* add ESP32 job staging contract prototype ([#88](https://github.com/constructorfleet/emberdeck/issues/88)) ([bfd4ff9](https://github.com/constructorfleet/emberdeck/commit/bfd4ff91e4d91be9856a5fe3761f1e7fceb8e410))
+* align selected vector shapes ([#92](https://github.com/constructorfleet/emberdeck/issues/92)) ([fbc3522](https://github.com/constructorfleet/emberdeck/commit/fbc3522466eab81a67c524a582e04eb36ea2ccc2))
+* **designer:** add editable monoline text engraving ([#98](https://github.com/constructorfleet/emberdeck/issues/98)) ([8153339](https://github.com/constructorfleet/emberdeck/commit/81533394dc63d7e44077879194b542cee8e701c3))
+* record durable job event history and audit log ([#77](https://github.com/constructorfleet/emberdeck/issues/77)) ([6805ba3](https://github.com/constructorfleet/emberdeck/commit/6805ba3fea2e2e2d149c5da0aa8ba07af4373e9b))
+
+
+### Bug Fixes
+
+* make docs navigation responsive and dismissible ([#89](https://github.com/constructorfleet/emberdeck/issues/89)) ([c550a88](https://github.com/constructorfleet/emberdeck/commit/c550a880fd327bb82bca5ae616256eb5a7572fe7)), closes [#35](https://github.com/constructorfleet/emberdeck/issues/35)
+* unify console status notices ([#90](https://github.com/constructorfleet/emberdeck/issues/90)) ([5b44810](https://github.com/constructorfleet/emberdeck/commit/5b4481036db7bedfe2ff40993a5b581ad5f5e155)), closes [#23](https://github.com/constructorfleet/emberdeck/issues/23)
+
 ## [0.6.0](https://github.com/constructorfleet/emberdeck/compare/v0.5.0...v0.6.0) (2026-10-28)
 
 
