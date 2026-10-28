@@ -136,6 +136,62 @@ func TestParseFlattensCubicAndRelativeQuadraticPathCommands(t *testing.T) {
 	}
 }
 
+func TestParseFlattensSmoothCubicAndQuadraticPathCommands(t *testing.T) {
+	source := []byte(`<svg width="140mm" height="100mm" viewBox="0 0 140 100"><path d="M10 80 C20 100 40 100 50 80 S80 60 90 80 Q100 100 110 80 T130 80"/></svg>`)
+	got, err := svgimport.Parse(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := got.Objects[0].Subpaths[0]
+	if path.Closed || len(path.Points) < 8 {
+		t.Fatalf("smooth cubic and quadratic commands produced an unexpected path: %#v", path)
+	}
+	if first, last := path.Points[0], path.Points[len(path.Points)-1]; first != (svgimport.Point{XMM: 10, YMM: 20}) || last != (svgimport.Point{XMM: 130, YMM: 20}) {
+		t.Fatalf("path endpoints = %#v and %#v, want (10,20) and (130,20)", first, last)
+	}
+	for sample := 0; sample <= 1000; sample++ {
+		testT := float64(sample) / 1000
+		if distanceToPolyline(cubicCoordinate(10, 20, 40, 50, testT), cubicCoordinate(20, 0, 0, 20, testT), path.Points) > svgimport.CurveToleranceMM+1e-6 {
+			t.Fatalf("first cubic sample at t=%.3f exceeds the documented chord tolerance", testT)
+		}
+		if distanceToPolyline(cubicCoordinate(50, 60, 80, 90, testT), cubicCoordinate(20, 40, 40, 20, testT), path.Points) > svgimport.CurveToleranceMM+1e-6 {
+			t.Fatalf("smooth cubic sample at t=%.3f exceeds the documented chord tolerance", testT)
+		}
+		if distanceToPolyline(90+20*testT, 20-40*testT*(1-testT), path.Points) > svgimport.CurveToleranceMM+1e-6 {
+			t.Fatalf("first quadratic sample at t=%.3f exceeds the documented chord tolerance", testT)
+		}
+		if distanceToPolyline(110+20*testT, 20+40*testT*(1-testT), path.Points) > svgimport.CurveToleranceMM+1e-6 {
+			t.Fatalf("smooth quadratic sample at t=%.3f exceeds the documented chord tolerance", testT)
+		}
+	}
+}
+
+func TestParseResetsSmoothControlPointsAndSupportsRelativeSmoothCommands(t *testing.T) {
+	source := []byte(`<svg width="160mm" height="100mm" viewBox="0 0 160 100"><path d="M10 80 c10 20 30 20 40 0 s40 -20 40 0 L100 80 s10 0 20 0 q10 20 20 0 t20 0"/><path d="M10 60 Q20 40 30 60 L40 60 T50 60"/></svg>`)
+	got, err := svgimport.Parse(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := got.Objects[0].Subpaths[0]
+	if path.Closed || len(path.Points) < 8 {
+		t.Fatalf("relative smooth commands produced an unexpected path: %#v", path)
+	}
+	if first, last := path.Points[0], path.Points[len(path.Points)-1]; first != (svgimport.Point{XMM: 10, YMM: 20}) || last != (svgimport.Point{XMM: 160, YMM: 20}) {
+		t.Fatalf("path endpoints = %#v and %#v, want (10,20) and (160,20)", first, last)
+	}
+	// After the line, S starts with the current point (100,20) as its first
+	// control rather than reflecting the earlier cubic control.
+	if distanceToPolyline(105, 20, path.Points) > svgimport.CurveToleranceMM {
+		t.Fatal("smooth cubic after a line did not reset its reflected control point")
+	}
+	resetQuadratic := got.Objects[1].Subpaths[0]
+	for _, point := range resetQuadratic.Points {
+		if point.XMM >= 40 && point.YMM != 40 {
+			t.Fatalf("smooth quadratic after a line used a reflected control: %#v", resetQuadratic.Points)
+		}
+	}
+}
+
 func cubicCoordinate(start, control1, control2, end, t float64) float64 {
 	oneMinusT := 1 - t
 	return oneMinusT*oneMinusT*oneMinusT*start + 3*oneMinusT*oneMinusT*t*control1 + 3*oneMinusT*t*t*control2 + t*t*t*end
@@ -238,8 +294,8 @@ func TestParseRejectsMalformedSVGNumberListsAndCurves(t *testing.T) {
 		"trailing points comma":    `<svg width="40mm" height="20mm" viewBox="0 0 40 20"><polyline points="0,0 1,1,"/></svg>`,
 		"trailing transform comma": `<svg width="40mm" height="20mm" viewBox="0 0 40 20"><polyline points="0,0 1,1" transform="translate(1,)"/></svg>`,
 		"line after close":         `<svg width="40mm" height="20mm" viewBox="0 0 40 20"><path d="M0 0 L10 0 L10 10 Z L20 20"/></svg>`,
-		"unsupported smooth cubic": `<svg width="40mm" height="20mm" viewBox="0 0 40 20"><path d="M0 0 S2 2 4 4"/></svg>`,
-		"unsupported smooth quad":  `<svg width="40mm" height="20mm" viewBox="0 0 40 20"><path d="M0 0 T4 4"/></svg>`,
+		"malformed smooth cubic":   `<svg width="40mm" height="20mm" viewBox="0 0 40 20"><path d="M0 0 S2 2 4"/></svg>`,
+		"malformed smooth quad":    `<svg width="40mm" height="20mm" viewBox="0 0 40 20"><path d="M0 0 T4"/></svg>`,
 		"unsupported arc":          `<svg width="40mm" height="20mm" viewBox="0 0 40 20"><path d="M0 0 A2 2 0 0 1 4 4"/></svg>`,
 		"malformed cubic path":     `<svg width="40mm" height="20mm" viewBox="0 0 40 20"><path d="M0 0 C1 2 3 4 5"/></svg>`,
 		"malformed quadratic path": `<svg width="40mm" height="20mm" viewBox="0 0 40 20"><path d="M0 0 Q1 2 3"/></svg>`,

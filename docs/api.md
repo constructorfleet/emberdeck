@@ -467,15 +467,16 @@ project endpoints. The root SVG must declare physical `width`, `height`, and
 The viewport is mapped to lower-left-origin millimetres. A mismatched aspect ratio
 requires explicit `preserveAspectRatio="none"`.
 
-The static subset supports direct-child paths made from M/L/H/V/Z line commands
-and C/c/Q/q cubic and quadratic Bezier commands, plus lines, polylines, polygons,
-rectangles, circles, ellipses, and element-level affine transforms. Curves are
-flattened deterministically to editable line segments with a maximum 0.05 mm
+The static subset supports direct-child paths made from M/L/H/V/Z line commands,
+C/c and S/s cubic Bezier commands, and Q/q and T/t quadratic Bezier commands,
+plus lines, polylines, polygons, rectangles, circles, ellipses, and element-level
+affine transforms. Curves are flattened deterministically to editable line
+segments with a maximum 0.05 mm
 chord deviation in final imported millimetre coordinates. Flattening rejects
 curves that cannot meet that tolerance within 16 subdivision levels or the
 4,000-point import limit. Circles and ellipses are represented by 32-point
 editable polylines.
-Smooth curve commands (S/s/T/t), elliptical arcs (A/a), group nesting, CSS/style,
+Elliptical arcs (A/a), group nesting, CSS/style,
 text, animation, DTD/entities, external references, and active content are
 rejected. Fill, stroke, colors, and SVG metadata never become laser operations.
 Imported geometry starts unassigned; assign each object to an explicit operation
