@@ -51,6 +51,8 @@ control and job state.
 
 ![EmberDeck operator console showing a controller-confirmed paused job](docs/assets/screenshots/operator-console-paused.png)
 
+![Console overview with a declared machine profile, saved project, G-code intake, and job library](docs/assets/screenshots/designer-console-overview.png)
+
 ## Available now
 
 - Durable upload, list, program view, deletion, explicit start, confirmed
@@ -60,8 +62,10 @@ control and job state.
   holds, and resumed execution. The same connection and lease span a pause.
 - Declared GRBL profiles and saved rectangle vector-engraving projects, with a
   bounded static preview and separate generated jobs for review and explicit
-  dispatch. SVG/text, cutting layers, raster engraving, and live toolpath
-  execution tracking remain future work.
+  dispatch. SVG/text import, multi-object editing, cutting layers, raster
+  engraving, live toolpath execution tracking, and driver-adapter configuration
+  remain future work; the [operator guide](docs/operator-guide.md) illustrates
+  the available controls and calls out these missing UI surfaces.
 - One active job per online driver; assignment leases and unique worker sessions.
 - Fail-closed worker behavior on server communication failures. Restarted or
   disconnected work becomes interrupted, with no automatic replay.

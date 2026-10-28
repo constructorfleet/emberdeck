@@ -13,6 +13,26 @@ After connecting, choose the driver assigned to the machine you prepared.
 
 ![Connected operator console with a queued program, driver selector, and safety check](assets/screenshots/operator-console-library.png)
 
+## Find the main controls
+
+The console groups design sources, G-code intake, and stored programs on one
+page. The overview below shows a saved profile and project alongside the upload
+and job controls. Close the project editor to return to the saved-project list;
+select **Reopen** to continue editing.
+
+![Console overview with a saved machine profile, saved project, G-code intake, and job library](assets/screenshots/designer-console-overview.png)
+
+| Area | Controls | What they do |
+| --- | --- | --- |
+| Machine profiles | **New profile**, **Edit profile**, **Delete profile** | Store the declared GRBL work area and limits used by the rectangle editor. |
+| Rectangle projects | **New rectangle project**, **Reopen**, **Save project**, **Generate queued job**, **Delete project** | Edit a saved rectangle engraving source, preview its declared envelope, or create a separate queued program. |
+| Add a program | File chooser, display name, **Add to library** | Upload plain-text G-code (up to 4 MiB) for inspection and dispatch. |
+| Stored programs | Driver selector, readiness checkbox, **View**, **Start**, **Pause**, **Resume**, **Cancel**, **Delete** | Inspect and manage jobs through the existing explicit-confirmation workflow. Available controls depend on job state and driver capabilities. |
+
+The profile and project lists remain separate from generated jobs: deleting a
+source project does not delete a generated program, and editing a source does
+not change an existing program.
+
 ## Add and inspect a program
 
 Choose a G-code file, enter a display name, and add it to the library. Use
@@ -49,6 +69,11 @@ not import SVG or text, generate cutting operations, or process raster images.
 
 ![Editable rectangle project with declared workspace and laser-off approach endpoint](assets/screenshots/designer-project.png)
 
+If a shape extends past the declared workspace, the editor explains the bounds
+error and disables both saving and generation until the dimensions are corrected.
+
+![Out-of-bounds rectangle with saving and generation disabled](assets/screenshots/designer-project-out-of-bounds.png)
+
 Saved profiles and projects can be reopened, edited, and deleted. Editing a
 profile makes its projects require review against the new revision; save the
 project against the selected revision before generating. Deleting a referenced
@@ -56,6 +81,8 @@ profile is blocked by the server.
 While a profile editor is open, generation is disabled. Save or cancel those
 profile edits first; after saving a changed profile, review and save the project
 against its new revision before generating.
+
+![Saved project blocked from generation until it is reviewed against the changed profile](assets/screenshots/designer-stale-profile.png)
 
 **Generate queued job** creates a normal library program. It does not dispatch
 the job, and it clears any earlier supervision confirmation. Use **View** to
@@ -69,10 +96,12 @@ confirmation and **Start** control when ready.
 
 ## Monitor a running program
 
-The job row shows acknowledged lines and a progress bar. **View** keeps the
-program available while job and driver status continue to refresh.
+The job row shows controller-acknowledged lines and a progress bar. This is
+streaming progress; it does not show completed, active, or remaining spatial
+toolpaths, and it does not identify the physical head position. **View** keeps
+the program available while job and driver status continue to refresh.
 
-![Running program progress with its source program open](assets/screenshots/operator-console-running-view.png)
+![Running program with acknowledged-line progress and its G-code source open; no spatial toolpath is displayed](assets/screenshots/operator-console-running-view.png)
 
 ## Pause and resume
 
@@ -115,3 +144,17 @@ behavior; the simulator does not qualify physical machine safety. See
 
 Regenerate the screenshots from the current console and simulator with
 `npm run docs:screenshots`.
+
+## Requested UI that is not available yet
+
+The current designer does not have multi-object selection and transforms, text
+or SVG import, ordered cut/engrave layers, or raster engraving. The console also
+does not show live completed/remaining toolpaths or head position, and it has
+no driver-adapter or importer-plugin configuration screens. Existing plugins
+are trusted preflight processes; they are not machine drivers or file
+converters. See the [designer plan](research/designer-architecture.md),
+[feature roadmap](roadmap.md#feature-requests), and the open requests for
+[#4](https://github.com/ConstructorFleet/emberdeck/issues/4),
+[#7](https://github.com/ConstructorFleet/emberdeck/issues/7),
+[#15](https://github.com/ConstructorFleet/emberdeck/issues/15), and
+[#16](https://github.com/ConstructorFleet/emberdeck/issues/16).
