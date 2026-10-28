@@ -1,43 +1,47 @@
-# Delivery plan
+# Product status
 
-Implemented capabilities still require release CI and hardware qualification
-where indicated. This is an early foundation, not a production certification.
+EmberDeck is an early-stage job manager, not a certified machine controller.
+Simulator and software checks do not qualify a physical machine. See
+[Safety & Limitations](safety.md) before operating hardware.
 
-- [x] Portable Go project and protected PR workflow
-- [x] Persistent authenticated job library and validation
-- [x] Browser upload, view, dispatch, progress, cancellation, and deletion
-- [x] Simulator through the controller wire boundary
-- [x] Distributed workers with sessions, leases, and fail-closed interruption
-- [x] GRBL acknowledgment streaming and Idle completion checks
-- [x] Serial and TCP transports (physical hardware unqualified)
-- [x] Versioned process preflight plugins and example plugin
-- [x] Native, Docker, Pi/systemd, and LXC deployment instructions
-- [x] Release automation for binaries, generated docs, and container images
-- [x] Verify hosted cross-platform/container checks and v0.1.0 release deployment
-- [x] Pause/resume with explicit controller state reporting
-- [x] Declared GRBL profiles and envelope validation/preview for rectangle projects
-- [ ] [#54: Profile-aware parsing and coordinate preview for uploaded machine programs](https://github.com/constructorfleet/emberdeck/issues/54)
-- [ ] Job history metadata, filtering, pagination, and large-library storage
-- [ ] Separate operator/worker credentials and multi-user permissions
-- [ ] Camera monitoring with authenticated access
-- [ ] Supported-controller hardware qualification matrix and test evidence
-- [ ] Installer/package validation on actual Pi, Windows, Mac, Linux, and LXC
+## Available
 
-The designer supports a rectangle-only v1 project and schema-v2 rectangle,
-ellipse, line, and generic path geometry with vector cutting and engraving.
-The first bounded static SVG importer handles line paths, basic shapes, and
-element transforms. Curved/grouped paths, text import, editor transforms, arbitrary
-path editing, undo/redo, and raster engraving remain future work. Ruida, proprietary DSP
-protocols, and OctoPrint plugin compatibility are also unsupported. Plugins
-can add adapters in later work.
+- Persistent G-code library, explicit dispatch, controller acknowledgements,
+  pause/resume on capable workers, cancellation, and failure reporting.
+- Simulator, GRBL serial and TCP transports, and distributed workers using
+  sessions and single-execution leases. Active jobs interrupted by server restart
+  or loss of worker communication are not automatically replayed.
+- Declared GRBL machine profiles, saved rectangle and multi-path vector projects,
+  and separate queued G-code generation for review and explicit dispatch. The
+  editor supports vector cutting and engraving and a bounded static SVG importer
+  for line paths, basic shapes, and element transforms. Curved/grouped paths,
+  text import, editor transforms, undo/redo, and raster engraving remain future
+  work.
+- Uploaded-job review against a selected machine profile, including upload-time
+  line validation, known or unknown path bounds, unsupported/incomplete-motion
+  warnings, a static envelope preview, and an explicit override before dispatch
+  when bounds are unknown or outside the profile.
+- Bounded linear XY toolpath visualization for supported programs. Its position
+  correlation can be estimated, ambiguous, or unavailable; it is not proof of
+  motion or laser output.
+- Trusted process plugins for preflight checks. They are not sandboxes, machine
+  drivers, or file converters. Ruida, proprietary DSP protocols, and OctoPrint
+  plugin compatibility remain unsupported; plugins can add adapters later.
 
-## Feature requests
+## Not available or not qualified
 
-Review open GitHub feature requests before selecting new work, then read the
-current issue body and comments for acceptance criteria. Issues #3 and #4 are
-required parts of the active product goal alongside the core deployment and
-job-management requirements above. Additional requests are tracked below with
-their implementation status and evidence:
+- Physical controller, cutter, enclosure, or emergency-stop qualification.
+- Complete coordinate interpretation for every uploaded program. Arcs,
+  incremental or machine-coordinate moves, offset writes, and programs without a
+  known initial head position are reported as unknown rather than guessed, so a
+  review may still require an explicit bounds override.
+- SVG/text import, arbitrary path editing, rotation/alignment, raster engraving,
+  and automatic design-to-machine configuration.
+- Universal Wi-Fi, proprietary DSP/Ruida controllers, or OctoPrint plugin
+  compatibility.
+- Multi-user permissions, camera monitoring, and advanced job-history
+  filtering/pagination.
+
 
 - [x] [#3: ESP32 driver firmware and ESPHome feasibility](https://github.com/constructorfleet/emberdeck/issues/3).
   Compare standalone firmware, an ESPHome component, and existing bridges;
@@ -113,3 +117,6 @@ their implementation status and evidence:
 
 The current issue bodies remain authoritative when their acceptance criteria
 change. A roadmap checkmark requires corresponding evidence, not a planned task.
+Capabilities may change between releases. The installed version and the
+operator-facing documentation shipped with it describe what is currently
+available; unsupported items above are not implied features.

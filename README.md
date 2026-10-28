@@ -1,4 +1,4 @@
-# EmberDeck
+# Overview
 
 **Your laser cutter's command deck.** Self-hosted job management with an embedded
 browser console, distributed controller workers, and trusted process plugins.
@@ -10,46 +10,11 @@ GRBL 1.1 is the first protocol. Proprietary DSP controllers (including Ruida) ar
 not supported. EmberDeck is not a safety controller: supervise cutting and use
 hardware interlocks and an emergency stop.
 
-## Try it without hardware
-
-Install Go 1.27 and build:
-
-```sh
-go build -o bin/emberdeck ./cmd/emberdeck
-export EMBERDECK_API_KEY="$(openssl rand -hex 32)"
-bin/emberdeck serve -simulate -data ./data
-```
-
-Open <http://127.0.0.1:8080>, enter the key, and upload a `.gcode` file. Select the
-simulator, confirm readiness, and start a job. The console separates acknowledged
-lines from spatial path progress and shows a camera-free preview for supported
-linear XY moves. Position correlation is estimated and assumes GRBL `$13=0`;
-completion requires the controller to report Idle. Cancel is a best-effort
-software stop, not a physical emergency stop.
-
-```gcode
-G21
-G90
-G1 X10 Y10 F100
-M5
-```
-
-To split server and driver, run `serve` on the server host and a worker on the
-machine host:
-
-```sh
-# Simulator worker; use HTTPS for remote connections.
-bin/emberdeck driver -server http://127.0.0.1:8080 -id bench -simulate
-# Serial worker (experimental, unqualified on physical hardware).
-bin/emberdeck driver -server http://127.0.0.1:8080 -id bench -serial /dev/ttyUSB0 -baud 115200
-```
-
-`serve -serial PORT` or `serve -tcp HOST:PORT` runs an all-in-one physical driver.
-`driver -list-ports` lists OS-reported serial ports. Opening a port can reset some
-controllers; always inspect controller state and manufacturer instructions.
-
-See the [illustrated operator guide](docs/operator-guide.md) for each console
-control and job state.
+Start with [Install](docs/install.md) to build a local software-only demo, then
+follow the [illustrated Operator Guide](docs/operator-guide.md) to use the console.
+For deployment choices, see [Deployment](docs/deployment.md). Review
+[Troubleshooting](docs/troubleshooting.md), the [Glossary](docs/glossary.md), and
+[Safety & Limitations](docs/safety.md) before connecting a machine.
 
 ![EmberDeck operator console showing a controller-confirmed paused job](docs/assets/screenshots/operator-console-paused.png)
 
@@ -91,26 +56,12 @@ for the supported GRBL settings and coordinate assumptions.
 
 ![Saved rectangle engraving source and its declared work-area preview](docs/assets/screenshots/designer-project.png)
 
-## Documentation and development
+## What EmberDeck does
 
-[Deployment](docs/deployment.md) · [API](docs/api.md) ·
-[Driver](docs/driver.md) · [Serial](docs/serial.md) · [Plugins](docs/plugins.md) ·
-[Architecture](docs/architecture.md) · [Roadmap](docs/roadmap.md)
-
-```sh
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -r docs/requirements.txt
-scripts/check.sh
-```
-
-This runs formatting, vet, race-enabled tests, command builds, and documentation
-rendering. The docs include CLI help from that build and an API route index from
-registered routes. Update explanatory docs in the same PR as behavior changes.
-See [contributing](CONTRIBUTING.md) for the TDD and Conventional Commit workflow.
-
-## License
-
-AGPL-3.0-only. Commercial use, paid hosting, and support are permitted under the
-license terms. Alternative proprietary licensing requires agreement from all
-relevant copyright holders; this repository does not promise that right.
+EmberDeck stores G-code jobs, dispatches them to a connected GRBL driver after
+operator confirmation, and reports controller acknowledgements and available
+execution telemetry. It can also save declared machine profiles and vector
+design projects and generate separate queued jobs for review. It does not start
+generated jobs automatically. See the [operator guide](docs/operator-guide.md)
+for the implemented console workflow and [Safety & Limitations](docs/safety.md)
+for important operating constraints.

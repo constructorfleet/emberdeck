@@ -23,7 +23,3 @@ The driver still fails closed, with the bounded best-effort feed hold and soft r
 - A controller that keeps reporting `Run` with an unchanged position and planner count fails 30 seconds after its last progress report, or 30 seconds after the line was sent if that is later.
 
 Progress is judged at the controller's reporting resolution. A move slow enough that neither its reported position nor its planner count changes for 30 seconds is treated as stalled. `driver.DefaultTimeouts()` returns these bounds. `driver.StreamWithOptions(ctx, conn, program, driver.Options{...})` accepts the same commands and callbacks as `StreamObserved` plus a `Timeouts` value with `Response` and `Liveness` durations; zero fields use the defaults and negative values are rejected. Bounds should stay well above the 200 ms status polling interval. `Stream`, `StreamControlled`, `StreamObserved`, and the worker use the defaults.
-
-## Worker package
-
-`worker.Run(ctx, serverURL, key, driverID, connector)` owns a unique session, polls for assignments, streams one assigned lease through the connector, and reports progress and terminal state. Poll failures fail closed and cancel an active stream. Terminal report retries reuse the same job ID and lease, so a lost HTTP response cannot cause the job to be resent to the controller. The worker package does not start physical drivers by itself; callers provide a connector for the intended wire endpoint.
