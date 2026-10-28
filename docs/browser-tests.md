@@ -11,6 +11,17 @@ Resume, it verifies acknowledged progress advances and accepts either a sampled
 job can finish between UI polls. It does not connect to or qualify physical
 hardware.
 
+The rectangle designer workflow creates a declared GRBL profile and a saved
+vector-engrave rectangle project through the browser. It verifies invalid bounds
+block save and generation, profile revision changes require project review, and
+projects persist across page reload. Generation adds a queued job and opens its
+program and provenance for review without starting it. It refuses generation
+while edits are unsaved and clears an already checked readiness box when a new
+program is generated. The test then checks the existing readiness gate,
+dispatches explicitly to the simulator, and verifies the job completes. It also
+checks narrow-screen overflow. The browser test uses the rendered UI and real
+HTTP API rather than mocking storage.
+
 ## Run locally
 
 Install the Python documentation dependency, pinned Node dependencies, and
