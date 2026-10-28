@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/ConstructorFleet/emberdeck/driver"
@@ -19,6 +21,27 @@ import (
 const driverTTL = 10 * time.Second
 
 var driverName = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+
+func (s *Server) updateParserQuarantine(id, reason string) error {
+	next := make(map[string]string, len(s.parserQuarantine)+1)
+	for key, value := range s.parserQuarantine {
+		next[key] = value
+	}
+	if reason == "" {
+		delete(next, id)
+	} else {
+		next[id] = reason
+	}
+	published, err := durableJSON(filepath.Join(s.dir, "parser-quarantine.json"), next)
+	if published && err != nil {
+		s.failStorage(err)
+	}
+	if err != nil {
+		return err
+	}
+	s.parserQuarantine = next
+	return nil
+}
 
 // Driver describes an online worker. Sessions prevent duplicate worker ownership.
 type Driver struct {
@@ -35,6 +58,7 @@ type Driver struct {
 	SettingsError      string           `json:"settings_error,omitempty"`
 	CameraAvailable    bool             `json:"camera_available"`
 	settingsRequested  time.Time
+	statusRequested    time.Time
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -75,6 +99,12 @@ func (s *Server) expire() error {
 	expired := []string{}
 	for id, d := range s.drivers {
 		if time.Since(d.LastSeen) > driverTTL {
+			if manual := s.manualControls[id]; manual != nil && manualAssignmentActive(manual.State) {
+				manual.State = manualStateInterrupted
+				manual.RequireFreshStatus = true
+				manual.Error = "worker lease expired; inspect the machine before releasing manual control"
+				manual.Updated = time.Now().UTC()
+			}
 			for jid, j := range s.jobs {
 				if j.DriverID == id && activeJob(j.State) {
 					if jobs == nil {
@@ -205,8 +235,20 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d, ok := s.drivers[in.DriverID]
-	if !ok || d.Busy {
+	if !ok {
 		fail(w, 409, "driver is offline or busy")
+		return
+	}
+	if s.parserQuarantine[d.ID] != "" {
+		fail(w, http.StatusConflict, "controller parser reset is unconfirmed; worker recovery or physical controller inspection is required")
+		return
+	}
+	if d.Busy {
+		fail(w, 409, "driver is offline or busy")
+		return
+	}
+	if manual := s.manualControls[d.ID]; manual != nil && manualAssignmentActive(manual.State) {
+		fail(w, http.StatusConflict, "driver has an active or unresolved manual-control lease")
 		return
 	}
 	if message := settingsBlock(j, d); message != "" {
@@ -287,6 +329,14 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 		respond(w, 200, s.idleCommand(id))
 		return
 	}
+	if assignment.manual != nil {
+		if assignment.command == "manual" {
+			respond(w, http.StatusOK, map[string]any{"command": assignment.command, "lease": assignment.manual.Lease, "manual": manualWorkerAssignment(assignment.manual)})
+		} else {
+			respond(w, http.StatusOK, map[string]any{"command": assignment.command})
+		}
+		return
+	}
 	if needsProgram {
 		if assignment.chunked {
 			assignment.job.Content = &jobtransfer.Manifest{Size: assignment.record.Size, SHA256: assignment.record.SHA256}
@@ -325,20 +375,25 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 
 // pollReport is one worker poll: session metadata plus optional job progress.
 type pollReport struct {
-	Capabilities    []string            `json:"capabilities"`
-	ControllerState string              `json:"controller_state"`
-	Session         string              `json:"session"`
-	JobID           string              `json:"job_id"`
-	Lease           string              `json:"lease"`
-	State           string              `json:"state"`
-	Acked           int                 `json:"acked"`
-	Total           int                 `json:"total"`
-	Error           string              `json:"error"`
-	Execution       *toolpath.Execution `json:"execution"`
+	Capabilities               []string            `json:"capabilities"`
+	ControllerState            string              `json:"controller_state"`
+	ControllerStatusFresh      bool                `json:"controller_status_fresh,omitempty"`
+	ControllerParserResetFresh bool                `json:"controller_parser_reset_fresh,omitempty"`
+	Session                    string              `json:"session"`
+	JobID                      string              `json:"job_id"`
+	Lease                      string              `json:"lease"`
+	State                      string              `json:"state"`
+	Acked                      int                 `json:"acked"`
+	Total                      int                 `json:"total"`
+	Error                      string              `json:"error"`
+	Execution                  *toolpath.Execution `json:"execution"`
 	// Controller settings read with `$$` (see controller_settings.go).
 	ControllerSettings *driver.Settings `json:"controller_settings"`
 	SettingsReadAt     *time.Time       `json:"settings_read_at"`
 	SettingsError      string           `json:"settings_error"`
+	ManualLease        string           `json:"manual_lease,omitempty"`
+	ManualState        string           `json:"manual_state,omitempty"`
+	ManualError        string           `json:"manual_error,omitempty"`
 }
 
 type pollAssignment struct {
@@ -346,6 +401,7 @@ type pollAssignment struct {
 	job     workerJob
 	record  jobRecord
 	chunked bool
+	manual  *manualControlLease
 }
 
 type terminalReceiptFields struct {
@@ -426,7 +482,7 @@ func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCa
 		fail(w, 409, "driver ID already owned by another session")
 		return nil, false, false
 	}
-	if len(in.Capabilities) > 16 || len(in.ControllerState) > 32 {
+	if len(in.Capabilities) > 24 || len(in.ControllerState) > 32 {
 		fail(w, 400, "invalid controller metadata")
 		return nil, false, false
 	}
@@ -440,6 +496,25 @@ func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCa
 		fail(w, 400, "invalid controller settings report")
 		return nil, false, false
 	}
+	manual := s.manualControls[id]
+	if in.ControllerParserResetFresh {
+		if !in.ControllerStatusFresh || (in.ControllerState != "Idle" && in.ControllerState != "Alarm") {
+			fail(w, http.StatusBadRequest, "parser reset confirmation requires a fresh terminal controller status")
+			return nil, false, false
+		}
+		if _, quarantined := s.parserQuarantine[id]; !quarantined {
+			fail(w, http.StatusConflict, "driver has no pending parser reset quarantine")
+			return nil, false, false
+		}
+		if err := s.updateParserQuarantine(id, ""); err != nil {
+			fail(w, http.StatusInternalServerError, "could not persist parser reset confirmation")
+			return nil, false, false
+		}
+		if manual != nil {
+			manual.RequireParserReset = false
+			manual.RequireFreshStatus = true
+		}
+	}
 	recordSettings(&d, in)
 	if in.Capabilities != nil {
 		if d.Busy && !sameCapabilities(d.Capabilities, in.Capabilities) {
@@ -450,13 +525,74 @@ func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCa
 			d.Capabilities = append([]string(nil), in.Capabilities...)
 		}
 	}
-	if in.ControllerState != "" {
-		d.ControllerState = in.ControllerState
-	}
+	recordManualControllerStatus(&d, manual, in)
 	d.ID = id
 	d.Session = in.Session
 	d.CredentialID = cause.actor.ID
 	d.LastSeen = time.Now().UTC()
+	if in.ManualLease != "" {
+		if err := manualReceiptError(manual, in); err != nil {
+			fail(w, http.StatusConflict, err.Error())
+			return nil, false, false
+		}
+		if in.JobID != "" || in.State != "" || in.Acked != 0 || in.Total != 0 || in.Execution != nil || in.Error != "" {
+			fail(w, http.StatusBadRequest, "manual-control reports cannot include job progress or G-code execution data")
+			return nil, false, false
+		}
+		switch in.ManualState {
+		case manualStateRunning:
+			if manual.State != manualStateCanceling {
+				manual.State = manualStateRunning
+			}
+		case manualStateCompleted, manualStateFailed, manualStateCanceled:
+			if in.ManualState == manualStateCanceled && manual.State != manualStateCanceling {
+				fail(w, http.StatusConflict, "manual-control cancellation was not requested")
+				return nil, false, false
+			}
+			resetWasRequired := strings.Contains(in.ManualError, "parser reset cleared the partial command") || strings.Contains(in.ManualError, "manual command parser reset was not confirmed")
+			if in.ControllerState == "Idle" && (!resetWasRequired || in.ControllerParserResetFresh) && !strings.Contains(in.ManualError, "manual command parser reset was not confirmed") && s.parserQuarantine[id] != "" {
+				if err := s.updateParserQuarantine(id, ""); err != nil {
+					fail(w, http.StatusInternalServerError, "could not persist manual-control completion")
+					return nil, false, false
+				}
+			}
+			if strings.Contains(in.ManualError, "manual command parser reset was not confirmed") {
+				if err := s.updateParserQuarantine(id, in.ManualError); err != nil {
+					fail(w, http.StatusInternalServerError, "could not persist parser reset quarantine")
+					return nil, false, false
+				}
+				manual.State = manualStateInterrupted
+				manual.RequireFreshStatus = true
+				manual.RequireParserReset = true
+				d.ControllerState = ""
+				manual.Error = in.ManualError
+			} else if manualMotion(manual.Action) && in.ControllerState != "Idle" {
+				if err := s.updateParserQuarantine(id, "parser reset required: manual motion ended without confirmed Idle"); err != nil {
+					fail(w, http.StatusInternalServerError, "could not persist interrupted manual parser quarantine")
+					return nil, false, false
+				}
+				manual.State = manualStateInterrupted
+				manual.RequireFreshStatus = true
+				d.ControllerState = ""
+				manual.Error = "motion ended without a fresh Idle controller report; inspect the machine before release"
+			} else {
+				manual.State = in.ManualState
+				manual.Error = in.ManualError
+			}
+		default:
+			fail(w, http.StatusBadRequest, "invalid manual-control state")
+			return nil, false, false
+		}
+		if len(manual.Error) > 1000 {
+			manual.Error = manual.Error[:1000]
+		}
+		manual.Updated = d.LastSeen
+		manual.ExpiresAt = d.LastSeen.Add(driverTTL)
+		d.Busy = manualAssignmentActive(manual.State)
+	} else if in.ManualState != "" || in.ManualError != "" {
+		fail(w, http.StatusBadRequest, "manual state and error require a manual lease")
+		return nil, false, false
+	}
 	if in.JobID != "" {
 		j, exists := s.jobs[in.JobID]
 		if !exists || j.DriverID != id || j.Lease == "" || j.Lease != in.Lease {
@@ -545,6 +681,32 @@ func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCa
 		}
 	}
 	d.Busy = false
+	if manual != nil && manualAssignmentActive(manual.State) {
+		d.Busy = true
+		if manual.State == manualStateQueued || manual.State == manualStateAssigned && manual.Session == in.Session {
+			manual.State = manualStateAssigned
+			manual.Session = in.Session
+			manual.Updated = d.LastSeen
+			manual.ExpiresAt = d.LastSeen.Add(driverTTL)
+			s.drivers[id] = d
+			return &pollAssignment{command: "manual", manual: manual}, false, true
+		}
+		s.drivers[id] = d
+		if manual.State == manualStateCanceling {
+			return &pollAssignment{command: "manual_cancel", manual: manual}, false, true
+		}
+		if in.ManualLease != "" && manual.State == manualStateRunning {
+			return &pollAssignment{command: "manual_running", manual: manual}, false, true
+		}
+		// Do not replay an assignment after a worker session changes. Keep the
+		// driver busy until the operator inspects and releases this lease.
+		return nil, false, true
+	}
+	if s.parserQuarantine[id] != "" {
+		d.Busy = true
+		s.drivers[id] = d
+		return nil, false, true
+	}
 	for _, j := range s.jobs {
 		if j.DriverID == id && activeJob(j.State) {
 			d.Busy = true

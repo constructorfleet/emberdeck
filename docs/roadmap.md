@@ -143,6 +143,19 @@ unsupported milestone.
   override when uploaded-job bounds are unknown or outside the profile. Keep the
   issue open for broader parser coverage and a review state that can establish
   fully known in-bounds programs without guessing an initial head position.
+- [ ] [#52: Machine-preparation controls](https://github.com/constructorfleet/emberdeck/issues/52).
+  Direct GRBL workers now provide confirmed home/unlock, bounded jog, X/Y zero,
+  and laser-off frame actions through an exclusive manual lease. Wire and worker
+  tests cover `$H`, `$X`, `$J=`, jog cancel `0x85`, `G10 L20`, `M5`, frame motion,
+  no job G-code in manual polls, and fail-closed stop receipts. The browser gates
+  each action by its exact capability and controller state and requires both a
+  preparation check and an action confirmation; the operator guide includes
+  screenshots and documents homing-reset position loss. Adapter `manual_*`
+  fields from #135 remain declarations only: the worker does not expose them as
+  controls or execute adapter manual assignments. Physical stop/hold latency,
+  board qualification, and hardware safety remain unverified; #59 tracks that
+  evidence. Keep #52 in the open feature plan until that hardware behavior is
+  qualified.
 - [x] [#8: Categorized documentation navigation and UX cleanup](https://github.com/constructorfleet/emberdeck/issues/8).
   Review the deployed documentation and record a content grouping; implement
   categorized navigation and presentation improvements across the site while

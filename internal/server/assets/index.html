@@ -161,6 +161,26 @@
          <div class="section-title jobs-heading"><div><p class="eyebrow">03 / LIBRARY</p><h2 id="jobs-title">Stored programs</h2></div><div class="section-actions"><button id="refresh" class="icon-button" type="button" aria-label="Refresh jobs" title="Refresh" disabled><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7v5h-5M4 17v-5h5"></path><path d="M5.6 9a7 7 0 0 1 11.6-2L20 12M4 12l2.8 5a7 7 0 0 0 11.6-2"></path></svg></button></div></div>
         <p id="library-freshness" class="library-freshness" role="status">Connect to load the library.</p>
         <div class="driver-controls"><label for="driver-select">Connected driver</label><select id="driver-select" disabled><option value="">Connect to load drivers</option></select><span id="driver-status" class="driver-status">Drivers are not loaded.</span><span id="controller-settings" class="driver-status" role="status" hidden></span></div>
+        <section id="manual-controls" class="manual-controls" aria-labelledby="manual-controls-title">
+          <div class="manual-heading"><div><p class="eyebrow">MACHINE PREPARATION</p><h3 id="manual-controls-title">Manual controls</h3></div><span id="manual-status" class="manual-status" role="status">Select a connected driver.</span></div>
+          <label class="safety-check manual-confirmation"><input id="manual-confirmation" type="checkbox" disabled><span>I checked the machine area and will supervise every preparation move. The laser must stay off.</span></label>
+          <div class="manual-actions">
+            <button id="manual-home" class="button button-small" type="button" disabled>Home</button>
+            <button id="manual-unlock" class="button button-small" type="button" disabled>Unlock</button>
+            <button id="manual-set-zero" class="button button-small" type="button" disabled>Set X/Y zero</button>
+          </div>
+          <div class="manual-jog">
+            <label>Jog axis<select id="manual-jog-axis" disabled><option>X</option><option>Y</option><option>Z</option></select></label>
+            <label>Distance (mm)<input id="manual-jog-distance" type="number" min="-25" max="25" step="0.1" value="1" disabled></label>
+            <label>Feed (mm/min)<input id="manual-jog-feed" type="number" min="1" max="3000" step="1" value="300" disabled></label>
+            <button id="manual-jog" class="button button-small" type="button" disabled>Jog</button>
+          </div>
+          <div class="manual-frame">
+            <label for="manual-frame-job">Frame reviewed job</label><select id="manual-frame-job" disabled><option value="">Choose an in-bounds job</option></select>
+            <button id="manual-frame" class="button button-small" type="button" disabled>Frame bounds</button>
+          </div>
+          <button id="manual-release" class="button button-small button-danger" type="button" hidden>Release manual control</button>
+        </section>
         <label class="safety-check"><input id="operator-confirmation" type="checkbox" disabled><span>I have checked the program and setup, verified the machine’s interlocks, and will supervise the cut.</span></label>
         <div class="job-filters" role="search" aria-label="Filter stored programs"><label for="job-filter-name">Name</label><input id="job-filter-name" type="search" disabled maxlength="200" placeholder="Filter by name" autocomplete="off"><label for="job-filter-state">State</label><select id="job-filter-state" disabled><option value="">All states</option><option value="queued">Queued</option><option value="running,pausing,paused,resuming,canceling">Active</option><option value="completed">Completed</option><option value="failed,interrupted">Failed or interrupted</option><option value="canceled">Canceled</option></select></div>
         <div id="empty-state" class="empty-state"><span class="empty-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 15c3-7 5 7 9 0s6 7 9 0"></path></svg></span><strong>Your library is ready</strong><span>Connect to load saved programs.</span></div>

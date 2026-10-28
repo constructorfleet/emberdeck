@@ -56,7 +56,22 @@ func (s *Server) idleCommand(id string) map[string]any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	d, ok := s.drivers[id]
-	if !ok || d.ControllerSettings != nil || d.Busy {
+	if !ok {
+		return response
+	}
+	if s.parserQuarantine[id] != "" {
+		response["read_parser_reset"] = true
+		return response
+	}
+	if manual := s.manualControls[id]; manual != nil && manual.State == manualStateInterrupted && (manual.RequireFreshStatus || d.ControllerState != "Idle") {
+		if d.statusRequested.IsZero() || time.Since(d.statusRequested) >= time.Second {
+			d.statusRequested = time.Now()
+			s.drivers[id] = d
+			response["read_status"] = true
+		}
+		return response
+	}
+	if d.ControllerSettings != nil || d.Busy {
 		return response
 	}
 	if d.settingsRequested.IsZero() || time.Since(d.settingsRequested) >= settingsRequestInterval {

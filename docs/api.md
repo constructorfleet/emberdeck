@@ -265,7 +265,33 @@ separate.
 
 `GET /drivers` returns online workers, their last heartbeat time, and busy status.
 It also returns `camera_available`, a boolean that does not reveal the source
-URL or credentials. An administrator can configure a driver's optional HTTP
+URL or credentials. Workers that implement machine-preparation controls advertise
+per-action capabilities: `manual_home`, `manual_unlock`, `manual_jog`,
+`manual_set_zero`, and `manual_frame`. The console enables an action only when
+its capability is present and the reported controller state permits it.
+
+`POST /drivers/{id}/manual` queues one typed manual assignment. Every request
+requires `confirmed:true`; jog additionally requires `axis` (`X`, `Y`, or `Z`),
+`distance_mm` within ±25 mm, and `feed_mm_min` from 1 to 3000. Frame requires a
+`job_id` whose geometry review is known and in bounds. Home, jog, and frame
+require a reported `Idle` controller; unlock requires `Alarm`; setting X/Y zero
+requires `Idle`. The response includes an opaque public assignment ID, action,
+state, `laser_off:true`, and a maximum duration. The worker lease secret is never
+returned. A manual assignment reserves the driver separately from a job lease;
+job G-code is not included.
+
+`GET /drivers/{id}/manual` returns the current manual assignment, or 404 when
+none exists. `DELETE /drivers/{id}/manual` requires `{"confirmed":true}`. A
+queued assignment is released immediately; a worker-owned assignment enters
+`canceling` and must report completion before the lease clears. An interrupted
+assignment requires a fresh Idle report before release. If GRBL's parser reset
+cannot be confirmed after an ambiguous partial command write, a durable driver
+quarantine blocks job starts, manual assignments, and lease release across
+server restarts. The worker retries a soft reset and clears quarantine only
+after the GRBL restart banner and a terminal Idle or Alarm status are confirmed.
+Manual control never starts automatically after a worker reconnects.
+
+An administrator can configure a driver's optional HTTP
 camera source with `PUT /drivers/{id}/camera` and
 `{"url":"http://camera.local/mjpeg","username":"viewer","password":"secret"}`.
 Use `{}` to remove the source. The URL must not contain embedded user-info;
