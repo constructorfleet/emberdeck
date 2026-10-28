@@ -502,3 +502,23 @@ func TestEventsNameTheActingCredential(t *testing.T) {
 		}
 	}
 }
+
+func TestHistoryCompactsWhileServingAndKeepsAppending(t *testing.T) {
+	dir := t.TempDir()
+	s, err := server.OpenWithOptions(dir, "test-key", server.Options{EventLimit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	var last string
+	// Twenty uploads prune far more than the compaction threshold in-process.
+	for i := 0; i < 20; i++ {
+		last = uploadJob(t, s, "bulk.gcode", "M5")
+	}
+	if lines := countLines(t, filepath.Join(dir, "job-events.jsonl")); lines > 1+2+16 {
+		t.Fatalf("event log was not compacted while serving: %d lines", lines)
+	}
+	if events := jobEvents(t, s, last); len(events) != 1 || events[0].Seq != 20 {
+		t.Fatalf("history after compaction: %+v", events)
+	}
+}

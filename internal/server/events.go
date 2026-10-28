@@ -173,7 +173,9 @@ func truncateFile(path string, size int64) error {
 }
 
 func (h *eventHistory) open(size int64) error {
-	f, err := os.OpenFile(h.path, os.O_WRONLY|os.O_APPEND, 0600)
+	// Not O_APPEND: Windows cannot truncate an append-only handle, and
+	// rollback must truncate. Appends write at the tracked size instead.
+	f, err := os.OpenFile(h.path, os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
@@ -215,7 +217,18 @@ func (s *Server) rewriteHistory(events []JobEvent, prunedThrough int64) error {
 	if err = f.Close(); err != nil {
 		return err
 	}
+	// Windows cannot replace a file that is still open, so release the
+	// append handle first and restore it if the replacement fails.
+	if h.file != nil {
+		_ = h.file.Close()
+		h.file = nil
+	}
 	if err = os.Rename(f.Name(), h.path); err != nil {
+		if h.path != "" && h.size > 0 {
+			if reopenErr := h.open(h.size); reopenErr != nil {
+				s.storageErr = reopenErr
+			}
+		}
 		return err
 	}
 	if err := syncDirectory(s.dir); err != nil {
@@ -315,7 +328,7 @@ func (s *Server) appendEvents(events []JobEvent) (int64, error) {
 	if h.file == nil {
 		return previous, errors.New("job event history is not open")
 	}
-	_, err := h.file.Write(buf.Bytes())
+	_, err := h.file.WriteAt(buf.Bytes(), previous)
 	if err == nil {
 		err = h.file.Sync()
 	}
