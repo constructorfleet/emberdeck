@@ -3,6 +3,8 @@ package main
 import (
 	"flag"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -20,6 +22,57 @@ func TestLocalDriverLogsNameTheRealTransport(t *testing.T) {
 		if got := localDriverLabel(tc.mode, tc.tcp, tc.serial); got != tc.want {
 			t.Errorf("%s label = %q, want %q", tc.mode, got, tc.want)
 		}
+	}
+}
+
+func TestServeReadsAPIKeyFromFileEnvironmentVariable(t *testing.T) {
+	keyFile := filepath.Join(t.TempDir(), "api-key")
+	if err := os.WriteFile(keyFile, []byte("secret-from-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EMBERDECK_API_KEY", "")
+	t.Setenv("EMBERDECK_API_KEY_FILE", keyFile)
+	err := runServe([]string{"-listen", "not-an-address", "-data", t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "listen:") {
+		t.Fatalf("serve did not load API key from file before attempting listen: %v", err)
+	}
+}
+
+func TestLogFlagsReadDockerFileEnvironmentVariables(t *testing.T) {
+	levelFile := filepath.Join(t.TempDir(), "log-level")
+	if err := os.WriteFile(levelFile, []byte("debug\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EMBERDECK_LOG_LEVEL", "")
+	t.Setenv("EMBERDECK_LOG_LEVEL_FILE", levelFile)
+	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
+	level, _, err := addLogFlags(flags)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := flags.Parse(nil); err != nil {
+		t.Fatal(err)
+	}
+	if *level != "debug" {
+		t.Fatalf("log level from file = %q, want debug", *level)
+	}
+}
+
+func TestDirectEnvironmentValueTakesPrecedenceOverFile(t *testing.T) {
+	t.Setenv("EMBERDECK_API_KEY", "direct-key")
+	t.Setenv("EMBERDECK_API_KEY_FILE", filepath.Join(t.TempDir(), "missing"))
+	err := runServe([]string{"-listen", "not-an-address", "-data", t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "listen:") {
+		t.Fatalf("direct API key did not take precedence over missing file: %v", err)
+	}
+}
+
+func TestServeReportsUnreadableSecretFile(t *testing.T) {
+	t.Setenv("EMBERDECK_API_KEY", "")
+	t.Setenv("EMBERDECK_API_KEY_FILE", filepath.Join(t.TempDir(), "missing"))
+	err := runServe(nil)
+	if err == nil || !strings.Contains(err.Error(), "read EMBERDECK_API_KEY_FILE") {
+		t.Fatalf("unreadable API key file error = %v", err)
 	}
 }
 
@@ -109,7 +162,10 @@ func TestLogFlagsFallBackToEnvironment(t *testing.T) {
 	t.Setenv("EMBERDECK_LOG_LEVEL", "debug")
 	t.Setenv("EMBERDECK_LOG_FORMAT", "json")
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
-	level, format := addLogFlags(flags)
+	level, format, err := addLogFlags(flags)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := flags.Parse(nil); err != nil {
 		t.Fatal(err)
 	}

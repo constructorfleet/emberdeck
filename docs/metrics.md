@@ -49,6 +49,10 @@ it disabled and does not change normal server exposure. The endpoint is always
 `/metrics`. When `EMBERDECK_METRICS_KEY` is non-empty, scrapes require
 `Authorization: Bearer <key>`; missing or incorrect credentials receive 401.
 When unset, any client that can reach the metrics listener can scrape it.
+Set `EMBERDECK_METRICS_KEY_FILE` to a file containing the key to load it as a
+Docker secret; a non-empty `EMBERDECK_METRICS_KEY` takes precedence, and one
+trailing line ending is removed from the file value. An unreadable configured
+file stops startup with an error.
 
 Bind to loopback or a private monitoring network, restrict firewall/security
 group access to Prometheus, and use a TLS proxy or trusted tunnel across an

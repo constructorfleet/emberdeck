@@ -130,6 +130,14 @@ Choose the detail and format with flags or environment variables; flags win:
 | `-log-level` | `EMBERDECK_LOG_LEVEL` | `debug`, `info`, `warn`, `error` | `info` |
 | `-log-format` | `EMBERDECK_LOG_FORMAT` | `text`, `json` | `text` |
 
+Docker secrets are supported for every environment setting above and for
+`EMBERDECK_API_KEY` and `EMBERDECK_METRICS_KEY`: set the variable name with a
+`_FILE` suffix to the path containing its value (for example,
+`EMBERDECK_API_KEY_FILE=/run/secrets/emberdeck_api_key`). A non-empty direct
+variable takes precedence over its `_FILE` variant. One trailing line ending is
+removed from a file value. An unreadable configured file stops startup with an
+error. Command-line flags still take precedence over environment defaults.
+
 At `info`, the server logs its version, data and plugin directories, listen
 addresses, local-driver start and restarts, shutdown, every job state change
 (with job ID, name, driver, acknowledged lines, and error), and each API request

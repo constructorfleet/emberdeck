@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -62,7 +63,10 @@ func runServe(args []string) error {
 	eventLimit := flags.Int("job-event-limit", server.DefaultEventLimit, "maximum number of job history events to keep (oldest are removed first)")
 	eventRetention := flags.Duration("job-event-retention", 90*24*time.Hour, "maximum age of job history events; 0 keeps them until -job-event-limit removes them")
 	serialDTR, serialRTS := addSerialModemFlags(flags)
-	logLevel, logFormat := addLogFlags(flags)
+	logLevel, logFormat, err := addLogFlags(flags)
+	if err != nil {
+		return err
+	}
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -93,7 +97,10 @@ func runServe(args []string) error {
 	if err != nil {
 		return err
 	}
-	key := os.Getenv("EMBERDECK_API_KEY")
+	key, err := envValue("EMBERDECK_API_KEY")
+	if err != nil {
+		return err
+	}
 	if key == "" {
 		return errors.New("EMBERDECK_API_KEY is required")
 	}
@@ -120,19 +127,24 @@ func runServe(args []string) error {
 	var metricsServer *http.Server
 	var metricsServeErr chan error
 	if *metricsListenAddress != "" {
+		metricsKey, err := envValue("EMBERDECK_METRICS_KEY")
+		if err != nil {
+			_ = listener.Close()
+			return err
+		}
 		metricsListener, err := net.Listen("tcp", *metricsListenAddress)
 		if err != nil {
 			_ = listener.Close()
 			return fmt.Errorf("metrics listen: %w", err)
 		}
 		metricsServer = &http.Server{
-			Handler:           handler.MetricsHandler(os.Getenv("EMBERDECK_METRICS_KEY")),
+			Handler:           handler.MetricsHandler(metricsKey),
 			ReadHeaderTimeout: 5 * time.Second,
 			ReadTimeout:       15 * time.Second,
 			WriteTimeout:      30 * time.Second,
 			IdleTimeout:       60 * time.Second,
 		}
-		logger.Info("serving metrics", "address", metricsListener.Addr().String(), "authenticated", os.Getenv("EMBERDECK_METRICS_KEY") != "")
+		logger.Info("serving metrics", "address", metricsListener.Addr().String(), "authenticated", metricsKey != "")
 		metricsServeErr = make(chan error, 1)
 		go func() { metricsServeErr <- metricsServer.Serve(metricsListener) }()
 		defer func() { _ = metricsServer.Close() }()
@@ -234,7 +246,10 @@ func runDriver(args []string) error {
 	baud := flags.Int("baud", 115200, "serial connection baud rate")
 	serialDTR, serialRTS := addSerialModemFlags(flags)
 	listPorts := flags.Bool("list-ports", false, "list available serial ports and exit")
-	logLevel, logFormat := addLogFlags(flags)
+	logLevel, logFormat, err := addLogFlags(flags)
+	if err != nil {
+		return err
+	}
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -279,7 +294,10 @@ func runDriver(args []string) error {
 		return err
 	}
 	slog.SetDefault(logger)
-	key := os.Getenv("EMBERDECK_API_KEY")
+	key, err := envValue("EMBERDECK_API_KEY")
+	if err != nil {
+		return err
+	}
 	if key == "" {
 		return errors.New("EMBERDECK_API_KEY is required")
 	}
@@ -295,17 +313,49 @@ func runDriver(args []string) error {
 
 // addLogFlags registers -log-level and -log-format, defaulting to
 // EMBERDECK_LOG_LEVEL and EMBERDECK_LOG_FORMAT so containers can set them.
-func addLogFlags(flags *flag.FlagSet) (*string, *string) {
-	level := flags.String("log-level", envOr("EMBERDECK_LOG_LEVEL", "info"), "log level: debug, info, warn, or error (env EMBERDECK_LOG_LEVEL)")
-	format := flags.String("log-format", envOr("EMBERDECK_LOG_FORMAT", "text"), "log format: text or json (env EMBERDECK_LOG_FORMAT)")
-	return level, format
+func addLogFlags(flags *flag.FlagSet) (*string, *string, error) {
+	levelDefault, err := envOr("EMBERDECK_LOG_LEVEL", "info")
+	if err != nil {
+		return nil, nil, err
+	}
+	formatDefault, err := envOr("EMBERDECK_LOG_FORMAT", "text")
+	if err != nil {
+		return nil, nil, err
+	}
+	level := flags.String("log-level", levelDefault, "log level: debug, info, warn, or error (env EMBERDECK_LOG_LEVEL)")
+	format := flags.String("log-format", formatDefault, "log format: text or json (env EMBERDECK_LOG_FORMAT)")
+	return level, format, nil
 }
 
-func envOr(name, fallback string) string {
-	if value := os.Getenv(name); value != "" {
-		return value
+func envOr(name, fallback string) (string, error) {
+	value, err := envValue(name)
+	if err != nil {
+		return "", err
 	}
-	return fallback
+	if value != "" {
+		return value, nil
+	}
+	return fallback, nil
+}
+
+// envValue supports Docker's _FILE convention for values supplied as secrets.
+// A non-empty direct environment value takes precedence over its file variant.
+func envValue(name string) (string, error) {
+	if value := os.Getenv(name); value != "" {
+		return value, nil
+	}
+	file := os.Getenv(name + "_FILE")
+	if file == "" {
+		return "", nil
+	}
+	contents, err := os.ReadFile(file)
+	if err != nil {
+		return "", fmt.Errorf("read %s_FILE: %w", name, err)
+	}
+	value := string(contents)
+	value = strings.TrimSuffix(value, "\n")
+	value = strings.TrimSuffix(value, "\r")
+	return value, nil
 }
 
 // newLogger builds a structured logger; empty settings mean info and text.
