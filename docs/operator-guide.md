@@ -214,8 +214,12 @@ unassigned; no operation or machine settings are inferred.
 
 If a shape extends past the declared workspace, the editor explains the bounds
 error and disables both saving and generation until the dimensions are corrected.
+The preview keeps the full rectangle visible at its actual position and marks
+the overrun with a warning outline. Workspace dimensions and the laser-off
+approach coordinates appear as text below the drawing so they remain readable
+at phone widths.
 
-![Out-of-bounds rectangle with saving and generation disabled](assets/screenshots/designer-project-out-of-bounds.png)
+![Visible out-of-bounds rectangle with warning outline, readable workspace labels, and saving disabled](assets/screenshots/designer-project-out-of-bounds.png)
 
 Saved profiles and projects can be reopened, edited, and deleted. Editing a
 profile makes its projects require review against the new revision; save the

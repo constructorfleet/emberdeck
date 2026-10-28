@@ -499,18 +499,31 @@
     const x = finiteField(projectFields.x_mm), y = finiteField(projectFields.y_mm);
     const w = finiteField(projectFields.width_mm), h = finiteField(projectFields.height_mm);
     if (![W, H].every(Number.isFinite) || W <= 0 || H <= 0) return;
-    const scale = Math.min(550 / W, 290 / H);
+    const hasRectangle = [x, y, w, h].every(Number.isFinite) && w > 0 && h > 0;
+    const minX = hasRectangle ? Math.min(0, x) : 0;
+    const minY = hasRectangle ? Math.min(0, y) : 0;
+    const drawnWidth = hasRectangle ? Math.max(W, x + w) - minX : W;
+    const drawnHeight = hasRectangle ? Math.max(H, y + h) - minY : H;
+    const scale = Math.min(550 / drawnWidth, 290 / drawnHeight);
     if (!Number.isFinite(scale) || scale <= 0) return;
-    const left = 35, bottom = 325, width = W * scale, height = H * scale;
+    const left = 35 - minX * scale, bottom = 325 + minY * scale, width = W * scale, height = H * scale;
     if (![left, bottom, width, height].every(Number.isFinite)) return;
     content.append(svgElement("rect", { class: "workspace-shape", x: left, y: bottom - height, width, height }));
-    content.append(svgElement("text", { x: left + 4, y: bottom - height + 14 }, `Declared workspace · ${W} × ${H} mm`));
-    if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0 || x < 0 || y < 0 || milli(x) + milli(w) > milli(W) || milli(y) + milli(h) > milli(H)) return;
-    const px = left + x * scale, py = bottom - (y + h) * scale, pw = w * scale;
+    $("#preview-workspace-label").textContent = `Declared workspace · ${W} × ${H} mm`;
+    $("#preview-approach-label").textContent = hasRectangle
+      ? `Laser-off approach endpoint · X${x} Y${y} mm`
+      : "Laser-off approach endpoint · enter a valid nonnegative position";
+    if (!hasRectangle) return;
+    const px = 35 + (x - minX) * scale, py = bottom - (y + h) * scale, pw = w * scale;
     if (![px, py, pw].every(Number.isFinite)) return;
-    content.append(svgElement("path", { class: "engrave-path", d: `M ${px} ${bottom-y*scale} L ${px+pw} ${bottom-y*scale} L ${px+pw} ${py} L ${px} ${py} Z` }));
+    const outOfBounds = x < 0 || y < 0 || milli(x) + milli(w) > milli(W) || milli(y) + milli(h) > milli(H);
+    const preview = $("#project-preview");
+    preview.setAttribute("aria-label", outOfBounds ? "Out-of-bounds rectangle and declared workspace preview" : "Declared workspace preview in millimetres");
+    preview.querySelector("desc").textContent = outOfBounds
+      ? "The rectangle is shown at its position with the portion outside the declared workspace highlighted."
+      : "Rectangle and laser-off approach endpoint in the declared work area.";
+    content.append(svgElement("path", { class: `engrave-path${outOfBounds ? " out-of-bounds" : ""}`, d: `M ${px} ${bottom-y*scale} L ${px+pw} ${bottom-y*scale} L ${px+pw} ${py} L ${px} ${py} Z` }));
     content.append(svgElement("circle", { class: "approach-point", cx: px, cy: bottom-y*scale, r: 5 }));
-    content.append(svgElement("text", { x: left, y: 349 }, `Laser-off approach endpoint · X${x} Y${y} mm`));
   }
 
   function updateProjectValidation() {
