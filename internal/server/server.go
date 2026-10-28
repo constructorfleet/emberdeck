@@ -37,15 +37,16 @@ type Server struct {
 	jobs        map[string]jobRecord
 	// progressDirty marks in-memory progress newer than jobs.json. Progress-only
 	// reports are not written; the next durable write or Close persists them.
-	progressDirty bool
-	profiles      map[string]MachineProfile
-	projects      map[string]DesignerProject
-	cameras       map[string]cameraSource
-	cameraLastGet map[string]time.Time
-	mux           *http.ServeMux
-	metrics       *serverMetrics
-	history       eventHistory
-	logger        *slog.Logger
+	progressDirty  bool
+	profiles       map[string]MachineProfile
+	projects       map[string]DesignerProject
+	cameras        map[string]cameraSource
+	cameraLastGet  map[string]time.Time
+	manualControls map[string]*manualControlLease
+	mux            *http.ServeMux
+	metrics        *serverMetrics
+	history        eventHistory
+	logger         *slog.Logger
 }
 
 // Options configures a server beyond its data directory and API key.
@@ -105,7 +106,7 @@ func OpenWithOptions(dir, key string, options Options) (*Server, error) {
 			_ = lock.Close()
 		}
 	}()
-	s := &Server{lock: lock, drivers: make(map[string]Driver), dir: dir, key: key, plugins: plugins, profiles: make(map[string]MachineProfile), projects: make(map[string]DesignerProject), cameras: make(map[string]cameraSource), cameraLastGet: make(map[string]time.Time), mux: http.NewServeMux(), logger: defaultLogger(options.Logger)}
+	s := &Server{lock: lock, drivers: make(map[string]Driver), dir: dir, key: key, plugins: plugins, profiles: make(map[string]MachineProfile), projects: make(map[string]DesignerProject), cameras: make(map[string]cameraSource), cameraLastGet: make(map[string]time.Time), manualControls: make(map[string]*manualControlLease), mux: http.NewServeMux(), logger: defaultLogger(options.Logger)}
 	s.history.limit, s.history.retention = options.EventLimit, options.EventRetention
 	s.metrics = newServerMetrics(s)
 	defer func() {
@@ -169,6 +170,9 @@ func OpenWithOptions(dir, key string, options Options) (*Server, error) {
 	s.handleAPI("GET /api/v1/drivers", readRoles, false, s.listDrivers)
 	s.handleAPI("PUT /api/v1/drivers/{id}/camera", adminRoles, false, s.setCameraSource)
 	s.handleAPI("GET /api/v1/drivers/{id}/camera", readRoles, false, s.getCameraFrame)
+	s.handleAPI("POST /api/v1/drivers/{id}/manual", writeRoles, false, s.createManualControl)
+	s.handleAPI("GET /api/v1/drivers/{id}/manual", readRoles, false, s.getManualControl)
+	s.handleAPI("DELETE /api/v1/drivers/{id}/manual", writeRoles, false, s.releaseManualControl)
 	// Admin includes a compatibility path for the bootstrap/local worker that
 	// historically shared EMBERDECK_API_KEY. Dedicated worker keys remain scoped.
 	s.handleAPI("POST /api/v1/drivers/{id}/poll", []string{"worker", "admin"}, true, s.pollDriver)

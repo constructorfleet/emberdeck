@@ -75,6 +75,11 @@ func (s *Server) expire() error {
 	expired := []string{}
 	for id, d := range s.drivers {
 		if time.Since(d.LastSeen) > driverTTL {
+			if manual := s.manualControls[id]; manual != nil && manualAssignmentActive(manual.State) {
+				manual.State = manualStateInterrupted
+				manual.Error = "worker lease expired; inspect the machine before releasing manual control"
+				manual.Updated = time.Now().UTC()
+			}
 			for jid, j := range s.jobs {
 				if j.DriverID == id && activeJob(j.State) {
 					if jobs == nil {
@@ -207,6 +212,10 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 	d, ok := s.drivers[in.DriverID]
 	if !ok || d.Busy {
 		fail(w, 409, "driver is offline or busy")
+		return
+	}
+	if manual := s.manualControls[d.ID]; manual != nil && manualAssignmentActive(manual.State) {
+		fail(w, http.StatusConflict, "driver has an active or unresolved manual-control lease")
 		return
 	}
 	if message := settingsBlock(j, d); message != "" {
@@ -426,7 +435,7 @@ func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCa
 		fail(w, 409, "driver ID already owned by another session")
 		return nil, false, false
 	}
-	if len(in.Capabilities) > 16 || len(in.ControllerState) > 32 {
+	if len(in.Capabilities) > 24 || len(in.ControllerState) > 32 {
 		fail(w, 400, "invalid controller metadata")
 		return nil, false, false
 	}
@@ -545,6 +554,9 @@ func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCa
 		}
 	}
 	d.Busy = false
+	if manual := s.manualControls[id]; manual != nil && manualAssignmentActive(manual.State) {
+		d.Busy = true
+	}
 	for _, j := range s.jobs {
 		if j.DriverID == id && activeJob(j.State) {
 			d.Busy = true
