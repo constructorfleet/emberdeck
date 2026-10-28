@@ -45,6 +45,38 @@ func TestUploadRejectsDriverInvalidProgramWithLineNumber(t *testing.T) {
 	}
 }
 
+func TestUploadValidationDistinguishesNameContentAndBinaryErrors(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	cases := []struct {
+		name   string
+		body   string
+		field  string
+		detail string
+	}{
+		{"blank name", `{"name":"","gcode":"G21\nG90\nM5"}`, "name", "Enter a display name for this program."},
+		{"blank program", `{"name":"empty.gcode","gcode":"  \n\t"}`, "gcode", "Enter the program text."},
+		{"binary program", `{"name":"image.png","gcode":"G21\n\u0000\u0001M5"}`, "gcode", "Program must be plain text G-code without binary or control bytes."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := request(t, s, "POST", "/api/v1/jobs", tc.body, "test-key")
+			var response struct {
+				Fields map[string]string `json:"fields"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || w.Code != http.StatusBadRequest {
+				t.Fatalf("upload validation response: %d %s (%v)", w.Code, w.Body.String(), err)
+			}
+			if response.Fields[tc.field] != tc.detail {
+				t.Fatalf("field %s = %q; want %q (all fields %#v)", tc.field, response.Fields[tc.field], tc.detail, response.Fields)
+			}
+		})
+	}
+}
+
 func TestUploadedProgramReviewReportsProfileBoundsAndUnknownMotion(t *testing.T) {
 	s, err := server.Open(t.TempDir(), "test-key")
 	if err != nil {

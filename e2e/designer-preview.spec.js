@@ -27,7 +27,7 @@ test('rectangle preview keeps readable labels and shows an out-of-bounds rectang
   await page.locator('#rect-height').fill('20');
   await page.locator('#operation-feed').fill('600');
   await page.locator('#operation-power').fill('25');
-  await expect(page.locator('#project-validation')).toContainText(/outside the declared workspace/i);
+  await expect(page.locator('#project-validation')).toContainText(/extends beyond the declared workspace width/i);
 
   const preview = page.locator('#project-preview');
   const workspace = preview.locator('.workspace-shape');
@@ -48,7 +48,7 @@ test('rectangle preview keeps readable labels and shows an out-of-bounds rectang
   expect(geometry.clipped).toBe(false);
 
   await page.locator('#rect-x').fill('-5');
-  await expect(page.locator('#project-validation')).toContainText(/position must be nonnegative/i);
+  await expect(page.locator('#project-validation')).toContainText(/position cannot be negative/i);
   await expect(rectangle).toHaveCount(1);
   const negativeGeometry = await page.evaluate(() => {
     const workspace = document.querySelector('#preview-content .workspace-shape').getBoundingClientRect();

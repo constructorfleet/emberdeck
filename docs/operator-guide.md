@@ -166,6 +166,10 @@ needs no bounds override; only the supervision check is required before
 **Start**. The preview cannot establish the current head position or physical
 machine safety.
 
+Upload errors identify the display name or program content field. Binary or
+invalid text files receive a plain-text G-code message instead of an unrelated
+missing-name error.
+
 ![Uploaded G-code reviewed in bounds against the chosen profile, with no override control](assets/screenshots/operator-console-uploaded-in-bounds-review.png)
 
 An **in bounds** review does not replace checking the program and machine. For
@@ -286,6 +290,13 @@ fonts, `style` or other unsupported attributes, nested text elements such as
 unassigned; no operation or machine settings are inferred.
 
 ![Editable rectangle project with declared workspace and laser-off approach endpoint](assets/screenshots/designer-project.png)
+
+Field validation appears beside each affected control and marks it for screen
+readers. The summary lists every failing rule. Negative coordinates, extra
+decimal places, workspace overruns, feed limits, and power limits each have a
+specific message; a corrected value clears its field error.
+
+![Rectangle editor with separate X-position and precision errors linked to their fields and summarized above the form](assets/screenshots/designer-field-validation.png)
 
 An untouched new project says **Save the project to enable generation**. Once
 you change its values, the editor shows an unsaved-edits hint. The hint clears

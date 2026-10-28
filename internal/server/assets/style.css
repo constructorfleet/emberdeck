@@ -1813,3 +1813,10 @@ footer {
 }
 
 .manual-controls [hidden] { display: none; }
+
+.form-error-summary { margin: var(--space-2) 0; padding: var(--space-3); border: 1px solid var(--danger-border); background: var(--surface-inset); color: var(--danger); font-size: var(--type-xs); line-height: 1.5; }
+.form-error-summary[hidden] { display: none; }
+.field-error { display: block; margin-top: var(--space-1); color: var(--danger); font: var(--type-xs)/1.4 var(--mono); }
+.field-error[hidden] { display: none; }
+.designer-form input[aria-invalid="true"] { border-color: var(--danger) !important; }
+.designer-form input:read-only { background: var(--surface-inset) !important; border-color: var(--border) !important; color: var(--text-muted) !important; cursor: not-allowed; }

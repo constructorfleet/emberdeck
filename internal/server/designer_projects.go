@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -216,7 +217,11 @@ func validateProjectInput(w http.ResponseWriter, r *http.Request, updating bool)
 	}
 	input.Name = strings.TrimSpace(input.Name)
 	if (input.SchemaVersion != 1 && input.SchemaVersion != 2) || input.Name == "" || len(input.Name) > 120 {
-		fail(w, 400, "invalid designer project")
+		message := "Enter a project name."
+		if len(input.Name) > 120 {
+			message = "Use 120 characters or fewer."
+		}
+		failFields(w, 400, "Review the highlighted project field.", map[string]string{"name": message})
 		return input, false
 	}
 	if !parseRevisionField(input.Revision, updating, &input.ExpectedRevision) {
@@ -243,11 +248,100 @@ func validateProjectInput(w http.ResponseWriter, r *http.Request, updating bool)
 		}
 	}
 	project := DesignerProject{SchemaVersion: input.SchemaVersion, Name: input.Name, ProfileID: input.ProfileID, ProfileRevision: input.ProfileRevision, Rectangle: input.Rectangle, Operation: input.Operation, Units: input.Units, Objects: input.Objects, Operations: input.Operations}
-	if !validProjectIntrinsic(project) {
+	if input.SchemaVersion == 1 {
+		if fields := projectFieldErrors(project, nil); len(fields) > 0 {
+			failFields(w, 400, "Review the highlighted project fields.", fields)
+			return input, false
+		}
+	} else if !validVectorProjectIntrinsic(project) {
 		fail(w, 400, "rectangle or vector engraving settings are outside the declared profile limits")
 		return input, false
 	}
 	return input, true
+}
+
+// projectFieldErrors returns field-keyed messages for schema 1 projects. A nil
+// profile checks intrinsic limits only; profile-dependent workspace and laser
+// ranges are added once the selected profile revision is current.
+func projectFieldErrors(project DesignerProject, profile *MachineProfile) map[string]string {
+	if project.SchemaVersion != 1 {
+		return nil
+	}
+	fields := make(map[string]string)
+	rectangle, operation := project.Rectangle, project.Operation
+	if project.Name == "" {
+		fields["name"] = "Enter a project name."
+	} else if len(project.Name) > 120 {
+		fields["name"] = "Use 120 characters or fewer."
+	}
+	for _, field := range []struct {
+		key, label string
+		value      float64
+		positive   bool
+	}{
+		{"x_mm", "X position", rectangle.XMM, false},
+		{"y_mm", "Y position", rectangle.YMM, false},
+		{"width_mm", "Width", rectangle.WidthMM, true},
+		{"height_mm", "Height", rectangle.HeightMM, true},
+	} {
+		switch {
+		case !finite(field.value) || !validPrecision(field.value):
+			fields[field.key] = "Use at most three decimal places."
+		case field.positive && field.value <= 0:
+			fields[field.key] = field.label + " must be greater than zero."
+		case !field.positive && field.value < 0:
+			fields[field.key] = field.label + " cannot be negative."
+		case field.value > 10000:
+			fields[field.key] = field.label + " must be 10,000 mm or less."
+		}
+	}
+	if operation.Type != "vector-engrave" {
+		fields["operation"] = "Only vector engraving is supported."
+	}
+	switch {
+	case !finite(operation.FeedMMMin) || !validPrecision(operation.FeedMMMin):
+		fields["feed_mm_min"] = "Use a feed with at most three decimal places."
+	case operation.FeedMMMin <= 0:
+		fields["feed_mm_min"] = "Feed must be greater than zero."
+	case operation.FeedMMMin > 100000:
+		fields["feed_mm_min"] = "Feed must be 100,000 mm/min or less."
+	}
+	switch {
+	case !finite(operation.PowerPercent) || !validPrecision(operation.PowerPercent):
+		fields["power_percent"] = "Use a power with at most three decimal places."
+	case operation.PowerPercent <= 0 || operation.PowerPercent > 100:
+		fields["power_percent"] = "Commanded power must be greater than zero and at most 100%."
+	}
+	if profile == nil {
+		return fields
+	}
+	if _, ok := fields["x_mm"]; !ok {
+		if _, widthBad := fields["width_mm"]; !widthBad && milli(rectangle.XMM)+milli(rectangle.WidthMM) > milli(profile.WidthMM) {
+			fields["width_mm"] = "X position plus width exceeds the declared " + formatMillimetres(profile.WidthMM) + " mm workspace."
+		}
+	}
+	if _, ok := fields["y_mm"]; !ok {
+		if _, heightBad := fields["height_mm"]; !heightBad && milli(rectangle.YMM)+milli(rectangle.HeightMM) > milli(profile.HeightMM) {
+			fields["height_mm"] = "Y position plus height exceeds the declared " + formatMillimetres(profile.HeightMM) + " mm workspace."
+		}
+	}
+	if _, bad := fields["feed_mm_min"]; !bad && (operation.FeedMMMin < profile.MinFeed || operation.FeedMMMin > profile.MaxFeed) {
+		fields["feed_mm_min"] = "Feed must be from " + formatMillimetres(profile.MinFeed) + " to " + formatMillimetres(profile.MaxFeed) + " mm/min."
+	}
+	if _, bad := fields["power_percent"]; !bad && operation.PowerPercent > profile.MaxPowerPct {
+		fields["power_percent"] = "Commanded power must be greater than zero and at most " + formatMillimetres(profile.MaxPowerPct) + "%."
+	}
+	if _, bad := fields["power_percent"]; !bad && powerS(profile.MaxS, operation.PowerPercent) < 1 {
+		fields["power_percent"] = "This percentage rounds to S0; increase commanded power."
+	}
+	return fields
+}
+
+func formatMillimetres(value float64) string {
+	if value == math.Trunc(value) {
+		return strconv.FormatInt(int64(value), 10)
+	}
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
 func powerS(maxS int64, percent float64) int64 {
@@ -311,7 +405,12 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateProjectValues(input, profile); err != nil {
-		fail(w, 400, err.Error())
+		fields := projectFieldErrors(DesignerProject{SchemaVersion: input.SchemaVersion, Name: input.Name, Rectangle: input.Rectangle, Operation: input.Operation}, &profile)
+		if len(fields) == 0 {
+			fail(w, 400, err.Error())
+			return
+		}
+		failFields(w, 400, "Review the highlighted project fields.", fields)
 		return
 	}
 	projects := copyProjects(s.projects)
@@ -329,11 +428,8 @@ func validateProjectValues(input projectRequest, profile MachineProfile) error {
 		project := DesignerProject{SchemaVersion: 2, Name: input.Name, ProfileID: input.ProfileID, ProfileRevision: input.ProfileRevision, Units: input.Units, Objects: input.Objects, Operations: input.Operations}
 		return validateVectorProjectValues(project, profile, false)
 	}
-	g, op := input.Rectangle, input.Operation
-	if op.Type != "vector-engrave" || !finite(g.XMM) || !finite(g.YMM) || !finite(g.WidthMM) || !finite(g.HeightMM) || !finite(op.FeedMMMin) || !finite(op.PowerPercent) ||
-		!validPrecision(g.XMM) || !validPrecision(g.YMM) || !validPrecision(g.WidthMM) || !validPrecision(g.HeightMM) || !validPrecision(op.FeedMMMin) || !validPrecision(op.PowerPercent) ||
-		g.XMM < 0 || g.YMM < 0 || g.WidthMM <= 0 || g.HeightMM <= 0 || g.XMM > 10000 || g.YMM > 10000 || g.WidthMM > 10000 || g.HeightMM > 10000 || milli(g.XMM)+milli(g.WidthMM) > milli(profile.WidthMM) || milli(g.YMM)+milli(g.HeightMM) > milli(profile.HeightMM) ||
-		op.FeedMMMin < profile.MinFeed || op.FeedMMMin > profile.MaxFeed || op.PowerPercent <= 0 || op.PowerPercent > profile.MaxPowerPct || powerS(profile.MaxS, op.PowerPercent) < 1 {
+	project := DesignerProject{SchemaVersion: 1, Name: input.Name, ProfileID: input.ProfileID, ProfileRevision: input.ProfileRevision, Rectangle: input.Rectangle, Operation: input.Operation}
+	if fields := projectFieldErrors(project, &profile); len(fields) > 0 {
 		return errors.New("rectangle or vector engraving settings are outside the declared profile limits")
 	}
 	return nil
@@ -612,7 +708,12 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateProjectValues(input, latest); err != nil {
-		fail(w, 400, err.Error())
+		fields := projectFieldErrors(DesignerProject{SchemaVersion: input.SchemaVersion, Name: input.Name, Rectangle: input.Rectangle, Operation: input.Operation}, &latest)
+		if len(fields) == 0 {
+			fail(w, 400, err.Error())
+			return
+		}
+		failFields(w, 400, "Review the highlighted project fields.", fields)
 		return
 	}
 	now := time.Now().UTC()
