@@ -1,0 +1,14 @@
+.git
+.github
+.idea
+.vscode
+data
+deploy
+docs
+*.md
+*.log
+*.test
+*.out
+coverage*
+Dockerfile*
+compose*.yaml

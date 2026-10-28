@@ -1,0 +1,30 @@
+services:
+  emberdeck:
+    build: .
+    image: emberdeck:local
+    restart: unless-stopped
+    environment:
+      EMBERDECK_API_KEY: ${EMBERDECK_API_KEY:?Set EMBERDECK_API_KEY in the environment}
+    ports:
+      - "8080:8080"
+    volumes:
+      - emberdeck-data:/data
+    command: ["serve", "-listen", "0.0.0.0:8080", "-data", "/data"]
+
+  # Deliberate software-only demonstration; omit this profile for normal use.
+  demo:
+    profiles: ["demo"]
+    build: .
+    image: emberdeck:local
+    restart: unless-stopped
+    environment:
+      EMBERDECK_API_KEY: ${EMBERDECK_API_KEY:?Set EMBERDECK_API_KEY in the environment}
+    ports:
+      - "8080:8080"
+    volumes:
+      - emberdeck-demo-data:/data
+    command: ["serve", "-listen", "0.0.0.0:8080", "-data", "/data", "-simulate"]
+
+volumes:
+  emberdeck-data:
+  emberdeck-demo-data:
