@@ -29,6 +29,14 @@ Simulator and software checks do not qualify a physical machine. See
   plugin compatibility remain unsupported; plugins can add adapters later.
 - Hashed credentials with viewer, operator, admin, and per-device worker roles.
   Worker credentials are scoped to driver IDs and can be revoked individually.
+- Large-library job storage with per-job program files, paginated job listing
+  filtered by state, name, and driver, and a durable per-job event history with
+  operator, worker, and server sources and bounded retention.
+- Read-only controller settings verification (`$$`) for profile-generated jobs,
+  with `$32=0`/`M3` warnings for uploaded jobs.
+- Per-job start and cancel confirmation naming the job and driver.
+- Idle workers reconnect after server or network failures; all-in-one mode keeps
+  serving HTTP when its local worker fails.
 
 ## Not available or not qualified
 
@@ -41,7 +49,7 @@ Simulator and software checks do not qualify a physical machine. See
   and automatic design-to-machine configuration.
 - Universal Wi-Fi, proprietary DSP/Ruida controllers, or OctoPrint plugin
   compatibility.
-- Camera monitoring and advanced job-history filtering/pagination.
+- Camera monitoring.
 
 ## Feature request planning
 
