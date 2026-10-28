@@ -21,6 +21,7 @@ Browser → HTTP server → durable job library (single-owner file lock)
          Worker → GRBL wire connection → serial / TCP / simulator
                    
 Server dispatch → versioned preflight plugins → allow / veto
+Adapter API prototype → worker-owned lease → controller-specific protocol
 ```
 
 An optional, separately bound Prometheus listener reports server-observed job
@@ -94,10 +95,17 @@ interlocks, fire protection, or serial electrical behavior.
 
 ## Plugins and access
 
-Plugins are separate processes speaking bounded versioned JSON. This avoids Go
-shared-library ABI restrictions across operating systems. Plugins are trusted
-code with the server's OS privileges; this is not a sandbox. OctoPrint Python
-plugins are not directly compatible.
+Preflight plugins are separate processes speaking bounded versioned JSON. This
+avoids Go shared-library ABI restrictions across operating systems. They are
+trusted code with the server's OS privileges; this is not a sandbox. OctoPrint
+Python plugins are not directly compatible.
+
+The versioned in-process `driveradapter` API prototype defines discovery,
+configuration, per-device capabilities, one-start-per-session assignment
+handling, status, and capability-gated controls. It is separate from preflight
+and is not yet loaded by the server or worker. See
+[driver adapter API](plugins.md#driver-adapter-api-prototype) for the contract, simulator, concrete
+Ruida Ethernet target, and remaining integration work.
 
 Authentication is a durable credential registry, not a process-wide shared-key
 check. It stores SHA-256 secret hashes and metadata; bearer secrets are generated
