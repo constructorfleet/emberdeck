@@ -3,3 +3,6 @@
 /dist/
 *.tmp
 .DS_Store
+
+/emberdeck
+/emberdeck.exe

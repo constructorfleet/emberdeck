@@ -27,4 +27,7 @@ fixture process. Browser checks cover operator flows. None qualifies hardware.
 
 ## Current implementation
 
-Repository and delivery scaffolding only. See the roadmap for pending work.
+The authenticated HTTP API persists uploaded jobs in a private data directory.
+Mutations write and sync a temporary file before replacing the library; failed
+writes do not publish an in-memory mutation. Run one server per data directory.
+The executable and browser UI are not connected yet.
