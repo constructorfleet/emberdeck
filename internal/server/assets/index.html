@@ -7,6 +7,7 @@
   <title>EmberDeck — Job library</title>
   <link rel="icon" href="/favicon.ico" sizes="32x32">
   <link rel="stylesheet" href="/style.css">
+  <script src="/controller-settings.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -28,7 +29,7 @@
     <div id="notice" class="notice" role="alert" hidden></div>
     <section id="designer-panel" class="panel designer-panel" aria-labelledby="designer-title">
       <div class="section-title"><div><p class="eyebrow">DESIGN SOURCE</p><h2 id="designer-title">Profiles and rectangle projects</h2></div><span class="step-number">MM · GRBL</span></div>
-      <p class="designer-intro">Declare the prepared work area and edit one vector-engraved rectangle. Coordinates use the lower-left work origin; no machine settings are read or changed.</p>
+      <p class="designer-intro">Declare the prepared work area and edit one vector-engraved rectangle. Coordinates use the lower-left work origin; controller settings are read for verification but never changed.</p>
       <div id="designer-status" class="designer-status" role="status">Connect to load saved profiles and projects.</div>
       <div class="designer-columns">
         <section class="designer-section" aria-labelledby="profiles-title">
@@ -47,7 +48,7 @@
               <label>Maximum feed (mm/min)<input id="profile-max-feed" aria-label="Maximum feed (mm/min)" type="number" min="0.001" max="100000" step="0.001" required></label>
               <label>Maximum commanded power (%)<input id="profile-max-power" aria-label="Maximum commanded power (%)" type="number" min="0.001" max="100" step="0.001" required></label>
             </div>
-            <p class="hint profile-declaration">Operator declaration only. Selecting a profile does not verify the dispatch driver or work coordinates. Before Start, confirm its $30 matches this maximum, declare $31=0 and $32=1, and prepare the active lower-left work origin. EmberDeck does not query, home, zero, or change controller settings. Commanded S percentage is not a measurement of optical output.</p>
+            <p class="hint profile-declaration">Operator declaration only: set this maximum to the controller's $30, declare $31=0 and $32=1, and prepare the active lower-left work origin. Start refuses a generated job unless the driver's controller reports the same $30, $31, and $32 (read with the read-only $$ command); work coordinates are not verified. EmberDeck does not home, zero, or change controller settings. Commanded S percentage is not a measurement of optical output.</p>
             <div class="designer-actions"><button class="button button-primary" type="submit">Save profile</button><button id="cancel-profile" class="button button-small" type="button">Cancel</button></div>
           </form>
         </section>
@@ -124,7 +125,7 @@
       </section>
       <section class="panel jobs-panel" aria-labelledby="jobs-title">
         <div class="section-title jobs-heading"><div><p class="eyebrow">03 / LIBRARY</p><h2 id="jobs-title">Stored programs</h2></div><button id="refresh" class="icon-button" type="button" aria-label="Refresh jobs" title="Refresh" disabled>↻</button></div>
-        <div class="driver-controls"><label for="driver-select">Connected driver</label><select id="driver-select" disabled><option value="">Connect to load drivers</option></select><span id="driver-status" class="driver-status">Drivers are not loaded.</span></div>
+        <div class="driver-controls"><label for="driver-select">Connected driver</label><select id="driver-select" disabled><option value="">Connect to load drivers</option></select><span id="driver-status" class="driver-status">Drivers are not loaded.</span><span id="controller-settings" class="driver-status" role="status" hidden></span></div>
         <label class="safety-check"><input id="operator-confirmation" type="checkbox" disabled><span>I have checked the program and setup, verified the machine’s interlocks, and will supervise the cut.</span></label>
         <div class="job-filters" role="search" aria-label="Filter stored programs"><label for="job-filter-name">Name</label><input id="job-filter-name" type="search" disabled maxlength="200" placeholder="Filter by name" autocomplete="off"><label for="job-filter-state">State</label><select id="job-filter-state" disabled><option value="">All states</option><option value="queued">Queued</option><option value="running,pausing,paused,resuming,canceling">Active</option><option value="completed">Completed</option><option value="failed,interrupted">Failed or interrupted</option><option value="canceled">Canceled</option></select></div>
         <div id="empty-state" class="empty-state"><span class="empty-mark" aria-hidden="true">⌁</span><strong>Your library is ready</strong><span>Connect to load saved programs.</span></div>

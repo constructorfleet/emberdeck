@@ -143,12 +143,23 @@ func Open(dir, key string) (*Server, error) {
 func (s *Server) populateMissingReviews() error {
 	var jobs map[string]jobRecord
 	for id, record := range s.jobs {
-		if record.Provenance != nil || record.Review != nil {
+		if record.Provenance != nil || (record.Review != nil && record.Review.ConstantPowerM3 != nil) {
 			continue
 		}
 		gcode, err := s.readProgram(record)
 		if err != nil {
 			return fmt.Errorf("review job %s: %w", id, err)
+		}
+		if record.Review != nil {
+			// Reviews stored before the M3 check gain only that flag.
+			review := *record.Review
+			review.ConstantPowerM3 = constantPowerFlag(gcode)
+			if jobs == nil {
+				jobs = s.copyJobs()
+			}
+			record.Review = &review
+			jobs[id] = record
+			continue
 		}
 		var profile *MachineProfile
 		stale := false

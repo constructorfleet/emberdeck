@@ -32,11 +32,13 @@ type ProgramReview struct {
 	Bounds          *toolpath.Bounds `json:"bounds,omitempty"`
 	ProfileBounds   *toolpath.Bounds `json:"profile_bounds,omitempty"`
 	Warnings        []string         `json:"warnings"`
+	// ConstantPowerM3 reports an M3 (constant laser power) command.
+	ConstantPowerM3 *bool `json:"constant_power_m3,omitempty"`
 }
 
 func reviewProgram(source string, profile *MachineProfile, stale bool) ProgramReview {
 	program := toolpath.Parse(source)
-	review := ProgramReview{BoundsStatus: "unknown", Warnings: append([]string{}, program.Warnings...)}
+	review := ProgramReview{BoundsStatus: "unknown", Warnings: append([]string{}, program.Warnings...), ConstantPowerM3: constantPowerFlag(source)}
 	if bounds, ok := toolpath.ProgramBounds(program); ok {
 		review.Bounds = &bounds
 	}
