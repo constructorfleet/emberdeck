@@ -1,0 +1,28 @@
+[Unit]
+Description=EmberDeck controller driver worker
+After=network-online.target
+Wants=network-online.target
+# Never stop restarting: an idle worker that cannot reach the server retries
+# in-process, and a fail-closed exit is restarted with a fresh session.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=emberdeck
+Group=emberdeck
+# Serial controllers are usually owned by dialout; harmless for TCP workers.
+SupplementaryGroups=dialout
+# Must define EMBERDECK_API_KEY, EMBERDECK_SERVER_URL, EMBERDECK_DRIVER_ID, and
+# EMBERDECK_DRIVER_CONNECTION (for example "-serial /dev/ttyUSB0 -baud 115200"
+# or "-tcp 192.0.2.40:23").
+EnvironmentFile=/etc/emberdeck/driver.env
+ExecStart=/usr/local/bin/emberdeck driver -server ${EMBERDECK_SERVER_URL} -id ${EMBERDECK_DRIVER_ID} $EMBERDECK_DRIVER_CONNECTION
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

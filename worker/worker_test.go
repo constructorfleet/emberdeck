@@ -79,13 +79,267 @@ func TestRunRetriesTerminalAndNeverResendsCompletedLease(t *testing.T) {
 	}
 }
 
-func TestRunFailsClosedOnPollError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "duplicate", http.StatusConflict) }))
+func TestRunRejectsBadCredentialsWithoutConnecting(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "unauthorized", http.StatusUnauthorized) }))
 	defer server.Close()
 	called := false
-	err := Run(context.Background(), server.URL, "key", "laser", func(context.Context) (io.ReadWriteCloser, error) { called = true; return driver.NewSimulator(), nil })
+	err := RunWithOptions(context.Background(), server.URL, "key", "laser", func(context.Context) (io.ReadWriteCloser, error) { called = true; return driver.NewSimulator(), nil }, fastOptions(nil))
 	if err == nil || called {
 		t.Fatalf("err=%v connector called=%v", err, called)
+	}
+}
+
+func fastOptions(logs *logRecorder) Options {
+	options := Options{RetryMin: 5 * time.Millisecond, RetryMax: 20 * time.Millisecond}
+	if logs != nil {
+		options.Logf = logs.Logf
+	}
+	return options
+}
+
+type logRecorder struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (l *logRecorder) Logf(format string, args ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.lines = append(l.lines, fmt.Sprintf(format, args...))
+}
+
+func (l *logRecorder) matching(fragment string) []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var result []string
+	for _, line := range l.lines {
+		if strings.Contains(line, fragment) {
+			result = append(result, line)
+		}
+	}
+	return result
+}
+
+func pollSession(t *testing.T, r *http.Request) map[string]any {
+	t.Helper()
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		t.Error(err)
+	}
+	return body
+}
+
+func TestIdleWorkerRetriesPollErrorsWithFreshSessionsAndLogsEachAttempt(t *testing.T) {
+	var mu sync.Mutex
+	sessions := []string{}
+	recovered := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := pollSession(t, r)
+		mu.Lock()
+		defer mu.Unlock()
+		sessions = append(sessions, body["session"].(string))
+		switch len(sessions) {
+		case 1, 2, 3:
+			http.Error(w, "upgrading", http.StatusBadGateway)
+		case 4:
+			close(recovered)
+			io.WriteString(w, `{"command":"idle"}`)
+		default:
+			io.WriteString(w, `{"command":"idle"}`)
+		}
+	}))
+	defer server.Close()
+	logs := &logRecorder{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- RunWithOptions(ctx, server.URL, "key", "laser", func(context.Context) (io.ReadWriteCloser, error) {
+			t.Error("idle worker opened the controller")
+			return driver.NewSimulator(), nil
+		}, fastOptions(logs))
+	}()
+	select {
+	case <-recovered:
+	case err := <-done:
+		t.Fatalf("idle worker exited after a poll error: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("idle worker did not recover")
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("worker exit = %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	unique := map[string]bool{}
+	for _, session := range sessions[:4] {
+		unique[session] = true
+	}
+	if len(unique) != 4 {
+		t.Fatalf("each retry must use a fresh session: %v", sessions)
+	}
+	if attempts := logs.matching("retry"); len(attempts) != 3 || !strings.Contains(attempts[0], "502") {
+		t.Fatalf("retry logs = %q", logs.lines)
+	}
+}
+
+func TestIdleWorkerSessionConflictResolvesAfterTTL(t *testing.T) {
+	const ttl = 150 * time.Millisecond
+	var mu sync.Mutex
+	owner, lastSeen := "previous-process", time.Now()
+	conflicts := 0
+	registered := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session := pollSession(t, r)["session"].(string)
+		mu.Lock()
+		defer mu.Unlock()
+		if time.Since(lastSeen) > ttl {
+			owner = ""
+		}
+		if owner != "" && owner != session {
+			conflicts++
+			http.Error(w, "driver ID already owned by another session", http.StatusConflict)
+			return
+		}
+		if owner == "" {
+			select {
+			case registered <- session:
+			default:
+			}
+		}
+		owner, lastSeen = session, time.Now()
+		io.WriteString(w, `{"command":"idle"}`)
+	}))
+	defer server.Close()
+	logs := &logRecorder{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- RunWithOptions(ctx, server.URL, "key", "laser", func(context.Context) (io.ReadWriteCloser, error) { return driver.NewSimulator(), nil }, fastOptions(logs))
+	}()
+	select {
+	case session := <-registered:
+		if session == "previous-process" {
+			t.Fatal("worker reused a foreign session")
+		}
+	case err := <-done:
+		t.Fatalf("worker exited on session conflict: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("session conflict did not resolve")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if conflicts == 0 || len(logs.matching("409")) != conflicts {
+		t.Fatalf("conflicts=%d logs=%q", conflicts, logs.lines)
+	}
+}
+
+// holdingController answers status queries but never acknowledges a program
+// line, so the assignment stays active until the worker closes the wire.
+func holdingController(closed chan<- struct{}) io.ReadWriteCloser {
+	client, peer := net.Pipe()
+	go func() {
+		defer close(closed)
+		defer peer.Close()
+		buffer := make([]byte, 64)
+		state := "Idle" // preflight requires Idle before program bytes
+		for {
+			n, err := peer.Read(buffer)
+			if err != nil {
+				return
+			}
+			if strings.Contains(string(buffer[:n]), "?") {
+				io.WriteString(peer, "<"+state+"|MPos:0,0,0>\n")
+				state = "Run"
+			}
+		}
+	}()
+	return client
+}
+
+func TestWorkerWithActiveLeaseFailsClosedOnReportError(t *testing.T) {
+	var mu sync.Mutex
+	pollsAfterFailure, failed := 0, false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := pollSession(t, r)
+		mu.Lock()
+		defer mu.Unlock()
+		if failed {
+			pollsAfterFailure++
+		}
+		if body["state"] == "running" {
+			failed = true
+			http.Error(w, "proxy restarting", http.StatusBadGateway)
+			return
+		}
+		io.WriteString(w, `{"command":"run","lease":"lease-a","job":{"id":"job-a","gcode":"G1 X1\nG1 X2"}}`)
+	}))
+	defer server.Close()
+	closed := make(chan struct{})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := RunWithOptions(ctx, server.URL, "key", "laser", func(context.Context) (io.ReadWriteCloser, error) { return holdingController(closed), nil }, fastOptions(nil))
+	if err == nil || errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "progress report") {
+		t.Fatalf("active lease must fail closed, got %v", err)
+	}
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("controller connection left open after fail-closed exit")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if pollsAfterFailure != 0 {
+		t.Fatalf("worker sent %d requests after failing closed", pollsAfterFailure)
+	}
+}
+
+func TestSuperviseRestartsWithFreshSessionAfterFailClosedExit(t *testing.T) {
+	var mu sync.Mutex
+	sessions := map[string]bool{}
+	assigned := false
+	restarted := make(chan struct{})
+	var once sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := pollSession(t, r)
+		mu.Lock()
+		defer mu.Unlock()
+		sessions[body["session"].(string)] = true
+		if body["state"] == "running" {
+			http.Error(w, "proxy restarting", http.StatusBadGateway)
+			return
+		}
+		if !assigned {
+			assigned = true
+			io.WriteString(w, `{"command":"run","lease":"lease-s","job":{"id":"job-s","gcode":"G1 X1\nG1 X2"}}`)
+			return
+		}
+		if len(sessions) >= 2 {
+			once.Do(func() { close(restarted) })
+		}
+		io.WriteString(w, `{"command":"idle"}`)
+	}))
+	defer server.Close()
+	logs := &logRecorder{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Supervise(ctx, server.URL, "key", "laser", func(context.Context) (io.ReadWriteCloser, error) { return holdingController(make(chan struct{})), nil }, fastOptions(logs))
+	}()
+	select {
+	case <-restarted:
+	case err := <-done:
+		t.Fatalf("supervisor exited: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatalf("worker was not restarted; logs=%q", logs.lines)
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("supervisor exit = %v", err)
+	}
+	if len(logs.matching("progress report")) == 0 {
+		t.Fatalf("failure was not logged: %q", logs.lines)
 	}
 }
 

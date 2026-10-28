@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	mathrand "math/rand/v2"
 	"net/http"
 	"strings"
 	"sync"
@@ -24,7 +26,65 @@ const (
 	pollInterval   = time.Second
 	reportInterval = time.Second
 	requestTimeout = 10 * time.Second
+
+	defaultRetryMin = time.Second
+	defaultRetryMax = 30 * time.Second
 )
+
+// Options tunes how a worker reconnects. The zero value uses production
+// defaults.
+type Options struct {
+	// RetryMin is the base delay before the first retry after a failed idle
+	// poll. Each further failure doubles it up to RetryMax. The actual delay
+	// is jittered uniformly between half and all of the base. Default 1s.
+	RetryMin time.Duration
+	// RetryMax caps the retry base delay. Default 30s.
+	RetryMax time.Duration
+	// Logf receives one line per retry, reconnection, and supervised restart.
+	// Default log.Printf.
+	Logf func(format string, args ...any)
+}
+
+func (o Options) normalized() Options {
+	if o.RetryMin <= 0 {
+		o.RetryMin = defaultRetryMin
+	}
+	if o.RetryMax <= 0 {
+		o.RetryMax = defaultRetryMax
+	}
+	if o.RetryMax < o.RetryMin {
+		o.RetryMax = o.RetryMin
+	}
+	if o.Logf == nil {
+		o.Logf = log.Printf
+	}
+	return o
+}
+
+// backoff doubles a base delay per failure and returns it with equal jitter,
+// so restarted workers do not reconnect in lockstep.
+type backoff struct {
+	min, max, base time.Duration
+}
+
+func (b *backoff) next() time.Duration {
+	if b.base < b.min {
+		b.base = b.min
+	}
+	base := b.base
+	b.base = min(base*2, b.max)
+	half := base / 2
+	return half + mathrand.N(base-half+1)
+}
+
+func (b *backoff) reset() { b.base = 0 }
+
+// permanent reports poll failures that a retry cannot fix: a malformed
+// request, a rejected API key, or a forbidden driver ID.
+func permanent(err error) bool {
+	var statusErr *statusError
+	return errors.As(err, &statusErr) && (statusErr.code == http.StatusBadRequest || statusErr.code == http.StatusUnauthorized || statusErr.code == http.StatusForbidden)
+}
 
 // Connector opens the worker's sole controller wire connection.
 type Connector func(context.Context) (io.ReadWriteCloser, error)
@@ -201,13 +261,27 @@ func cloneExecution(source toolpath.Execution) toolpath.Execution {
 	return result
 }
 
-// Run polls the server using one unique session per process. It returns on
-// cancellation or any poll/protocol error. A failed poll is fail-closed: an
-// active stream is canceled and no further job commands are sent.
+// Run is RunWithOptions with default Options.
 func Run(ctx context.Context, serverURL, key, id string, connect Connector) error {
-	if ctx == nil || connect == nil || strings.TrimSpace(serverURL) == "" || key == "" || id == "" {
-		return errors.New("worker: context, server URL, key, driver ID, and connector are required")
+	return RunWithOptions(ctx, serverURL, key, id, connect, Options{})
+}
+
+// RunWithOptions polls the server with one unique session at a time.
+//
+// While idle, a failed poll (network error, server restart, proxy error, or a
+// 409 session conflict left by a previous process) is retried with jittered
+// exponential backoff and a fresh session; each attempt is logged. HTTP 400,
+// 401, and 403 are configuration errors and are returned.
+//
+// While holding an active lease the worker fails closed: a failed progress
+// report cancels the stream, closes the controller, and returns an error
+// without further job commands. It also returns on cancellation or a protocol
+// error.
+func RunWithOptions(ctx context.Context, serverURL, key, id string, connect Connector, options Options) error {
+	if err := validArguments(ctx, serverURL, key, id, connect); err != nil {
+		return err
 	}
+	options = options.normalized()
 	session, err := newSession()
 	if err != nil {
 		return fmt.Errorf("worker: create session: %w", err)
@@ -215,6 +289,8 @@ func Run(ctx context.Context, serverURL, key, id string, connect Connector) erro
 	endpoint := strings.TrimRight(serverURL, "/") + "/api/v1/drivers/" + id + "/poll"
 	client := &http.Client{Timeout: requestTimeout}
 	completed := make(map[string]progress)
+	retry := backoff{min: options.RetryMin, max: options.RetryMax}
+	failures := 0
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -222,7 +298,27 @@ func Run(ctx context.Context, serverURL, key, id string, connect Connector) erro
 		var assignment assignment
 		err := post(ctx, client, endpoint, key, pollRequest{Session: session, Capabilities: []string{"pause_resume"}}, &assignment)
 		if err != nil {
-			return fmt.Errorf("worker: poll: %w", err)
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if permanent(err) {
+				return fmt.Errorf("worker: poll: %w", err)
+			}
+			failures++
+			delay := retry.next()
+			options.Logf("worker %s: idle poll failed (attempt %d): %v; retrying with a new session in %s", id, failures, err, delay.Round(time.Millisecond))
+			if err := wait(ctx, delay); err != nil {
+				return err
+			}
+			if session, err = newSession(); err != nil {
+				return fmt.Errorf("worker: create session: %w", err)
+			}
+			continue
+		}
+		if failures > 0 {
+			options.Logf("worker %s: reconnected after %d failed polls", id, failures)
+			failures = 0
+			retry.reset()
 		}
 		switch assignment.Command {
 		case "idle":
@@ -266,6 +362,41 @@ func Run(ctx context.Context, serverURL, key, id string, connect Connector) erro
 			return fmt.Errorf("worker: unknown server command %q", assignment.Command)
 		}
 	}
+}
+
+// Supervise runs the worker until ctx ends. When the worker stops with an
+// error, including a fail-closed exit from an active lease, the failure is
+// logged and the worker restarts with a new session after jittered backoff.
+// The server marks the driver offline and interrupts its active job when the
+// old session's heartbeat expires; restarted workers never replay a lease.
+func Supervise(ctx context.Context, serverURL, key, id string, connect Connector, options Options) error {
+	if err := validArguments(ctx, serverURL, key, id, connect); err != nil {
+		return err
+	}
+	options = options.normalized()
+	retry := backoff{min: options.RetryMin, max: options.RetryMax}
+	for {
+		started := time.Now()
+		err := RunWithOptions(ctx, serverURL, key, id, connect, options)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if time.Since(started) > options.RetryMax {
+			retry.reset()
+		}
+		delay := retry.next()
+		options.Logf("worker %s: stopped: %v; driver offline, restarting with a new session in %s", id, err, delay.Round(time.Millisecond))
+		if err := wait(ctx, delay); err != nil {
+			return err
+		}
+	}
+}
+
+func validArguments(ctx context.Context, serverURL, key, id string, connect Connector) error {
+	if ctx == nil || connect == nil || strings.TrimSpace(serverURL) == "" || key == "" || id == "" {
+		return errors.New("worker: context, server URL, key, driver ID, and connector are required")
+	}
+	return nil
 }
 
 func runJob(ctx context.Context, client *http.Client, endpoint, key, session string, a assignment, connect Connector) (progress, error) {

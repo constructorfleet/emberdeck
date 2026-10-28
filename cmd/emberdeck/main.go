@@ -100,11 +100,11 @@ func runServe(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	workerCtx, cancelWorker := context.WithCancel(ctx)
+	defer cancelWorker()
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- httpServer.Serve(listener) }()
 	mode := connectionMode(*simulate, *tcpAddress, *serialPort)
 	var workerErr chan error
-	workerFinished := false
 	if mode != "" {
 		workerErr = make(chan error, 1)
 		endpoint := serverURL(listener.Addr())
@@ -112,34 +112,39 @@ func runServe(args []string) error {
 		if mode == "simulate" {
 			id = "simulator"
 		}
+		label := localDriverLabel(mode, *tcpAddress, *serialPort)
 		connect := connectionConnector(mode, *tcpAddress, *serialPort, *baud)
+		logf := func(format string, args ...any) { log.Printf(label+": "+format, args...) }
 		go func() {
-			workerErr <- worker.Run(workerCtx, endpoint, key, id, connect)
+			// A local worker failure marks the driver offline (its heartbeat
+			// expires) and restarts it; it never stops the HTTP server.
+			workerErr <- worker.Supervise(workerCtx, endpoint, key, id, connect, worker.Options{Logf: logf})
+		}()
+		defer func() {
+			cancelWorker()
+			if workerErr == nil {
+				return
+			}
+			if err := <-workerErr; err != nil && !errors.Is(err, context.Canceled) {
+				logf("%v", err)
+			}
 		}()
 	}
-	defer func() {
-		cancelWorker()
-		if workerErr != nil && !workerFinished {
-			if err := <-workerErr; err != nil && !errors.Is(err, context.Canceled) {
-				log.Printf("driver worker: %v", err)
+	for waiting := true; waiting; {
+		select {
+		case err := <-serveErr:
+			if errors.Is(err, http.ErrServerClosed) {
+				return nil
+			}
+			return fmt.Errorf("serve HTTP: %w", err)
+		case <-ctx.Done():
+			waiting = false
+		case err := <-workerErr:
+			workerErr = nil
+			if err != nil && !errors.Is(err, context.Canceled) {
+				log.Printf("%s stopped: %v; driver offline, HTTP server still running", localDriverLabel(mode, *tcpAddress, *serialPort), err)
 			}
 		}
-	}()
-	select {
-	case err := <-serveErr:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
-		return fmt.Errorf("serve HTTP: %w", err)
-	case <-ctx.Done():
-	case err := <-workerErr:
-		workerFinished = true
-		if err != nil && !errors.Is(err, context.Canceled) {
-			cancelWorker()
-			_ = httpServer.Close()
-			return fmt.Errorf("simulated driver: %w", err)
-		}
-		return nil
 	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -234,6 +239,18 @@ func connectionMode(simulate bool, tcpAddress, serialPort string) string {
 		return "serial"
 	default:
 		return ""
+	}
+}
+
+// localDriverLabel names the all-in-one driver's real transport for logs.
+func localDriverLabel(mode, tcpAddress, serialPort string) string {
+	switch mode {
+	case "tcp":
+		return "TCP driver " + tcpAddress
+	case "serial":
+		return "serial driver " + serialPort
+	default:
+		return "simulated driver"
 	}
 }
 

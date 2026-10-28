@@ -25,6 +25,25 @@ services:
       - emberdeck-demo-data:/data
     command: ["serve", "-listen", "0.0.0.0:8080", "-data", "/data", "-simulate"]
 
+  # Remote controller worker. Enable with `--profile driver`; see
+  # docs/deployment.md. EMBERDECK_CONTROLLER_TCP is required for this profile;
+  # without it the worker exits with a usage error and keeps restarting.
+  driver:
+    profiles: ["driver"]
+    build: .
+    image: emberdeck:local
+    restart: always
+    environment:
+      EMBERDECK_API_KEY: ${EMBERDECK_API_KEY:?Set EMBERDECK_API_KEY in the environment}
+    command:
+      - driver
+      - -server
+      - ${EMBERDECK_SERVER_URL:-http://emberdeck:8080}
+      - -id
+      - ${EMBERDECK_DRIVER_ID:-bench}
+      - -tcp
+      - ${EMBERDECK_CONTROLLER_TCP:-}
+
 volumes:
   emberdeck-data:
   emberdeck-demo-data:
