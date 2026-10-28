@@ -40,7 +40,9 @@ The controller-settings spec checks that the console shows the simulator's
 `max_s` differs from the simulator's `$30`, verifies the row lists the
 mismatch, and verifies **Start** is refused with 409 and the field-by-field
 message while the job stays queued. It also checks the `M3` constant-power
-warning on an uploaded program.
+warning on an uploaded program, shown on the row and in the Start
+confirmation dialog, and a route-substituted `$32=0` driver report that warns
+on an uploaded program.
 
 ## Run locally
 

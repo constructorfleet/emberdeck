@@ -106,3 +106,24 @@ test('uploaded M3 program warns about constant laser power before Start', async 
   await expect(dialog).toBeHidden();
   await expect(row).toContainText(/queued/i);
 });
+
+test('uploaded job warns when the selected driver reports $32=0', async ({ page }) => {
+  // The simulator reports $32=1; substitute a laser-mode-off report.
+  await page.route('**/api/v1/drivers', async (route) => {
+    const response = await route.fetch();
+    const drivers = await response.json();
+    for (const driver of drivers) {
+      if (driver.controller_settings) driver.controller_settings['$32'] = 0;
+    }
+    await route.fulfill({ response, json: drivers });
+  });
+  await connect(page);
+  await expect(page.locator('#controller-settings')).toContainText('$32=0 (laser mode)', { timeout: 15000 });
+  const name = `laser-mode-off-${test.info().retry}-${Date.now()}.gcode`;
+  await api(page, '/api/v1/jobs', { name, gcode: 'G21\nG90\nM4 S100\nG1 X1 F100\nM5\n' });
+  await page.getByLabel('Name', { exact: true }).fill(name);
+  const row = jobRow(page, name);
+  await expect(row).toContainText(/queued/i);
+  await expect(row.locator('.laser-mode-warning')).toHaveText(/reports \$32=0 \(laser mode off\)/);
+  await expect(row.locator('.laser-mode-warning')).toHaveCount(1);
+});
