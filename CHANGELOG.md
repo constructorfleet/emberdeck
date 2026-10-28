@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.14.0](https://github.com/constructorfleet/emberdeck/compare/v0.13.0...v0.14.0) (2026-10-28)
+
+
+### Features
+
+* **driveradapter:** declare manual control capabilities ([#135](https://github.com/constructorfleet/emberdeck/issues/135)) ([30c9117](https://github.com/constructorfleet/emberdeck/commit/30c9117f81f92e80ffdb096965b80dfcbc2c2526))
+
+
+### Bug Fixes
+
+* enrich project and job list context ([#138](https://github.com/constructorfleet/emberdeck/issues/138)) ([1a78923](https://github.com/constructorfleet/emberdeck/commit/1a789236887c7f3b6a677d79f59d5674cf11167b))
+
 ## [0.13.0](https://github.com/constructorfleet/emberdeck/compare/v0.12.0...v0.13.0) (2026-10-28)
 
 
