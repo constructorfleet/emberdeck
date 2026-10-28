@@ -370,13 +370,23 @@
   function renderProjects() {
     const list = $("#project-list");
     list.replaceChildren();
-    for (const project of projects.filter((candidate) => candidate.schema_version === 1)) {
+    const savedProjects = projects.filter((candidate) => candidate.schema_version === 1);
+    $("#project-empty").hidden = savedProjects.length > 0;
+    for (const project of savedProjects) {
       const row = document.createElement("li");
+      row.dataset.profileId = project.profile_id;
       const label = document.createElement("strong");
-      label.textContent = `${project.name} · r${project.revision}`;
+      const profile = profiles.find((candidate) => candidate.id === project.profile_id);
+      label.textContent = `${project.name} · ${profile?.name || "Missing profile"} · r${project.profile_revision}`;
+      if (project.profile_stale || !profile || profile.revision !== project.profile_revision) {
+        const stale = document.createElement("span");
+        stale.className = "stale-badge";
+        stale.textContent = "Needs review";
+        label.append(" ", stale);
+      }
       const actions = document.createElement("div");
       actions.className = "designer-actions";
-      const reopen = button(`Reopen ${project.name}`, "button button-small", () => openSavedProject(project.id));
+      const reopen = button("Reopen", "button button-small", () => openSavedProject(project.id), `Reopen project ${project.name}`);
       reopen.disabled = !serverAvailable;
       const remove = button("Delete", "button button-small button-danger", () => deleteProject(project.id, project.name), `Delete project ${project.name}`);
       remove.disabled = !serverAvailable;
@@ -569,7 +579,11 @@
     const project = projects.find((candidate) => candidate.id === id);
     if (!project) return;
     const profile = profiles.find((candidate) => candidate.id === project.profile_id);
-    if (profile) $("#profile-select").value = profile.id;
+    const priorProfile = $("#profile-select").value;
+    if (profile) {
+      $("#profile-select").value = profile.id;
+      if (priorProfile !== profile.id) setDesignerStatus(`Switched to profile ${profile.name} to reopen ${project.name}.`);
+    }
     fillProject(project);
     $("#project-form").scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
@@ -1203,17 +1217,31 @@
   function renderVectorProjects() {
     const list = $("#vector-project-list");
     list.replaceChildren();
-    projects.filter((project) => project.schema_version === 2).forEach((project) => {
+    const savedProjects = projects.filter((project) => project.schema_version === 2);
+    $("#vector-project-empty").hidden = savedProjects.length > 0;
+    savedProjects.forEach((project) => {
       const row = document.createElement("li");
+      row.dataset.profileId = project.profile_id;
       const label = document.createElement("strong");
-      label.textContent = `${project.name} · r${project.revision} · ${project.objects.length} shapes`;
+      const profile = profiles.find((candidate) => candidate.id === project.profile_id);
+      label.textContent = `${project.name} · ${profile?.name || "Missing profile"} · r${project.profile_revision} · ${project.objects.length} shapes`;
+      if (project.profile_stale || !profile || profile.revision !== project.profile_revision) {
+        const stale = document.createElement("span");
+        stale.className = "stale-badge";
+        stale.textContent = "Needs review";
+        label.append(" ", stale);
+      }
       const actions = document.createElement("div"); actions.className = "designer-actions";
-      const reopen = button(`Reopen vector ${project.name}`, "button button-small", () => {
+      const reopen = button("Reopen", "button button-small", () => {
         const profile = profiles.find((candidate) => candidate.id === project.profile_id);
-        if (profile) $("#profile-select").value = profile.id;
+        const priorProfile = $("#profile-select").value;
+        if (profile) {
+          $("#profile-select").value = profile.id;
+          if (priorProfile !== profile.id) setDesignerStatus(`Switched to profile ${profile.name} to reopen ${project.name}.`);
+        }
         fillVectorProject(project);
         $("#vector-form").scrollIntoView({ behavior: "smooth", block: "nearest" });
-      });
+      }, `Reopen vector project ${project.name}`);
       reopen.disabled = !serverAvailable;
       const remove = button("Delete", "button button-small button-danger", () => deleteVectorProject(project.id, project.name), `Delete vector project ${project.name}`);
       remove.disabled = !serverAvailable;
@@ -1574,6 +1602,12 @@
       if (job.state === "running" || job.state === "canceling" || job.total > 0) details.push(`${job.acked || 0} / ${job.total || 0} lines`);
       state.textContent = details.join(" · ");
       info.append(title, state);
+      const metadata = document.createElement("span");
+      const created = new Date(job.created);
+      const createdLabel = Number.isNaN(created.getTime()) ? "Created time unavailable" : `Created ${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(created)}`;
+      const sizeLabel = `${new Intl.NumberFormat().format(job.size || 0)} bytes`;
+      metadata.textContent = `${createdLabel} · ${sizeLabel} · ${job.provenance ? "Generated" : "Uploaded"}`;
+      info.append(metadata);
       window.EmberDeckJobHistory?.appendTimes(info, job);
       if (job.controller_state) {
         const controller = document.createElement("span");

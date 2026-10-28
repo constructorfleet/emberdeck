@@ -50,7 +50,7 @@ test('editable monoline text saves, reopens, generates engraving geometry, and d
 
   await page.reload();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
-  await page.getByRole('button', { name: `Reopen vector ${projectName}` }).click();
+  await page.getByRole('button', { name: `Reopen vector project ${projectName}` }).click();
   await expect(page.locator('#vector-text-content')).toHaveValue('Q7');
   await expect(page.locator('#vector-text-size')).toHaveValue('7');
   await expect(page.locator('#vector-preview-content .vector-path')).toHaveCount(1);

@@ -61,6 +61,7 @@
         <section class="designer-section" aria-labelledby="projects-title">
           <div class="designer-heading"><h3 id="projects-title">Rectangle projects</h3><button id="new-project" class="button button-small" type="button" disabled>New rectangle project</button></div>
           <ul id="project-list" class="project-list" aria-label="Saved rectangle projects"></ul>
+          <p id="project-empty" class="list-empty" hidden>No rectangle projects yet. Choose <strong>New rectangle project</strong> to create one.</p>
           <form id="project-form" class="designer-form" hidden>
             <h4 id="project-form-title">New rectangle project</h4>
             <label for="project-name">Project name</label><input id="project-name" maxlength="120" required>
@@ -87,6 +88,7 @@
       <section class="designer-section vector-section" aria-labelledby="vector-projects-title">
         <div class="designer-heading"><div><h3 id="vector-projects-title">Multi-path vector projects</h3><p class="hint">Create editable rectangle, ellipse, and line paths. Add ordered engraving or cutting operations, then assign each shape.</p></div><button id="new-vector-project" class="button button-small" type="button" disabled>New vector project</button></div>
         <ul id="vector-project-list" class="project-list" aria-label="Saved multi-path vector projects"></ul>
+        <p id="vector-project-empty" class="list-empty" hidden>No vector projects yet. Choose <strong>New vector project</strong> to create one.</p>
         <form id="vector-form" class="designer-form" hidden>
           <h4 id="vector-form-title">New vector project</h4>
           <label for="vector-name">Project name</label><input id="vector-name" maxlength="120" required>

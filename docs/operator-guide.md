@@ -45,7 +45,7 @@ do not replace it.
 
 Select a screenshot to open the full-size image.
 
-![Stored program library filters for narrowing jobs by name and state](assets/screenshots/operator-console-library.png)
+![Stored job row shows its creation time, byte size, and uploaded source](assets/screenshots/operator-console-library.png)
 
 ## Open the designer
 
@@ -75,9 +75,9 @@ shows these controls independently from design sources.
 | Area | Controls | What they do |
 | --- | --- | --- |
 | Machine profiles | **New profile**, **Edit profile**, **Delete profile** | Store the declared GRBL work area and limits used by the rectangle editor. |
-| Design projects | **New rectangle project** or **New vector project**, **Reopen**, **Save**, **Generate queued job**, **Delete** | Edit a v1 rectangle engraving source or a v2 multi-path design with ordered engraving/cutting layers and editable monoline text engraving, preview its declared envelope, or create a separate queued program. |
+| Design projects | **New rectangle project** or **New vector project**, **Reopen**, **Save**, **Generate queued job**, **Delete** | Each saved project lists its machine profile and saved profile revision. **Needs review** marks projects whose profile has since changed or disappeared. Reopening selects the project's profile and announces a profile switch. Empty lists explain how to create a project. Edit a v1 rectangle engraving source or a v2 multi-path design with ordered engraving/cutting layers and editable monoline text engraving, preview its declared envelope, or create a separate queued program. |
 | Add a program | File chooser, display name, profile selector, **Add to library** | Upload plain-text G-code (up to 4 MiB), validate line limits, and review its known path against the selected profile. |
-| Stored programs | Driver selector, readiness checkbox, bounds override, **Name** and **State** filters, **View**, **Start**, **Pause**, **Resume**, **Cancel**, **Delete**, **← Newer** / **Older →** | Find, inspect, and manage jobs through explicit bounds override, readiness confirmation, and Start and Cancel confirmation dialogs. Available controls depend on job state and driver capabilities. |
+| Stored programs | Driver selector, readiness checkbox, bounds override, **Name** and **State** filters, **View**, **Start**, **Pause**, **Resume**, **Cancel**, **Delete**, **← Newer** / **Older →** | Each job shows its creation time, byte size, and whether it was uploaded or generated. Empty lists explain how to add G-code. Find, inspect, and manage jobs through explicit bounds override, readiness confirmation, and Start and Cancel confirmation dialogs. Available controls depend on job state and driver capabilities. |
 
 The profile and project lists remain separate from generated jobs: deleting a
 source project does not delete a generated program, and editing a source does
@@ -230,6 +230,8 @@ profile edits first; after saving a changed profile, review and save the project
 against its new revision before generating.
 
 ![Saved project blocked from generation until it is reviewed against the changed profile](assets/screenshots/designer-stale-profile.png)
+
+![Saved project row shows its profile name, original revision, and Needs review badge](assets/screenshots/designer-project-needs-review.png)
 
 **Generate queued job** creates a normal library program. It does not dispatch
 the job, and it clears any earlier supervision confirmation. Use **View** to

@@ -890,6 +890,24 @@ footer {
   overflow-wrap: anywhere;
 }
 
+.list-empty {
+  margin: var(--space-2) 0;
+  color: var(--muted);
+  font-size: var(--type-xs);
+}
+
+.stale-badge {
+  display: inline-block;
+  margin-inline-start: .35rem;
+  padding: .08rem .4rem;
+  border: 1px solid var(--warning);
+  border-radius: 999px;
+  color: var(--warning);
+  font-size: .8em;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
 .project-editor-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));

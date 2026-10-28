@@ -97,7 +97,7 @@ test('designer has its own page and supports selecting, dragging, and scaling a 
   await expect(page.locator('.workspace')).toBeVisible();
   await expect(page.locator('#designer-panel')).toBeHidden();
   await page.goto('/designer');
-  await page.getByRole('button', { name: `Reopen vector Mouse project ${attempt}` }).click();
+  await page.getByRole('button', { name: `Reopen vector project Mouse project ${attempt}` }).click();
   await expect(page.locator('#vector-scale-x')).toHaveValue('1.667');
   await expect(page.locator('#vector-scale-y')).toHaveValue('1');
   await expect(page.locator('#vector-rotation')).toHaveValue('45');
