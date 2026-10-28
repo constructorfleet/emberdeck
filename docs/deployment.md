@@ -150,12 +150,70 @@ List ports using `emberdeck driver -list-ports`. Then select the correct device:
 ./emberdeck serve -serial /dev/ttyUSB0 -baud 115200 -data ./data
 ```
 
+In all-in-one mode, a local worker failure is logged with its transport (for
+example `serial driver /dev/ttyUSB0: ...`). The driver shows as offline while the
+worker restarts, and the web console stays available.
+
 Windows names are typically `COM3`; macOS names often begin `/dev/cu.`. Use the
 OS-reported name instead of assuming either convention. The Linux service user
 needs access to the selected device (see [serial transport](serial.md)). Docker
 needs explicit `--device` or Compose `devices` plus appropriate group permissions;
 no device passthrough is configured by default. These commands expose the
 transport; they do not qualify a physical machine for use.
+
+## Driver as a service
+
+A standalone `emberdeck driver` retries when idle, so a server upgrade or
+network drop does not need operator action. It exits only on a configuration
+error or after failing closed during an active job (see
+[worker reconnection](worker.md#reconnection)). Run it under a supervisor
+that always restarts it.
+
+### systemd
+
+Install the binary and `emberdeck` user as in the Linux section above, then:
+
+```sh
+sudo sh -c 'umask 077; cat > /etc/emberdeck/driver.env' <<'ENV'
+EMBERDECK_API_KEY=the-same-server-key
+EMBERDECK_SERVER_URL=https://emberdeck.example.net
+EMBERDECK_DRIVER_ID=bench
+EMBERDECK_DRIVER_CONNECTION=-serial /dev/ttyUSB0 -baud 115200
+ENV
+sudo install -o root -g root -m 0644 deploy/emberdeck-driver.service /etc/systemd/system/emberdeck-driver.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now emberdeck-driver
+journalctl -u emberdeck-driver -f
+```
+
+For a TCP controller, use `EMBERDECK_DRIVER_CONNECTION=-tcp 192.0.2.40:23`.
+The unit sets `Restart=always` and `RestartSec=5`, and removes systemd's
+start rate limit. It adds the `dialout` supplementary group for serial access.
+Change that group if your distribution assigns serial devices differently.
+
+### Docker Compose
+
+The `driver` profile in `compose.yaml` runs a TCP worker with
+`restart: always`:
+
+```sh
+export EMBERDECK_API_KEY='the-same-server-key'
+export EMBERDECK_CONTROLLER_TCP=192.0.2.40:23
+# Optional: defaults are http://emberdeck:8080 (the Compose server) and bench.
+export EMBERDECK_SERVER_URL=https://emberdeck.example.net
+export EMBERDECK_DRIVER_ID=bench
+docker compose --profile driver up --build -d driver
+```
+
+`EMBERDECK_CONTROLLER_TCP` is required. Without it the worker exits with a
+usage error, and Compose keeps restarting it. For a serial controller, add the
+device and group to a Compose override, and replace the command's `-tcp` pair
+with `-serial` and the device path. Retry logs appear in
+`docker compose logs -f driver`.
+
+A restarted worker uses a new session. After a crash, its first polls can log
+HTTP 409 `driver ID already owned by another session` for up to 10 seconds
+before it takes over the driver ID. This is expected.
 
 ## Upgrades and mixed versions
 
