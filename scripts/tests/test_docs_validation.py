@@ -13,14 +13,23 @@ class RenderedDocsValidationTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.site = Path(self.temp.name)
         (self.site / "index.html").write_text(
-            '<html><body><h1 id="home">Home</h1>'
+            '<html><body><h1 id="home">Home<a class="headerlink" href="#home">¶</a></h1>'
             '<a href="guide.html#setup">Setup</a>'
             '<a href="assets/screenshots/designer-console-overview.png">'
             '<img src="assets/screenshots/designer-console-overview.png" alt="Overview"></a></body></html>',
             encoding="utf-8",
         )
         (self.site / "guide.html").write_text(
-            '<html><body><h2 id="setup">Setup</h2></body></html>',
+            '<html><body><h2 id="setup">Setup<a class="headerlink" href="#setup">¶</a></h2></body></html>',
+            encoding="utf-8",
+        )
+        (self.site / "search.html").write_text(
+            '<form role="search"><input type="search" aria-label="Search"></form>',
+            encoding="utf-8",
+        )
+        (self.site / "search-index.json").write_text(
+            '[{"page":"Home","url":"index.html#home","heading":"Home","level":1},'
+            '{"page":"Setup","url":"guide.html#setup","heading":"Setup","level":2}]',
             encoding="utf-8",
         )
         (self.site / "assets").mkdir()
@@ -43,6 +52,28 @@ class RenderedDocsValidationTests(unittest.TestCase):
 
     def test_accepts_existing_pages_fragments_and_images(self):
         validate_rendered_docs(self.site)
+
+    def test_rejects_heading_without_permalink(self):
+        (self.site / "guide.html").write_text('<h2 id="setup">Setup</h2>', encoding="utf-8")
+        with self.assertRaisesRegex(SystemExit, "needs a permalink.*guide.html"):
+            validate_rendered_docs(self.site)
+
+    def test_rejects_missing_generated_heading_index(self):
+        (self.site / "search-index.json").unlink()
+        with self.assertRaisesRegex(SystemExit, "heading index is missing"):
+            validate_rendered_docs(self.site)
+
+    def test_rejects_long_page_without_contents_list(self):
+        (self.site / "guide.html").write_text(
+            ''.join(f'<h2 id="section-{i}">Section {i}<a class="headerlink" href="#section-{i}">¶</a></h2>' for i in range(4)),
+            encoding="utf-8",
+        )
+        (self.site / "search-index.json").write_text(
+            '[{"page":"Home","url":"index.html#home","heading":"Home","level":1}]',
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(SystemExit, "On this page list.*guide.html"):
+            validate_rendered_docs(self.site)
 
     def test_rejects_missing_fragment_targets(self):
         (self.site / "index.html").write_text(

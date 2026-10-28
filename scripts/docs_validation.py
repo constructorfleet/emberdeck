@@ -4,6 +4,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 import re
 from urllib.parse import unquote, urlsplit
+import json
 
 
 class _PageParser(HTMLParser):
@@ -13,14 +14,26 @@ class _PageParser(HTMLParser):
         self.references = []
         self.images = []
         self.anchors = []
+        self.headings = []
+        self.permalinks = set()
+        self.page_toc = False
+        self.has_search_form = False
 
     def handle_starttag(self, tag, attrs):
         values = dict(attrs)
         if values.get("id"):
             self.ids.add(values["id"])
+        if tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+            self.headings.append({"id": values.get("id", ""), "level": int(tag[1])})
+        if tag == "nav" and values.get("aria-label") == "On this page":
+            self.page_toc = True
+        if tag == "form" and values.get("role") == "search":
+            self.has_search_form = True
         if tag == "a":
             self.references.append(("link", values.get("href", ""), values.get("alt", "")))
             self.anchors.append(values.get("href", ""))
+            if "headerlink" in values.get("class", "").split():
+                self.permalinks.add(values.get("href", ""))
         elif tag == "img":
             self.references.append(("image", values.get("src", ""), values.get("alt", "")))
             self.images.append({**values, "parent_href": self.anchors[-1] if self.anchors else ""})
@@ -82,6 +95,11 @@ def validate_rendered_docs(site: Path) -> None:
         pages[page.name] = parser
 
     for page_name, parser in pages.items():
+        for heading in parser.headings:
+            if heading["id"] and "#" + heading["id"] not in parser.permalinks:
+                raise SystemExit(f"Documentation heading needs a permalink in {page_name}: #{heading['id']}")
+        if sum(1 for heading in parser.headings if heading["level"] == 2 and heading["id"]) >= 4 and not parser.page_toc:
+            raise SystemExit(f"Long documentation page needs an On this page list: {page_name}")
         for kind, reference, alt in parser.references:
             if not reference:
                 raise SystemExit(f"Empty documentation {kind} in {page_name}")
@@ -139,3 +157,24 @@ def validate_rendered_docs(site: Path) -> None:
             raise SystemExit("Documentation home page must use only the designer console overview screenshot")
         if home_screenshots[0].get("parent_href") != home_screenshots[0].get("src"):
             raise SystemExit("Documentation home screenshot needs a full-size screenshot link")
+
+    search_page = pages.get("search.html")
+    if not search_page or not search_page.has_search_form:
+        raise SystemExit("Documentation search page needs an accessible search form")
+    index_path = site / "search-index.json"
+    if not index_path.is_file():
+        raise SystemExit("Generated documentation heading index is missing: search-index.json")
+    try:
+        heading_index = json.loads(index_path.read_text(encoding="utf-8"))
+        indexed_urls = {item["url"] for item in heading_index}
+    except (json.JSONDecodeError, KeyError, TypeError):
+        raise SystemExit("Generated documentation heading index is invalid")
+    expected_urls = {
+        page_name + "#" + heading["id"]
+        for page_name, parser in pages.items()
+        if page_name != "404.html"
+        for heading in parser.headings
+        if heading["id"]
+    }
+    if indexed_urls != expected_urls or len(heading_index) != len(indexed_urls):
+        raise SystemExit("Generated documentation heading index must contain every page heading exactly once")
