@@ -3,7 +3,10 @@
 The console stores G-code programs, dispatches them to a connected driver, and
 shows progress reported by that driver. Keep the machine supervised whenever a
 program is running or paused. Pause and resume controls are available only when
-the assigned driver reports the `pause_resume` capability.
+the assigned driver reports the `pause_resume` capability. The console shell,
+stylesheet, script, and icon load without the API key. Only `/api/` requests
+need the key, so a mistyped address shows **Page not found** rather than an
+authentication error.
 
 ## Connect and choose a driver
 

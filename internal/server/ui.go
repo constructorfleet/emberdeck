@@ -11,7 +11,7 @@ var uiAssets embed.FS
 // serveUI serves only the public console shell and its static assets. Job data
 // remains available exclusively through the authenticated API.
 func (s *Server) serveUI(w http.ResponseWriter, r *http.Request) bool {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return false
 	}
 	var name, contentType string
@@ -22,6 +22,8 @@ func (s *Server) serveUI(w http.ResponseWriter, r *http.Request) bool {
 		name, contentType = "assets/app.js", "text/javascript; charset=utf-8"
 	case "/style.css":
 		name, contentType = "assets/style.css", "text/css; charset=utf-8"
+	case "/favicon.ico":
+		name, contentType = "assets/favicon.ico", "image/x-icon"
 	default:
 		return false
 	}

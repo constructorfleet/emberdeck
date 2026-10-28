@@ -165,6 +165,52 @@ func TestConsoleLoadsWithoutExposingJobs(t *testing.T) {
 	}
 }
 
+func TestPublicAssetsAndUnknownPaths(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	public := []struct{ path, contentType string }{
+		{"/", "text/html"},
+		{"/app.js", "text/javascript"},
+		{"/style.css", "text/css"},
+		{"/favicon.ico", "image/"},
+	}
+	for _, want := range public {
+		for _, method := range []string{"GET", "HEAD"} {
+			w := request(t, s, method, want.path, "", "")
+			if w.Code != http.StatusOK {
+				t.Errorf("%s %s without a key: %d", method, want.path, w.Code)
+			}
+			if got := w.Header().Get("Content-Type"); !strings.Contains(got, want.contentType) {
+				t.Errorf("%s %s content type = %q, want %q", method, want.path, got, want.contentType)
+			}
+		}
+	}
+
+	// Unknown non-API paths are ordinary misses, never authentication failures.
+	for _, method := range []string{"GET", "POST", "DELETE"} {
+		for _, key := range []string{"", "test-key"} {
+			w := request(t, s, method, "/missing-page", "", key)
+			if w.Code != http.StatusNotFound {
+				t.Errorf("%s /missing-page with key %q returned %d, want 404", method, key, w.Code)
+			}
+			if strings.Contains(w.Body.String(), "authentication") {
+				t.Errorf("%s /missing-page with key %q reported an authentication error: %s", method, key, w.Body.String())
+			}
+		}
+	}
+
+	// The API namespace still authenticates before routing, including unknown routes.
+	if w := request(t, s, "GET", "/api/v1/unknown", "", ""); w.Code != http.StatusUnauthorized {
+		t.Errorf("unauthenticated unknown API route returned %d, want 401", w.Code)
+	}
+	if w := request(t, s, "GET", "/api/v1/unknown", "", "test-key"); w.Code != http.StatusNotFound {
+		t.Errorf("authenticated unknown API route returned %d, want 404", w.Code)
+	}
+}
+
 func TestDataDirectoryHasOneServerOwner(t *testing.T) {
 	dir := t.TempDir()
 	first, err := server.Open(dir, "test-key")

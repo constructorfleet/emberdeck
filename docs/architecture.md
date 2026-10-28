@@ -63,6 +63,11 @@ Remote workers must use TLS or a trusted TLS tunnel. Operators and workers share
 one key in the initial implementation. Multi-user permissions, separate worker
 credentials, and camera access controls remain on the roadmap.
 
+The browser console shell, its stylesheet, script, and favicon are public assets.
+Only paths under `/api/` require the bearer key, so a mistyped URL returns an
+ordinary `404` instead of an authentication error. The assets never include job,
+profile, or project data.
+
 ## Verification boundaries
 
 HTTP tests cover persistence, lifecycle, duplicate ownership, and plugin vetoes.
