@@ -132,6 +132,7 @@ type VectorObject struct {
 	Kind        string           `json:"kind"`
 	ID          string           `json:"id"`
 	OperationID string           `json:"operation_id,omitempty"`
+	Text        *VectorText      `json:"text,omitempty"`
 	Transform   *VectorTransform `json:"transform,omitempty"`
 	Subpaths    []VectorSubpath  `json:"subpaths"`
 }
@@ -216,6 +217,25 @@ func validateProjectInput(w http.ResponseWriter, r *http.Request, updating bool)
 	if !parseRevisionField(input.Revision, updating, &input.ExpectedRevision) {
 		fail(w, 400, "invalid project revision")
 		return input, false
+	}
+	if input.SchemaVersion == 2 {
+		for i := range input.Objects {
+			if input.Objects[i].Kind != "text" {
+				continue
+			}
+			if input.Objects[i].Text == nil {
+				fail(w, 400, "text source is required")
+				return input, false
+			}
+			paths, err := generateMonolineText(*input.Objects[i].Text)
+			if err != nil {
+				fail(w, 400, err.Error())
+				return input, false
+			}
+			// Server-generated paths are canonical so clients cannot submit text
+			// source that disagrees with the geometry saved or later dispatched.
+			input.Objects[i].Subpaths = paths
+		}
 	}
 	project := DesignerProject{SchemaVersion: input.SchemaVersion, Name: input.Name, ProfileID: input.ProfileID, ProfileRevision: input.ProfileRevision, Rectangle: input.Rectangle, Operation: input.Operation, Units: input.Units, Objects: input.Objects, Operations: input.Operations}
 	if !validProjectIntrinsic(project) {
@@ -337,8 +357,19 @@ func validVectorProjectIntrinsic(project DesignerProject) bool {
 	totalPoints := 0
 	for _, object := range project.Objects {
 		if !validObjectID(object.ID) || objectIDs[object.ID] ||
-			(object.Kind != "rectangle" && object.Kind != "ellipse" && object.Kind != "line" && object.Kind != "path") ||
+			(object.Kind != "rectangle" && object.Kind != "ellipse" && object.Kind != "line" && object.Kind != "path" && object.Kind != "text") ||
 			len(object.Subpaths) == 0 || len(object.Subpaths) > 500 || !validVectorTransform(object.Transform) {
+			return false
+		}
+		if object.Kind == "text" {
+			if object.Text == nil {
+				return false
+			}
+			generated, err := generateMonolineText(*object.Text)
+			if err != nil || !sameVectorSubpaths(object.Subpaths, generated) {
+				return false
+			}
+		} else if object.Text != nil {
 			return false
 		}
 		if object.Kind == "rectangle" && (len(object.Subpaths) != 1 || !object.Subpaths[0].Closed || len(object.Subpaths[0].Points) != 4) ||
@@ -395,7 +426,24 @@ func validVectorProjectIntrinsic(project DesignerProject) bool {
 					return false
 				}
 			}
-			if object.OperationID != "" && operationIDs[object.OperationID] == "vector-cut" && (!path.Closed || !nonzeroPathArea(path.Points)) {
+			if object.Kind != "text" && object.OperationID != "" && operationIDs[object.OperationID] == "vector-cut" && (!path.Closed || !nonzeroPathArea(path.Points)) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func sameVectorSubpaths(left, right []VectorSubpath) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i].Closed != right[i].Closed || len(left[i].Points) != len(right[i].Points) {
+			return false
+		}
+		for j := range left[i].Points {
+			if left[i].Points[j] != right[i].Points[j] {
 				return false
 			}
 		}
@@ -511,6 +559,9 @@ func validateVectorProjectValues(project DesignerProject, profile MachineProfile
 				return errors.New("assign every vector object to an operation before generation")
 			}
 			continue
+		}
+		if object.Kind == "text" && operations[object.OperationID].Type == "vector-cut" {
+			return errors.New("text objects can only be engraved")
 		}
 		for _, path := range object.Subpaths {
 			if operations[object.OperationID].Type == "vector-cut" && !path.Closed {

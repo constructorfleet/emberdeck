@@ -176,6 +176,7 @@ func OpenWithOptions(dir, key string, options Options) (*Server, error) {
 	s.handleAPI("DELETE /api/v1/profiles/{id}", writeRoles, false, s.deleteProfile)
 	s.handleAPI("GET /api/v1/projects", readRoles, false, s.listProjects)
 	s.handleAPI("POST /api/v1/projects", writeRoles, false, s.createProject)
+	s.handleAPI("POST /api/v1/designer/text-geometry", writeRoles, false, s.designerTextGeometry)
 	s.handleAPI("POST /api/v1/svg-import", writeRoles, false, s.importSVG)
 	s.handleAPI("GET /api/v1/projects/{id}", readRoles, false, s.getProject)
 	s.handleAPI("PUT /api/v1/projects/{id}", writeRoles, false, s.updateProject)

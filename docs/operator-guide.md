@@ -57,7 +57,7 @@ select **Reopen** to continue editing.
 | Area | Controls | What they do |
 | --- | --- | --- |
 | Machine profiles | **New profile**, **Edit profile**, **Delete profile** | Store the declared GRBL work area and limits used by the rectangle editor. |
-| Design projects | **New rectangle project** or **New vector project**, **Reopen**, **Save**, **Generate queued job**, **Delete** | Edit a v1 rectangle engraving source or a v2 multi-path design with ordered engraving/cutting layers, preview its declared envelope, or create a separate queued program. |
+| Design projects | **New rectangle project** or **New vector project**, **Reopen**, **Save**, **Generate queued job**, **Delete** | Edit a v1 rectangle engraving source or a v2 multi-path design with ordered engraving/cutting layers and editable monoline text engraving, preview its declared envelope, or create a separate queued program. |
 | Add a program | File chooser, display name, profile selector, **Add to library** | Upload plain-text G-code (up to 4 MiB), validate line limits, and review its known path against the selected profile. |
 | Stored programs | Driver selector, readiness checkbox, bounds override, **Name** and **State** filters, **View**, **Start**, **Pause**, **Resume**, **Cancel**, **Delete**, **← Newer** / **Older →** | Find, inspect, and manage jobs through explicit bounds override, readiness confirmation, and Start and Cancel confirmation dialogs. Available controls depend on job state and driver capabilities. |
 
@@ -178,7 +178,8 @@ starting position is unknown, so the preview does not draw a travel path to the
 endpoint. Geometry outside the declared envelope, invalid feed or power, and
 values with more than three decimal places block saving and generation.
 The version 1 rectangle editor supports one rectangle and vector engraving.
-Version 2 supports multiple rectangle, ellipse, and line paths, described below.
+Version 2 supports multiple rectangle, ellipse, line, and monoline text objects,
+described below.
 The multi-path editor can import a bounded static SVG subset. It converts
 physical dimensions and the viewBox to editable millimetre paths, but does not
 import colors, styling, text, raster images, or machine settings.
@@ -221,6 +222,23 @@ layer's feed and commanded power, and move layers to change execution order.
 Every path must be assigned before generation. Lines can be engraved; cutting
 requires closed shapes with nonzero area. The preview uses green for engraving,
 red dashed outlines for cutting, and gray dotted paths for unassigned geometry.
+
+Choose **Add text** to create a text object. Its source content, fixed font ID
+`emberdeck-stick-v1`, height, and X/Y origin remain editable and are saved in
+the project. The editor asks the server to generate the corresponding open
+millimetre stroke paths; preview, profile bounds, and generated G-code use those
+same paths. Text can only be assigned to vector engraving. Supported source
+characters are ASCII A–Z and a–z, digits 0–9, space, and `. , : ; ! ? + - / _
+( )`. Lowercase letters use uppercase stroke shapes. Text must contain 1–32
+characters and be 1–100 mm high. Unsupported characters, empty/space-only text,
+invalid size, and out-of-range coordinates show field errors and block save and
+generation. The font is a small hand-authored stroke table with no external
+runtime font dependency. This is vector engraving; raster engraving remains
+unsupported. SVG `<text>` import also remains unsupported.
+
+![Editable monoline text source, size, and generated stroke preview](assets/screenshots/designer-monoline-text.png)
+
+![Monoline text controls and preview on a narrow screen](assets/screenshots/designer-monoline-text-mobile.png)
 
 Use the shape checkboxes to select two or more shapes for alignment; the native
 checkboxes work with the keyboard. Alignment controls stay disabled until at
@@ -363,7 +381,8 @@ Regenerate the screenshots from the current console and simulator with
 
 ## Requested UI that is not available yet
 
-The current designer does not have text import, undo/redo, or raster engraving.
+The current designer does not have SVG text import, undo/redo, or raster
+engraving. Native editable monoline text is supported as described above.
 SVG import supports straight paths and
 C/c/Q/q Bezier curves; nested groups, S/s/T/t smooth commands, and A/a arcs are
 not available. Live path correlation currently covers supported linear XY
