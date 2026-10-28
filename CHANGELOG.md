@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.0](https://github.com/constructorfleet/emberdeck/compare/v0.5.0...v0.6.0) (2026-10-28)
+
+
+### Features
+
+* add structured server and driver logging ([#84](https://github.com/constructorfleet/emberdeck/issues/84)) ([b030255](https://github.com/constructorfleet/emberdeck/commit/b0302552a97f75bfbd550826f9def65919f03f5c))
+* add verified chunked worker transfers ([#83](https://github.com/constructorfleet/emberdeck/issues/83)) ([ee3f4ce](https://github.com/constructorfleet/emberdeck/commit/ee3f4ce6de3fd24cb541ffc3ffba3f8c305db270))
+* confirm job start and cancel per job and driver ([#74](https://github.com/constructorfleet/emberdeck/issues/74)) ([ab2037f](https://github.com/constructorfleet/emberdeck/commit/ab2037f0e4f751c36fdf5f9aa60172137c494b8e))
+* import bounded SVG Bezier curves ([#73](https://github.com/constructorfleet/emberdeck/issues/73)) ([4c2e860](https://github.com/constructorfleet/emberdeck/commit/4c2e860b3f99a806bf8d99cb85f72cc0a3c8d1ce))
+* verify controller laser settings before streaming ([#79](https://github.com/constructorfleet/emberdeck/issues/79)) ([e8a289a](https://github.com/constructorfleet/emberdeck/commit/e8a289a25446876e5b6e335cfbf1b8903faf75a8))
+
+
+### Bug Fixes
+
+* consolidate console tokens and meet contrast ([#80](https://github.com/constructorfleet/emberdeck/issues/80)) ([ce4b8cc](https://github.com/constructorfleet/emberdeck/commit/ce4b8cc0102bbc07fd571a42e40012d254c115b4)), closes [#31](https://github.com/constructorfleet/emberdeck/issues/31)
+
 ## [0.5.0](https://github.com/constructorfleet/emberdeck/compare/v0.4.0...v0.5.0) (2026-10-28)
 
 
