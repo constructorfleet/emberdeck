@@ -405,6 +405,9 @@ assignment manifest, then validate all G-code. A truncated, altered, oversized,
 or malformed program is failed without sending any program bytes. Workers keep
 the complete verified program in memory in this Go implementation; a constrained
 firmware implementation may stage the same bounded content in PSRAM or flash.
+For a failure before streaming, the worker reports `acked:0` and the assignment's
+`total` line count so the server can accept and persist the failed receipt without
+claiming controller progress.
 Protocol 1 assignments are capped at 8 MiB to keep existing Go workers within
 their response-reader limit; starting a larger encoded assignment with a legacy
 worker returns 413 and leaves the job queued. New workers also accept a

@@ -101,6 +101,7 @@ type assignment struct {
 	Job          struct {
 		ID      string                `json:"id"`
 		GCode   string                `json:"gcode"`
+		Total   int                   `json:"total"`
 		Size    int64                 `json:"size"`
 		Content *jobtransfer.Manifest `json:"content"`
 		// ExpectedSettings is the job's profile snapshot. When present, the
@@ -357,7 +358,7 @@ func RunWithOptions(ctx context.Context, serverURL, key, id string, connect Conn
 			if assignment.Job.ID == "" || assignment.Lease == "" {
 				return errors.New("worker: cancel command has no assignment")
 			}
-			terminal := progress{JobID: assignment.Job.ID, Lease: assignment.Lease, State: "canceled"}
+			terminal := progress{JobID: assignment.Job.ID, Lease: assignment.Lease, State: "canceled", Total: assignment.Job.Total}
 			completed[assignment.Lease] = terminal
 			options.Logf("worker %s: job %s canceled before streaming", id, assignment.Job.ID)
 			if err := postTerminal(ctx, client, endpoint, key, report.poll(session, &terminal)); err != nil {
@@ -379,7 +380,7 @@ func RunWithOptions(ctx context.Context, serverURL, key, id string, connect Conn
 			var terminal progress
 			if reset := report.takeReset(); reset != "" {
 				// A settings probe saw a reset banner; refuse without reopening.
-				terminal = progress{JobID: assignment.Job.ID, Lease: assignment.Lease, State: "failed", Error: reset}
+				terminal = progress{JobID: assignment.Job.ID, Lease: assignment.Lease, State: "failed", Total: assignment.Job.Total, Error: reset}
 			} else {
 				options.Logf("worker %s: running job %s", id, assignment.Job.ID)
 				if assignment.Job.Content != nil {
@@ -388,7 +389,7 @@ func RunWithOptions(ctx context.Context, serverURL, key, id string, connect Conn
 						if ctx.Err() != nil {
 							return ctx.Err()
 						}
-						terminal = progress{JobID: assignment.Job.ID, Lease: assignment.Lease, State: "failed", Error: "job content transfer: " + fetchErr.Error()}
+						terminal = progress{JobID: assignment.Job.ID, Lease: assignment.Lease, State: "failed", Total: assignment.Job.Total, Error: "job content transfer: " + fetchErr.Error()}
 					} else {
 						assignment.Job.GCode = gcode
 					}
@@ -455,18 +456,18 @@ func validArguments(ctx context.Context, serverURL, key, id string, connect Conn
 
 func runJob(ctx context.Context, client *http.Client, endpoint, key, session string, a assignment, connect Connector, report *controllerReport) (progress, error) {
 	if len(a.Job.GCode) > jobtransfer.MaxProgramBytes {
-		return progress{JobID: a.Job.ID, Lease: a.Lease, State: "failed", Error: "job program exceeds the 4 MiB worker limit"}, nil
+		return progress{JobID: a.Job.ID, Lease: a.Lease, State: "failed", Total: a.Job.Total, Error: "job program exceeds the 4 MiB worker limit"}, nil
 	}
 	total, validationErr := driver.Validate(a.Job.GCode)
 	if validationErr != nil {
-		return progress{JobID: a.Job.ID, Lease: a.Lease, State: "failed", Error: validationErr.Error()}, nil
+		return progress{JobID: a.Job.ID, Lease: a.Lease, State: "failed", Total: a.Job.Total, Error: validationErr.Error()}, nil
 	}
 	conn, err := connect(ctx)
 	if err != nil {
-		return progress{JobID: a.Job.ID, Lease: a.Lease, State: "failed", Error: err.Error()}, nil
+		return progress{JobID: a.Job.ID, Lease: a.Lease, State: "failed", Total: total, Error: err.Error()}, nil
 	}
 	if conn == nil {
-		return progress{JobID: a.Job.ID, Lease: a.Lease, State: "failed", Error: "connector returned nil connection"}, nil
+		return progress{JobID: a.Job.ID, Lease: a.Lease, State: "failed", Total: total, Error: "connector returned nil connection"}, nil
 	}
 	defer conn.Close()
 	streamCtx, cancel := context.WithCancel(ctx)
