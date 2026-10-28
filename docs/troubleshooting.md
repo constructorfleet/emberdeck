@@ -41,9 +41,14 @@ permission. Also ensure another program is not holding the port. See
 ## API key is rejected
 
 An `authentication required` response means the supplied key was not accepted.
-Check that the server is running with the intended `EMBERDECK_API_KEY` and that
-the browser or worker uses the matching value. Operators and workers currently
-share this key. In the browser, use **Change key** to enter the correct value;
-the console validates it before saving it for that tab session. Do not share the
-key with untrusted users or plugins. See the
+The first start in a data directory without `credentials.json` migrates
+`EMBERDECK_API_KEY` to a hashed `bootstrap-admin` credential; after that the
+server accepts only active stored credentials, so changing the environment
+value does not rotate a key. Check that the browser or worker uses a credential
+created through the admin API, that it has not been revoked, and that a worker
+credential's `driver_ids` includes its `-id`. In the browser, use **Change key**
+to enter the correct value; the console validates it before saving it for that
+tab session. Keep the bootstrap admin key on the server side and give each
+remote worker its own credential. See the
+[credential contract](api.md#credential-roles-and-lifecycle) and the
 [Operator Guide](operator-guide.md#connect-and-choose-a-driver).

@@ -15,11 +15,31 @@ For a first-run route, start with [Install](install.md), then read the
 [Operator Guide](operator-guide.md). Keep the [Troubleshooting](troubleshooting.md),
 [Glossary](glossary.md), and [Safety & Limitations](safety.md) pages nearby.
 
-Set a long, unique `EMBERDECK_API_KEY` before starting the server. The server
-listens on loopback by default; the examples below bind all interfaces. Expose
-that listener only on a trusted network, or put it behind a TLS reverse proxy.
-Remote workers should use HTTPS or a trusted TLS tunnel. A raw TCP controller
-connection is separate from the worker's authenticated HTTP connection.
+Set a long, unique `EMBERDECK_API_KEY` before starting the server. If the data
+directory has no `credentials.json`, the first start stores its SHA-256 hash as
+the `bootstrap-admin` credential; the key itself is not written to disk. Existing
+single-key deployments keep working after this migration. Once the file exists,
+the environment value is not an authentication fallback: it must match an active
+stored credential when used for API calls. Changing it does not rotate a key.
+
+After first start, create named credentials through the admin API. For example,
+create a worker credential scoped to one device (the response's `key` is shown
+once):
+
+```sh
+curl --fail-with-body -X POST https://emberdeck.example.net/api/v1/credentials \
+  -H 'Authorization: Bearer ADMIN_KEY' -H 'Content-Type: application/json' \
+  -d '{"name":"bench worker","role":"worker","driver_ids":["bench"]}'
+```
+
+Set the returned secret as the driver's `EMBERDECK_API_KEY`; keep the admin key
+on the server/operator side. The server listens on loopback by default; the
+examples below bind all interfaces. Expose it only on a trusted network or
+behind a TLS reverse proxy. Remote workers should use HTTPS or a trusted TLS
+tunnel. A raw TCP controller connection is separate from the worker's
+authenticated HTTP connection. See
+[the API credential contract](api.md#credential-roles-and-lifecycle) for roles,
+rotation, revocation, and recovery.
 
 ## Docker Compose
 
@@ -133,19 +153,22 @@ demo. Stop with Ctrl+C.
 
 ## Distributed worker
 
-Run the server without `-simulate`, then start one worker process for the
-simulator or a network-accessible GRBL controller. The worker's `-server` value
-must be reachable from that host. Use an HTTPS URL or trusted TLS tunnel when
-the connection crosses an untrusted network:
+Run the server without `-simulate`, create a worker credential for its driver ID,
+then start one worker process for the simulator or a network-accessible GRBL
+controller. Set the worker's environment to its dedicated worker key (not the
+admin key). The worker's `-server` value must be reachable from that host. Use
+an HTTPS URL or trusted TLS tunnel when the connection crosses an untrusted
+network:
 
 ```sh
-export EMBERDECK_API_KEY='the-same-server-key'
+export EMBERDECK_API_KEY='the-one-time-worker-key-for-bench'
 ./emberdeck driver -server https://emberdeck.example.net -id bench -tcp 192.0.2.40:23
 ```
 
 For a simulator instead of TCP hardware:
 
 ```sh
+export EMBERDECK_API_KEY='the-one-time-worker-key-for-bench'
 ./emberdeck driver -server https://emberdeck.example.net -id bench -simulate
 ```
 
@@ -214,7 +237,7 @@ Install the binary and `emberdeck` user as in the Linux section above, then:
 
 ```sh
 sudo sh -c 'umask 077; cat > /etc/emberdeck/driver.env' <<'ENV'
-EMBERDECK_API_KEY=the-same-server-key
+EMBERDECK_API_KEY=the-one-time-worker-key-for-bench
 EMBERDECK_SERVER_URL=https://emberdeck.example.net
 EMBERDECK_DRIVER_ID=bench
 EMBERDECK_DRIVER_CONNECTION=-serial /dev/ttyUSB0 -baud 115200 -serial-dtr off -serial-rts off
@@ -226,17 +249,21 @@ journalctl -u emberdeck-driver -f
 ```
 
 For a TCP controller, use `EMBERDECK_DRIVER_CONNECTION=-tcp 192.0.2.40:23`.
-The unit sets `Restart=always` and `RestartSec=5`, and removes systemd's
+Keep the driver's key in this protected environment file, separate from the
+server's admin key. The unit sets `Restart=always` and `RestartSec=5`, and removes systemd's
 start rate limit. It adds the `dialout` supplementary group for serial access.
 Change that group if your distribution assigns serial devices differently.
 
 ### Docker Compose
 
 The `driver` profile in `compose.yaml` runs a TCP worker with
-`restart: always`:
+`restart: always`. Its current environment mapping passes the same
+`EMBERDECK_API_KEY` as the server for legacy compatibility. For least privilege,
+run a standalone worker with a worker-scoped secret (or provide a Compose
+override replacing the driver's environment mapping):
 
 ```sh
-export EMBERDECK_API_KEY='the-same-server-key'
+export EMBERDECK_API_KEY='the-server-admin-key'
 export EMBERDECK_CONTROLLER_TCP=192.0.2.40:23
 # Optional: defaults are http://emberdeck:8080 (the Compose server) and bench.
 export EMBERDECK_SERVER_URL=https://emberdeck.example.net
@@ -244,11 +271,28 @@ export EMBERDECK_DRIVER_ID=bench
 docker compose --profile driver up --build -d driver
 ```
 
+Example standalone container using a dedicated worker key:
+
+```sh
+docker run --restart unless-stopped \
+  -e EMBERDECK_API_KEY='the-one-time-worker-key-for-bench' \
+  ghcr.io/constructorfleet/emberdeck:vX.Y.Z \
+  driver -server https://emberdeck.example.net -id bench -tcp 192.0.2.40:23
+```
+
 `EMBERDECK_CONTROLLER_TCP` is required. Without it the worker exits with a
 usage error, and Compose keeps restarting it. For a serial controller, add the
 device and group to a Compose override, and replace the command's `-tcp` pair
 with `-serial` and the device path. Retry logs appear in
 `docker compose logs -f driver`.
+
+To rotate a worker key, stop the worker and ensure it has no active job, revoke
+the old credential with `DELETE /api/v1/credentials/{id}`, create a new worker
+credential for the same driver ID, update its protected environment, start it,
+and check `GET /api/v1/drivers` with an operator/admin credential to verify its
+session. Scopes cannot overlap; revoking an active worker interrupts its lease.
+See the [API guide](api.md#bootstrap-migration-and-rotation) for rotation and
+bootstrap recovery details.
 
 A restarted worker uses a new session. After a crash, its first polls can log
 HTTP 409 `driver ID already owned by another session` for up to 10 seconds

@@ -24,8 +24,9 @@ state to the central server. See [metrics and monitoring](metrics.md).
 ## Storage and ownership
 
 Library mutations write and sync a temporary file before replacing jobs.json,
-profiles.json, or designs.json. Profiles and editable projects are separate from
-generated jobs; each mutation replaces one library under the server's lock.
+profiles.json, designs.json, or credentials.json. Profiles and editable projects
+are separate from generated jobs; each mutation replaces one library under the
+server's lock.
 Profile/project libraries are validated on startup; corrupt records or broken
 references fail closed. An older project binding is a supported stale state,
 not corruption, and requires review/resave before generation.
@@ -81,9 +82,23 @@ shared-library ABI restrictions across operating systems. Plugins are trusted
 code with the server's OS privileges; this is not a sandbox. OctoPrint Python
 plugins are not directly compatible.
 
-Remote workers must use TLS or a trusted TLS tunnel. Operators and workers share
-one key in the initial implementation. Multi-user permissions, separate worker
-credentials, and camera access controls remain on the roadmap.
+Authentication is a durable credential registry, not a process-wide shared-key
+check. It stores SHA-256 secret hashes and metadata; bearer secrets are generated
+with 256 bits of entropy and compared in constant time. Route registration
+centralizes role authorization: viewers read, operators also mutate/generate,
+admins additionally manage credentials, and workers can only poll/report for
+their explicitly assigned driver IDs. Active worker scopes cannot overlap.
+Revoking a worker credential removes its sessions and interrupts its active
+leases before acknowledging revocation; no other worker is changed and no job is
+replayed. If the credential-store file is absent, startup atomically seeds an
+admin hash from `EMBERDECK_API_KEY` for explicit single-key migration. Once the
+store exists, the environment key is not a fallback. Admin's worker-poll access
+is retained only for bootstrap/local-worker compatibility; distributed workers
+should use scoped worker credentials.
+
+Remote workers must use TLS or a trusted TLS tunnel. Use a separate, revocable
+worker credential for each device and scope it to the driver's ID. Camera access
+controls are not implemented.
 
 The browser console shell, its stylesheet, script, and favicon are public assets.
 Only paths under `/api/` require the bearer key, so a mistyped URL returns an

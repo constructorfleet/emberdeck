@@ -27,6 +27,8 @@ Simulator and software checks do not qualify a physical machine. See
 - Trusted process plugins for preflight checks. They are not sandboxes, machine
   drivers, or file converters. Ruida, proprietary DSP protocols, and OctoPrint
   plugin compatibility remain unsupported; plugins can add adapters later.
+- Hashed credentials with viewer, operator, admin, and per-device worker roles.
+  Worker credentials are scoped to driver IDs and can be revoked individually.
 
 ## Not available or not qualified
 
@@ -39,8 +41,7 @@ Simulator and software checks do not qualify a physical machine. See
   and automatic design-to-machine configuration.
 - Universal Wi-Fi, proprietary DSP/Ruida controllers, or OctoPrint plugin
   compatibility.
-- Multi-user permissions, camera monitoring, and advanced job-history
-  filtering/pagination.
+- Camera monitoring and advanced job-history filtering/pagination.
 
 ## Feature request planning
 
