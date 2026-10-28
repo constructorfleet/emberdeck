@@ -64,7 +64,9 @@
   let vectorPointerDrag = null;
   let vectorIDSequence = 0;
   const toolpathCache = new Map();
+  const generatedReviewCache = new Map();
   const toolpathViewports = new Map();
+  let profileRevisionKey = null;
   const boundsOverrides = new Set();
 
   function clearNotice({ connectionOnly = false } = {}) {
@@ -204,6 +206,8 @@
     manualRecords.clear();
     $("#manual-confirmation").checked = false;
     toolpathCache.clear();
+    generatedReviewCache.clear();
+    profileRevisionKey = null;
     toolpathViewports.clear();
     profiles = [];
     projects = [];
@@ -406,6 +410,10 @@
     try {
       const [nextProfiles, nextProjects] = await Promise.all([api("/api/v1/profiles"), api("/api/v1/projects")]);
       if (!connected || version !== sessionVersion) return;
+      const nextProfileRevisionKey = JSON.stringify((Array.isArray(nextProfiles) ? nextProfiles : [])
+        .map((profile) => [profile.id, profile.revision, profile.width_mm, profile.height_mm]).sort(([left], [right]) => left.localeCompare(right)));
+      if (profileRevisionKey !== null && profileRevisionKey !== nextProfileRevisionKey) generatedReviewCache.clear();
+      profileRevisionKey = nextProfileRevisionKey;
       profiles = Array.isArray(nextProfiles) ? nextProfiles : [];
       projects = Array.isArray(nextProjects) ? nextProjects : [];
       renderProfiles();
@@ -1776,7 +1784,7 @@
         progress.setAttribute("aria-label", `${job.acked || 0} of ${job.total || 0} lines acknowledged`);
         info.append(progress);
       }
-      if (active || job.execution || review) {
+      if (active || job.execution || review || job.provenance) {
         const toolpathView = document.createElement("section");
         toolpathView.className = "toolpath-live";
         toolpathView.dataset.toolpathJob = job.id;
@@ -1875,11 +1883,13 @@
 
   function renderToolpathView(host, job, path, review) {
     host.replaceChildren();
+    const profileBounds = review?.profile_stale ? null : review?.profile_bounds;
+    const live = ["running", "pausing", "paused", "resuming", "canceling"].includes(job.state);
     const execution = job.execution || {};
     const progress = execution.path_progress || { completed: 0, total: path.segments.length, confidence: "unknown" };
     const summary = document.createElement("p");
     summary.className = "toolpath-summary";
-    summary.textContent = job.execution ? `Path progress: ${progress.completed || 0} of ${progress.total || 0} segments · ${progress.confidence || "unknown"}` : `Static program review · bounds ${review?.bounds_status || "unknown"} · execution not reported`;
+    summary.textContent = job.execution ? `Path progress: ${progress.completed || 0} of ${progress.total || 0} segments · ${progress.confidence || "unknown"}` : live ? `Live job toolpath · bounds ${review?.bounds_status || "unknown"} · controller execution progress not reported` : `Static program review · bounds ${review?.bounds_status || "unknown"} · execution not reported`;
     host.append(summary);
     if (review?.bounds) {
       const boundsText = document.createElement("p");
@@ -1920,7 +1930,7 @@
     }
 
     const points = path.segments.flatMap((segment) => [segment.start, segment.end]);
-    if (review?.profile_bounds) points.push(review.profile_bounds.min, review.profile_bounds.max);
+    if (profileBounds) points.push(profileBounds.min, profileBounds.max);
     const workPosition = job.state !== "interrupted" && execution.position_units === "assumed-mm" ? execution.work_position : null;
     if (job.state === "interrupted" && execution.work_position) {
       const stalePosition = document.createElement("p");
@@ -1941,13 +1951,12 @@
     const svg = document.createElementNS(svgNS, "svg");
     svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.width} ${view.height}`);
     svg.setAttribute("role", "img");
-    svg.setAttribute("aria-label", job.execution ? `Fitted XY execution preview for ${job.name}; completed estimate, active path and remaining paths are shown` : `Fitted static XY program preview for ${job.name}`);
+    svg.setAttribute("aria-label", job.execution ? `Fitted XY execution preview for ${job.name}; completed estimate, active path and remaining paths are shown${profileBounds ? "; declared profile work area shown, not verified machine travel" : ""}` : live ? `Live XY program preview for ${job.name}; controller execution progress is not reported${profileBounds ? "; declared profile work area shown, not verified machine travel" : ""}` : `Fitted static XY program preview for ${job.name}${profileBounds ? "; declared profile work area shown, not verified machine travel" : ""}`);
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
     svg.classList.add("toolpath-svg");
     const group = document.createElementNS(svgNS, "g");
     group.setAttribute("transform", "scale(1 -1)");
-    if (review?.profile_bounds) {
-      const profileBounds = review.profile_bounds;
+    if (profileBounds) {
       const box = document.createElementNS(svgNS, "rect");
       box.setAttribute("class", "toolpath-profile-bounds");
       box.setAttribute("x", profileBounds.min.x); box.setAttribute("y", profileBounds.min.y);
@@ -1999,20 +2008,30 @@
     const legend = document.createElement("p");
     legend.className = "toolpath-legend";
     const headLegend = job.state === "interrupted" ? "head marker hidden after interruption because the last report may be stale" : "head marker where work coordinates are available";
+    const profileLabel = profileBounds
+      ? "Dashed rectangle is the declared profile work area; it is not sensed or verified machine travel."
+      : review?.profile_stale
+        ? "Declared profile work area is stale because the profile changed or was removed; no rectangle is shown."
+        : "Declared profile work area is unavailable; no rectangle is shown.";
     legend.textContent = job.execution
-      ? (review?.profile_bounds ? `Completed estimate · active segment · remaining path · laser-on solid · laser-off travel dashed · ${headLegend} · dashed rectangle is the selected profile work area.` : `Completed estimate · active segment · remaining path · laser-on solid · laser-off travel dashed · ${headLegend}. Machine bounds are unknown without a selected profile.`)
-      : (review?.profile_bounds ? "Program motion · laser-on solid · laser-off travel dashed · dashed rectangle is the selected profile work area." : "Program motion · laser-on solid · laser-off travel dashed · machine bounds are unknown without a selected profile.");
+      ? `Completed estimate · active segment · remaining path · laser-on solid · laser-off travel dashed · ${headLegend} · ${profileLabel}`
+      : `Program motion · laser-on solid · laser-off travel dashed · ${profileLabel}`;
     host.append(controls, svg, legend);
   }
 
   async function refreshToolpathViews() {
     for (const job of jobs) {
-      if (!(job.program_review || job.execution || ["running", "pausing", "paused", "resuming", "canceling"].includes(job.state))) continue;
+      if (!(job.program_review || job.provenance || job.execution || ["running", "pausing", "paused", "resuming", "canceling"].includes(job.state))) continue;
       const host = Array.from(list.querySelectorAll(".toolpath-live")).find((node) => node.dataset.toolpathJob === job.id);
       if (!host) continue;
       try {
         if (!toolpathCache.has(job.id)) toolpathCache.set(job.id, await api(`/api/v1/jobs/${encodeURIComponent(job.id)}/toolpath`));
-        renderToolpathView(host, job, toolpathCache.get(job.id), job.program_review);
+        let review = job.program_review;
+        if (job.provenance) {
+          if (!generatedReviewCache.has(job.id)) generatedReviewCache.set(job.id, await api(`/api/v1/jobs/${encodeURIComponent(job.id)}/review`));
+          review = generatedReviewCache.get(job.id);
+        }
+        renderToolpathView(host, job, toolpathCache.get(job.id), review);
       } catch (error) {
         host.textContent = `Toolpath preview unavailable: ${error.message}`;
       }

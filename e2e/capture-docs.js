@@ -244,6 +244,53 @@ async function main() {
     await designerRow.getByRole('button', { name: /^View / }).click();
     await expect(page.locator('#program-provenance')).toContainText('Panel outline');
     await captureElement(page, '#program-provenance', 'designer-generated-review.png');
+    const sourceJobID = await designerRow.getByRole('button', { name: /^View / }).getAttribute('data-job-id');
+    await page.locator('#close-program').click();
+    const runningGenerated = await page.evaluate(async (sourceJobID) => {
+      const headers = { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' };
+      const source = await (await fetch(`/api/v1/jobs/${sourceJobID}`, { headers })).json();
+      const profile = source.provenance.profile;
+      const points = [{ x_mm: 0, y_mm: 0 }, { x_mm: 10, y_mm: 0 }, ...Array.from({ length: 500 }, (_, index) => {
+        const row = Math.floor(index / 25);
+        const column = index % 25;
+        return { x_mm: 10 + (row % 2 === 0 ? column : 24 - column) * 10, y_mm: 10 + row * 9 };
+      })];
+      const projectResponse = await fetch('/api/v1/projects', {
+        method: 'POST', headers,
+        body: JSON.stringify({
+          schema_version: 2, name: 'Running generated profile view', units: 'mm',
+          profile_id: profile.id, profile_revision: profile.revision,
+          objects: [{ id: 'running-path', kind: 'path', operation_id: 'running-engrave', subpaths: [{ points, closed: false }] }],
+          operations: [{ id: 'running-engrave', type: 'vector-engrave', feed_mm_min: 600, power_percent: 25 }],
+        }),
+      });
+      if (!projectResponse.ok) throw new Error(`Could not create long generated screenshot project: ${projectResponse.status} ${await projectResponse.text()}`);
+      const project = await projectResponse.json();
+      const jobResponse = await fetch(`/api/v1/projects/${project.id}/generate`, { method: 'POST', headers, body: JSON.stringify({ revision: project.revision }) });
+      if (!jobResponse.ok) throw new Error(`Could not generate screenshot job: ${jobResponse.status} ${await jobResponse.text()}`);
+      return { project, job: await jobResponse.json() };
+    }, sourceJobID);
+    await page.locator('#refresh').click();
+    const runningGeneratedRow = page.locator('#job-list li').filter({ hasText: runningGenerated.job.name });
+    await expect(runningGeneratedRow).toContainText(/queued/i);
+    await page.locator('#operator-confirmation').check();
+    await runningGeneratedRow.getByRole('button', { name: /^Start / }).click();
+    const generatedStart = page.getByRole('dialog', { name: /Start Running generated profile view\.gcode\?/ });
+    await generatedStart.getByRole('button', { name: 'Start on simulator' }).click();
+    await expect(runningGeneratedRow).toContainText(/running/i);
+    await expect(runningGeneratedRow.locator('.toolpath-summary')).toContainText(/Path progress:/, { timeout: 15000 });
+    await expect(runningGeneratedRow.locator('.toolpath-segment.path-active')).toHaveCount(1);
+    await expect(runningGeneratedRow.locator('.toolpath-profile-bounds')).toHaveCount(1);
+    await expect(runningGeneratedRow.locator('.toolpath-legend')).toContainText(/not sensed or verified machine travel/i);
+    await captureElement(page, '#job-list li:has-text("Running generated profile view.gcode")', 'operator-console-running-generated-view.png');
+    await expect(runningGeneratedRow).toContainText(/completed/i, { timeout: 30000 });
+    page.once('dialog', (dialog) => dialog.accept());
+    await runningGeneratedRow.getByRole('button', { name: /Delete Running generated profile view\.gcode/ }).click();
+    await expect(runningGeneratedRow).toHaveCount(0);
+    await page.evaluate(async (projectID) => {
+      const response = await fetch(`/api/v1/projects/${projectID}`, { method: 'DELETE', headers: { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: 1 }) });
+      if (!response.ok) throw new Error(`Could not remove screenshot project: ${response.status}`);
+    }, runningGenerated.project.id);
     await page.getByRole('link', { name: 'Designer' }).click();
     await page.setViewportSize({ width: 375, height: 812 });
     await captureElement(page, 'section[aria-labelledby="projects-title"]', 'designer-mobile.png');

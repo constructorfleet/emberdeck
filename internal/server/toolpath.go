@@ -28,6 +28,7 @@ func (s *Server) getToolpath(w http.ResponseWriter, r *http.Request) {
 type ProgramReview struct {
 	ProfileID       string           `json:"profile_id,omitempty"`
 	ProfileRevision int              `json:"profile_revision,omitempty"`
+	ProfileStale    bool             `json:"profile_stale,omitempty"`
 	BoundsStatus    string           `json:"bounds_status"`
 	Bounds          *toolpath.Bounds `json:"bounds,omitempty"`
 	ProfileBounds   *toolpath.Bounds `json:"profile_bounds,omitempty"`
@@ -49,7 +50,8 @@ func reviewProgram(source string, profile *MachineProfile, stale bool) ProgramRe
 	review.ProfileID, review.ProfileRevision = profile.ID, profile.Revision
 	review.ProfileBounds = &toolpath.Bounds{Min: toolpath.Point{}, Max: toolpath.Point{X: profile.WidthMM, Y: profile.HeightMM}}
 	if stale {
-		review.Warnings = append(review.Warnings, "the selected machine profile changed or was deleted after upload")
+		review.ProfileStale = true
+		review.Warnings = append(review.Warnings, "the declared machine profile changed or was deleted after this job was created")
 		return review
 	}
 	if review.Bounds == nil {
@@ -89,7 +91,8 @@ func (s *Server) currentReview(job Job) *ProgramReview {
 	profile, exists := s.profiles[job.ProfileID]
 	if !exists || profile.Revision != job.ProfileRevision {
 		copy.BoundsStatus = "unknown"
-		copy.Warnings = append(copy.Warnings, "the selected machine profile changed or was deleted after upload")
+		copy.ProfileStale = true
+		copy.Warnings = append(copy.Warnings, "the declared machine profile changed or was deleted after this job was created")
 	}
 	return &copy
 }
@@ -103,6 +106,11 @@ func (s *Server) getJobReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	review := s.currentReview(record.Job)
+	var generatedStale bool
+	if record.Provenance != nil {
+		profile, exists := s.profiles[record.Provenance.Profile.ID]
+		generatedStale = !exists || profile.Revision != record.Provenance.Profile.Revision
+	}
 	s.mu.Unlock()
 	gcode, ok := s.program(w, record)
 	if !ok {
@@ -110,7 +118,7 @@ func (s *Server) getJobReview(w http.ResponseWriter, r *http.Request) {
 	}
 	if review == nil && record.Provenance != nil {
 		profile := record.Provenance.Profile
-		generatedReview := reviewProgram(gcode, &profile, false)
+		generatedReview := reviewProgram(gcode, &profile, generatedStale)
 		review = &generatedReview
 	}
 	program := toolpath.Parse(gcode)

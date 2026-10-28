@@ -107,7 +107,7 @@ func TestUploadedProgramReviewReportsProfileBoundsAndUnknownMotion(t *testing.T)
 		t.Fatalf("update profile: %d %s", w.Code, w.Body.String())
 	}
 	w = request(t, s, "GET", "/api/v1/jobs/"+job.ID+"/review", "", "test-key")
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"bounds_status":"unknown"`) || !strings.Contains(w.Body.String(), "changed or was deleted") {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"bounds_status":"unknown"`) || !strings.Contains(w.Body.String(), `"profile_stale":true`) || !strings.Contains(w.Body.String(), "changed or was deleted") {
 		t.Fatalf("stale profile review = %d %s", w.Code, w.Body.String())
 	}
 }

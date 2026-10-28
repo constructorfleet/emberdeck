@@ -374,10 +374,13 @@ existing readiness confirmation and **Start** control to dispatch.
 The job row shows controller-acknowledged lines separately from the spatial
 toolpath. Open **View** during a supported run to see completed, active, and
 remaining XY segments, laser-off travel, and the latest available work position.
-Use **+**, **−**, **Fit**, or drag the plot to inspect it. The plot fits the
-program geometry; it does not know the physical machine bounds. An estimated
-head position assumes GRBL reports millimetres (`$13=0`), and the UI labels that
-assumption. A repeated or overlapping path can make correlation ambiguous;
+Use **+**, **−**, **Fit**, or drag the plot to inspect it. When a current profile
+is available, the plot includes its declared work area as a dashed rectangle.
+This is operator-declared profile data; it is not sensed or verified machine
+travel. If the profile changed or was removed, the preview hides the rectangle
+and reports that its work area is stale. An estimated head position assumes
+GRBL reports millimetres (`$13=0`), and the UI labels that assumption. A
+repeated or overlapping path can make correlation ambiguous;
 missing coordinates, disconnects, pauses, and restarts can leave progress
 unknown. If the server marks a job interrupted, its last reported work position
 remains in the job record for context, but the plot hides the head marker because
@@ -394,6 +397,8 @@ operator supervision, an enclosure interlock, or an emergency stop.
 ![Running job with its authenticated camera feed beside progress and controls](assets/screenshots/operator-camera-monitor.png)
 
 ![Running program with estimated live toolpath, head marker, legend, and G-code source open](assets/screenshots/operator-console-running-view.png)
+
+![Running designer-generated program with its declared profile work area clearly marked as not verified machine travel](assets/screenshots/operator-console-running-generated-view.png)
 
 ## Pause and resume
 
