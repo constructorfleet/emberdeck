@@ -69,6 +69,7 @@ jobs:
             suffix=""; [ "$GOOS" != windows ] || suffix=.exe
             go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "dist/bin/emberdeck-$GOOS-$GOARCH$suffix" ./cmd/emberdeck
           done
+          python scripts/artifact-smoke.py dist/bin/emberdeck-linux-amd64 --expected-version "$VERSION"
           cd dist/bin && sha256sum * > SHA256SUMS
       - name: Attach binaries
         env:
