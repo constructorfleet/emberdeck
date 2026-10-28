@@ -213,7 +213,12 @@ def run(binary: pathlib.Path, expected_version: str):
             if status != 201:
                 raise SmokeFailure(f"upload returned HTTP {status}")
             job_id = job["id"]
-            request(base, f"/api/v1/jobs/{job_id}/start", "POST", {"driver_id": "local", "confirmed": True})
+            request(
+                base,
+                f"/api/v1/jobs/{job_id}/start",
+                "POST",
+                {"driver_id": "local", "confirmed": True, "bounds_override": True},
+            )
 
             def running_and_acked():
                 _, current = request(base, f"/api/v1/jobs/{job_id}")
