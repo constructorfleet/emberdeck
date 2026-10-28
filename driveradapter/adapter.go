@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -203,6 +204,7 @@ type Session struct {
 	capabilities Capabilities
 	started      bool
 	closed       bool
+	hasStatus    bool
 	lastAccepted int
 	lastExecuted int
 	lastTotal    int
@@ -258,32 +260,51 @@ func (s *Session) validateStatus(status Status) error {
 	if status.AcceptedLines < 0 || status.TotalLines < status.AcceptedLines {
 		return fmt.Errorf("%w: invalid accepted line count", ErrProtocol)
 	}
-	if s.lastTotal != 0 && status.TotalLines != s.lastTotal {
+	if s.hasStatus && status.TotalLines != s.lastTotal {
 		return fmt.Errorf("%w: total line count changed during lease", ErrProtocol)
 	}
-	s.lastTotal = status.TotalLines
 	if status.AcceptedLines < s.lastAccepted {
 		return fmt.Errorf("%w: accepted line count regressed", ErrProtocol)
 	}
-	s.lastAccepted = status.AcceptedLines
 	if status.ExecutedLines != nil {
 		if *status.ExecutedLines < 0 || *status.ExecutedLines > status.AcceptedLines || *status.ExecutedLines < s.lastExecuted {
 			return fmt.Errorf("%w: executed line count is inconsistent or regressed", ErrProtocol)
 		}
-		s.lastExecuted = *status.ExecutedLines
+	}
+	if status.State == StateCompleted && (status.AcceptedLines != status.TotalLines ||
+		(status.ExecutedLines != nil && *status.ExecutedLines != status.TotalLines)) {
+		return fmt.Errorf("%w: completed status requires all accepted and reported executed lines", ErrProtocol)
 	}
 	if status.Position != nil && !s.capabilities.PositionFeedback {
 		return fmt.Errorf("%w: position returned without position-feedback capability", ErrProtocol)
+	}
+	if status.Position != nil && (!isFinite(status.Position.X) || !isFinite(status.Position.Y) || !isFinite(status.Position.Z)) {
+		return fmt.Errorf("%w: position coordinates must be finite", ErrProtocol)
 	}
 	switch status.PositionFeedback {
 	case FeedbackConfirmed, FeedbackEstimated, FeedbackUnknown, FeedbackUnavailable:
 	default:
 		return fmt.Errorf("%w: invalid position feedback confidence %q", ErrProtocol, status.PositionFeedback)
 	}
+	if status.Position == nil && (status.PositionFeedback == FeedbackConfirmed || status.PositionFeedback == FeedbackEstimated) {
+		return fmt.Errorf("%w: %s position feedback requires coordinates", ErrProtocol, status.PositionFeedback)
+	}
 	if status.Position != nil && (status.PositionFeedback == FeedbackUnavailable) {
 		return fmt.Errorf("%w: position is present but marked unavailable", ErrProtocol)
 	}
+	// Commit progress only after the whole report passes validation. A rejected
+	// status must not poison the baseline used to check the next report.
+	s.lastTotal = status.TotalLines
+	s.lastAccepted = status.AcceptedLines
+	if status.ExecutedLines != nil {
+		s.lastExecuted = *status.ExecutedLines
+	}
+	s.hasStatus = true
 	return nil
+}
+
+func isFinite(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
 }
 
 func (s *Session) Pause(ctx context.Context) error {
