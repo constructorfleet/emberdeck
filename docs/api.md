@@ -467,20 +467,33 @@ project endpoints. The root SVG must declare physical `width`, `height`, and
 The viewport is mapped to lower-left-origin millimetres. A mismatched aspect ratio
 requires explicit `preserveAspectRatio="none"`.
 
-The static subset supports direct-child paths made from M/L/H/V/Z line commands,
-C/c and S/s cubic Bezier commands, and Q/q and T/t quadratic Bezier commands,
-plus lines, polylines, polygons, rectangles, circles, ellipses, and element-level
-affine transforms. Curves are flattened deterministically to editable line
-segments with a maximum 0.05 mm
-chord deviation in final imported millimetre coordinates. Flattening rejects
-curves that cannot meet that tolerance within 16 subdivision levels or the
-4,000-point import limit. Circles and ellipses are represented by 32-point
-editable polylines.
-Elliptical arcs (A/a), group nesting, CSS/style,
-text, animation, DTD/entities, external references, and active content are
-rejected. Fill, stroke, colors, and SVG metadata never become laser operations.
-Imported geometry starts unassigned; assign each object to an explicit operation
-layer before generating a job.
+The static subset supports paths made from M/L/H/V/Z line commands, C/c and
+S/s cubic Bezier commands, and Q/q and T/t quadratic Bezier commands, plus
+lines, polylines, polygons, rectangles, circles, ellipses, and affine element
+transforms. Nested `<g>` groups compose their transforms with descendant groups
+and elements. Groups accept only `id` and `transform` attributes and may nest up
+to 16 levels. The root may be unqualified or use the official SVG namespace;
+foreign element namespaces and namespaced attributes are rejected.
+
+Static `<text>` elements are converted to open editable strokes using the fixed
+`emberdeck-stick-v1` font. `font-family` must equal that font ID, and `font-size`
+must be a unitless number from 1 to 100 SVG user units. Optional `x` and `y` are
+finite unitless numbers defaulting to zero. Text accepts 1–32 ASCII characters:
+A–Z, a–z, digits, space, and `. , : ; ! ? + - / _ ( )`; lowercase uses
+uppercase glyph strokes. Only `x`, `y`, `font-family`, `font-size`, `id`, and
+`transform` are accepted on `<text>`. Style and other unsupported attributes,
+other fonts, and nested elements such as `<tspan>` are rejected.
+
+Curves are flattened deterministically to editable line segments with a maximum
+0.05 mm chord deviation in final imported millimetre coordinates. Flattening
+rejects curves that cannot meet that tolerance within 16 subdivision levels or
+the 4,000-point import limit. Circles and ellipses are represented by 32-point
+editable polylines. Elliptical arcs (A/a), CSS/style, animation, DTD/entities,
+external references, embedded raster images, and active content are rejected.
+Fill, stroke, colors, and SVG metadata never become laser operations. Imported
+geometry, including text strokes, starts unassigned; assign each object to an
+explicit operation layer before generating a job. Raster engraving is not
+implemented.
 
 ## Editable design projects
 

@@ -231,10 +231,10 @@ async function main() {
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.getByRole('button', { name: 'New vector project' }).click();
     await page.locator('#vector-name').fill('Imported SVG paths');
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="90mm" height="55mm" viewBox="0 0 90 55"><g id="outer" transform="translate(5 2)"><g id="inner" transform="translate(5 0)"><path d="M10 45 L35 45 L35 25 L10 25 Z" transform="translate(2 0)"/><path d="M50 45 C58 25 72 25 80 45"/></g></g></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="90mm" height="55mm" viewBox="0 0 90 55"><g id="outer" transform="translate(5 2)"><g id="inner" transform="translate(5 0)"><path d="M10 45 L35 45 L35 25 L10 25 Z" transform="translate(2 0)"/><path d="M50 45 C58 25 72 25 80 45"/></g></g><text x="8" y="18" font-family="emberdeck-stick-v1" font-size="12">DECK 42</text></svg>`;
     await page.locator('#vector-svg-file').setInputFiles({ name: 'imported-shapes.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(svg) });
-    await expect(page.locator('#notice .notice-message')).toContainText('Imported 2 editable SVG paths');
-    await expect(page.locator('#vector-object-list li')).toHaveCount(2);
+    await expect(page.locator('#notice .notice-message')).toContainText('Imported 3 editable SVG paths');
+    await expect(page.locator('#vector-object-list li')).toHaveCount(3);
     await captureElement(page, '#vector-form', 'designer-svg-import.png');
     await page.setViewportSize({ width: 390, height: 844 });
     await captureElement(page, '#vector-form', 'designer-svg-import-mobile.png');

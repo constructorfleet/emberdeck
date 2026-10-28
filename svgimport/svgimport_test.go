@@ -29,6 +29,84 @@ func TestParseConvertsViewBoxPolylineToLowerLeftMillimetres(t *testing.T) {
 	}
 }
 
+func TestParseImportsBoundedMonolineSVGTextAsOpenGeometry(t *testing.T) {
+	source := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="40mm" height="20mm" viewBox="0 0 40 20"><g transform="translate(2 3)"><text x="1" y="10" transform="translate(1 2)" font-family="emberdeck-stick-v1" font-size="7">A</text></g></svg>`)
+	got, err := svgimport.Parse(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Objects) != 1 || len(got.Objects[0].Subpaths) != 3 {
+		t.Fatalf("imported text geometry = %#v, want one object with three strokes", got.Objects)
+	}
+	wants := [][]svgimport.Point{
+		{{XMM: 4, YMM: 5}, {XMM: 6.5, YMM: 12}},
+		{{XMM: 6.5, YMM: 12}, {XMM: 9, YMM: 5}},
+		{{XMM: 5, YMM: 8}, {XMM: 8, YMM: 8}},
+	}
+	for pathIndex, want := range wants {
+		path := got.Objects[0].Subpaths[pathIndex]
+		if path.Closed || len(path.Points) != len(want) {
+			t.Fatalf("text stroke %d = %#v, want open stroke %#v", pathIndex, path, want)
+		}
+		for pointIndex, point := range want {
+			if path.Points[pointIndex] != point {
+				t.Fatalf("text stroke %d point %d = %#v, want %#v", pathIndex, pointIndex, path.Points[pointIndex], point)
+			}
+		}
+	}
+}
+
+func TestParseRejectsUnsupportedMonolineSVGTextFeatures(t *testing.T) {
+	tooLong := strings.Repeat("A", 33)
+	cases := []struct {
+		name, element, message string
+	}{
+		{"missing font", `<text font-size="7">A</text>`, "font-family"},
+		{"foreign font", `<text font-family="Remote Font" font-size="7">A</text>`, "font-family"},
+		{"font unit", `<text font-family="emberdeck-stick-v1" font-size="7px">A</text>`, "unitless"},
+		{"font too large", `<text font-family="emberdeck-stick-v1" font-size="101">A</text>`, "from 1 to 100"},
+		{"unsupported glyph", `<text font-family="emberdeck-stick-v1" font-size="7">A@</text>`, "supports ASCII"},
+		{"too many characters", `<text font-family="emberdeck-stick-v1" font-size="7">` + tooLong + `</text>`, "1 to 32"},
+		{"style attribute", `<text font-family="emberdeck-stick-v1" font-size="7" style="font-weight:bold">A</text>`, "attribute"},
+		{"tspan", `<text font-family="emberdeck-stick-v1" font-size="7"><tspan>A</tspan></text>`, "nested SVG text element"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			source := `<svg width="40mm" height="20mm" viewBox="0 0 40 20">` + test.element + `</svg>`
+			if _, err := svgimport.Parse([]byte(source)); err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("Parse error = %v, want an error containing %q", err, test.message)
+			}
+		})
+	}
+}
+
+func TestParseAcceptsMonolineSVGTextAtFontAndLengthLimits(t *testing.T) {
+	cases := []struct {
+		name, dimensions, text string
+		wantStrokes            int
+	}{
+		{"minimum font size", `width="40mm" height="20mm" viewBox="0 0 40 20"`, `<text x="1" y="10" font-family="emberdeck-stick-v1" font-size="1">A</text>`, 3},
+		{"maximum font size and text length", `width="2800mm" height="200mm" viewBox="0 0 2800 200"`, `<text x="0" y="100" font-family="emberdeck-stick-v1" font-size="100">` + strings.Repeat("A", 32) + `</text>`, 96},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			source := `<svg ` + test.dimensions + `>` + test.text + `</svg>`
+			got, err := svgimport.Parse([]byte(source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Objects) != 1 || len(got.Objects[0].Subpaths) != test.wantStrokes {
+				t.Fatalf("text strokes = %#v, want %d", got.Objects, test.wantStrokes)
+			}
+			for i, stroke := range got.Objects[0].Subpaths {
+				if stroke.Closed || len(stroke.Points) < 2 {
+					t.Fatalf("text stroke %d = %#v, want an open stroke", i, stroke)
+				}
+			}
+		})
+	}
+}
+
 func TestParseRejectsActiveExternalAndUnmodeledSVGContent(t *testing.T) {
 	cases := []struct {
 		name   string

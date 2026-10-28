@@ -104,6 +104,53 @@ func TestSVGImportAPIComposesNestedGroupsAndReturnsUnassignedGeometry(t *testing
 	}
 }
 
+func TestSVGImportAPIConvertsMonolineTextAndRejectsUnsupportedText(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	request := func(source string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/svg-import", strings.NewReader(source))
+		r.Header.Set("Authorization", "Bearer test-key")
+		r.Header.Set("Content-Type", "image/svg+xml")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	source := `<svg width="40mm" height="20mm" viewBox="0 0 40 20"><text x="2" y="10" font-family="emberdeck-stick-v1" font-size="7">A</text></svg>`
+	response := request(source)
+	if response.Code != http.StatusOK {
+		t.Fatalf("monoline SVG text import = %d %s", response.Code, response.Body.String())
+	}
+	var imported struct {
+		Objects []struct {
+			Subpaths []struct {
+				Points []struct {
+					X float64 `json:"x_mm"`
+					Y float64 `json:"y_mm"`
+				} `json:"points"`
+				Closed bool `json:"closed"`
+			} `json:"subpaths"`
+			OperationID string `json:"operation_id"`
+		} `json:"objects"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &imported); err != nil {
+		t.Fatal(err)
+	}
+	if len(imported.Objects) != 1 || len(imported.Objects[0].Subpaths) != 3 || imported.Objects[0].OperationID != "" {
+		t.Fatalf("monoline text should become unassigned editable geometry: %+v", imported.Objects)
+	}
+	first := imported.Objects[0].Subpaths[0]
+	if first.Closed || len(first.Points) != 2 || first.Points[0].X != 2 || first.Points[0].Y != 10 || first.Points[1].X != 4.5 || first.Points[1].Y != 17 {
+		t.Fatalf("first imported text stroke = %+v", first)
+	}
+	unsupported := request(`<svg width="40mm" height="20mm" viewBox="0 0 40 20"><text font-family="emberdeck-stick-v1" font-size="7" style="fill:red">A</text></svg>`)
+	if unsupported.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("styled SVG text = %d %s, want unsupported content rejection", unsupported.Code, unsupported.Body.String())
+	}
+}
+
 func TestSVGImportRequiresImageContentTypeAndRejectsActiveContent(t *testing.T) {
 	s, err := server.Open(t.TempDir(), "test-key")
 	if err != nil {
