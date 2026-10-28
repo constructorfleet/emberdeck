@@ -116,7 +116,7 @@ async function uploadJob(page, name, lineCount) {
 }
 
 async function startJob(page, row) {
-  const start = row.getByRole('button', { name: 'Start' });
+  const start = row.getByRole('button', { name: /^Start / });
   await expect(start).toBeDisabled();
   await page.locator('#operator-confirmation').check();
   const boundsOverride = row.getByRole('checkbox', { name: /Override .* bounds review/ });
@@ -125,9 +125,24 @@ async function startJob(page, row) {
     await boundsOverride.check();
   }
   await expect(start).toBeEnabled();
-  await start.click();
+  await confirmStart(page, start);
   await expect(row).toContainText(/running/i);
   return row.locator('progress');
+}
+
+async function confirmStart(page, start, driver = 'simulator') {
+  await start.click();
+  const dialog = page.getByRole('dialog', { name: /^Start .*\?$/ });
+  await expect(dialog).toContainText(driver);
+  await dialog.getByRole('button', { name: `Start on ${driver}` }).click();
+  await expect(dialog).toBeHidden();
+}
+
+async function confirmCancel(page, cancel) {
+  await cancel.click();
+  const dialog = page.getByRole('dialog', { name: /^Cancel .*\?$/ });
+  await dialog.getByRole('button', { name: 'Cancel job' }).click();
+  await expect(dialog).toBeHidden();
 }
 
 async function waitForProgress(progress, total) {
@@ -152,7 +167,7 @@ test('operator uploads, confirms, monitors, views, completes, and deletes a job'
 
   const selectedDriver = await page.locator('#driver-select').inputValue();
   const pollCountBeforeView = driverPolls;
-  await row.getByRole('button', { name: 'View', exact: true }).click();
+  await row.getByRole('button', { name: /^View / }).click();
   await expect(page.locator('#program-panel')).toBeVisible();
   await expect(page.locator('#program-code')).toContainText('G1 X1 F100');
   await expect.poll(() => driverPolls, { timeout: 5000 }).toBeGreaterThan(pollCountBeforeView);
@@ -174,7 +189,7 @@ test('operator can cancel a running job', async ({ page }) => {
   const row = await uploadJob(page, `operator-cancel-${test.info().retry}.gcode`, lines);
   const progress = await startJob(page, row);
   await waitForProgress(progress, lines);
-  await row.getByRole('button', { name: 'Cancel' }).click();
+  await confirmCancel(page, row.getByRole('button', { name: /^Cancel / }));
   await expect(row).toContainText(/canceled/i, { timeout: 10000 });
   await expect(row.getByRole('button', { name: /Delete/ })).toBeVisible();
 });
@@ -202,12 +217,12 @@ test('running uploaded G-code shows a fitted camera-free toolpath with estimated
   await expect(row.locator('.toolpath-summary')).toContainText('Static program review · bounds unknown');
   const boundsOverride = row.getByRole('checkbox', { name: /Override unknown bounds review/ });
   await expect(boundsOverride).toBeVisible();
-  const start = row.getByRole('button', { name: 'Start' });
+  const start = row.getByRole('button', { name: /^Start / });
   await page.locator('#operator-confirmation').check();
   await expect(start).toBeDisabled();
   await boundsOverride.check();
   await expect(start).toBeEnabled();
-  await start.click();
+  await confirmStart(page, start);
   await expect(row).toContainText(/running/i);
   const progress = row.locator('progress');
   await expect(row.locator('.toolpath-live')).toBeVisible({ timeout: 10000 });
@@ -238,14 +253,17 @@ test('operator pauses on controller acknowledgement, confirms resume, and comple
   const row = await uploadJob(page, name, lines);
   const progress = await startJob(page, row);
   await waitForProgress(progress, lines);
-  await row.getByRole('button', { name: 'View', exact: true }).click();
+  await row.getByRole('button', { name: /^View / }).click();
 
-  await row.getByRole('button', { name: 'Pause' }).click();
+  const pause = row.getByRole('button', { name: `Pause ${name}` });
+  await expect(pause).toHaveAccessibleDescription(/without canceling it; Resume continues it/);
+  await pause.click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(row).toContainText(/pausing/i);
-  await expect(row.getByRole('button', { name: 'Pausing…' })).toBeDisabled();
+  await expect(row.getByRole('button', { name: /^Pausing… / })).toBeDisabled();
   await expect(row).toContainText(/paused/i, { timeout: 15000 });
   await expect(row).toContainText('Last controller report: Hold:0');
-  await expect(row.getByRole('button', { name: 'Resume' })).toBeVisible();
+  await expect(row.getByRole('button', { name: /^Resume / })).toBeVisible();
   await expect.poll(() => controllerStates.filter((state) => state === 'Hold:0').length, { timeout: 5000 }).toBeGreaterThanOrEqual(2);
   const pausedAt = await progress.evaluate((node) => node.value);
   await page.waitForTimeout(2500);
@@ -253,8 +271,9 @@ test('operator pauses on controller acknowledgement, confirms resume, and comple
   await expect(page.locator('#program-panel')).toBeVisible();
   await expect(page.locator('#driver-select')).toHaveValue('simulator');
 
-  const resume = row.getByRole('button', { name: 'Resume' });
+  const resume = row.getByRole('button', { name: `Resume ${name}` });
   await expect(resume).toBeDisabled();
+  await expect(resume).toHaveAccessibleDescription(/Needs the safety check/);
   await page.locator('#operator-confirmation').check();
   await expect(resume).toBeEnabled();
   const resumeStateIndex = controllerStates.length;
@@ -275,16 +294,16 @@ test('operator can cancel a paused job and delete the interrupted job', async ({
   const row = await uploadJob(page, `operator-cancel-paused-${test.info().retry}.gcode`, 1000);
   const progress = await startJob(page, row);
   await waitForProgress(progress, 1000);
-  await row.getByRole('button', { name: 'Pause' }).click();
+  await row.getByRole('button', { name: /^Pause / }).click();
   await expect(row).toContainText(/paused/i, { timeout: 15000 });
   await expect(row).toContainText('Last controller report: Hold:0');
-  await expect(row.getByRole('button', { name: 'Delete' })).toHaveCount(0);
+  await expect(row.getByRole('button', { name: /^Delete / })).toHaveCount(0);
 
-  await row.getByRole('button', { name: 'Cancel' }).click();
+  await confirmCancel(page, row.getByRole('button', { name: /^Cancel / }));
   await expect(row).toContainText(/canceled/i, { timeout: 10000 });
-  await expect(row.getByRole('button', { name: 'Delete' })).toBeVisible();
+  await expect(row.getByRole('button', { name: /^Delete / })).toBeVisible();
   page.once('dialog', (dialog) => dialog.accept());
-  await row.getByRole('button', { name: 'Delete' }).click();
+  await row.getByRole('button', { name: /^Delete / }).click();
   await expect(row).toHaveCount(0);
 });
 
@@ -319,7 +338,7 @@ test('operator pages and filters the library while programs load only on view', 
   await expect(rows).toHaveCount(1);
   await expect(rows.first()).toContainText(`${prefix}-00.gcode`);
   await expect(page.getByRole('button', { name: 'Older →' })).toBeDisabled();
-  await rows.first().getByRole('button', { name: 'View', exact: true }).click();
+  await rows.first().getByRole('button', { name: /^View / }).click();
   await expect(page.locator('#program-code')).toHaveText('G21\nG90\nM5\n');
 
   await page.getByLabel('State', { exact: true }).selectOption({ label: 'Completed' });
@@ -334,4 +353,82 @@ test('operator pages and filters the library while programs load only on view', 
     expect(body).not.toContain('"gcode"');
     expect(body).not.toContain('"lease"');
   }
+});
+
+test('Start explains why it is unavailable, then confirms the job and driver before dispatch', async ({ page }) => {
+  const startRequests = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && /\/api\/v1\/jobs\/[^/]+\/start$/.test(new URL(request.url()).pathname)) startRequests.push(request);
+  });
+  // No driver worker is connected until the route is removed.
+  await page.route('**/api/v1/drivers', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
+  await page.goto('/');
+  await page.locator('#api-key').fill(apiKey);
+  await page.getByRole('button', { name: /Connect/ }).click();
+  await expect(page.locator('#driver-select')).toContainText('No drivers connected');
+  const name = `operator-dispatch-confirm-${test.info().retry}.gcode`;
+  const row = await uploadJob(page, name, 20);
+
+  const view = row.getByRole('button', { name: `View ${name}` });
+  const start = row.getByRole('button', { name: `Start ${name}` });
+  await expect(view).toBeVisible();
+  await expect(row.getByRole('button', { name: `Delete ${name}` })).toBeVisible();
+  await page.locator('#operator-confirmation').check();
+  const boundsOverride = row.getByRole('checkbox', { name: /Override .* bounds review/ });
+  if (await boundsOverride.count()) await boundsOverride.check();
+
+  await expect(start).toHaveAttribute('aria-disabled', 'true');
+  await expect(start).not.toHaveAttribute('disabled', /.*/);
+  await expect(start).toHaveAccessibleDescription(/Needs a connected driver/);
+  await expect(row.getByText('Needs a connected driver')).toBeVisible();
+  await view.focus();
+  await page.keyboard.press('Tab');
+  await expect(start).toBeFocused();
+  await page.keyboard.press('Enter');
+  await start.click({ force: true });
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(startRequests).toHaveLength(0);
+
+  await page.unroute('**/api/v1/drivers');
+  await expect(page.locator('#driver-select')).toHaveValue('simulator', { timeout: 5000 });
+  await expect(start).not.toHaveAttribute('aria-disabled', 'true');
+  await start.click();
+  const dialog = page.getByRole('dialog', { name: `Start ${name}?` });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText(name);
+  await expect(dialog).toContainText('simulator');
+  await expect(dialog.getByRole('button', { name: 'Go back' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(start).toBeFocused();
+  await expect(row).toContainText(/queued/i);
+  expect(startRequests).toHaveLength(0);
+
+  await start.click();
+  await dialog.getByRole('button', { name: 'Start on simulator' }).click();
+  await expect(row).toContainText(/running|completed/i);
+  expect(startRequests).toHaveLength(1);
+  expect(startRequests[0].postDataJSON()).toMatchObject({ driver_id: 'simulator', confirmed: true });
+});
+
+test('Cancel asks for confirmation naming the job and returns focus when kept running', async ({ page }) => {
+  await connect(page);
+  const lines = 1000;
+  const name = `operator-cancel-confirm-${test.info().retry}.gcode`;
+  const row = await uploadJob(page, name, lines);
+  const progress = await startJob(page, row);
+  await waitForProgress(progress, lines);
+  await expect(row.getByRole('button', { name: `View ${name}` })).toBeVisible();
+  const cancel = row.getByRole('button', { name: `Cancel ${name}` });
+  await cancel.click();
+  const dialog = page.getByRole('dialog', { name: `Cancel ${name}?` });
+  await expect(dialog).toContainText('simulator');
+  await expect(dialog).toContainText(/cannot be resumed/i);
+  await dialog.getByRole('button', { name: 'Keep running' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(cancel).toBeFocused();
+  await expect(row).toContainText(/running/i);
+  await cancel.click();
+  await dialog.getByRole('button', { name: 'Cancel job' }).click();
+  await expect(row).toContainText(/canceled/i, { timeout: 10000 });
 });

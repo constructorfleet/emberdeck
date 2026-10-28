@@ -219,7 +219,7 @@ async function main() {
     await page.getByRole('button', { name: /Add to library/ }).click();
     const row = page.locator('#job-list li').filter({ hasText: name });
     await expect(row).toContainText(/queued/i);
-    await row.getByRole('button', { name: 'View', exact: true }).click();
+    await row.getByRole('button', { name: /^View / }).click();
     await page.locator('#close-program').click();
     await expect(row.locator('.toolpath-summary')).toContainText(/bounds out_of_bounds/i);
     await expect(row.locator('.toolpath-profile-bounds')).toHaveCount(1);
@@ -230,16 +230,20 @@ async function main() {
     await page.locator('#operator-confirmation').check();
     const boundsOverride = row.getByRole('checkbox', { name: /Override .* bounds review/ });
     if (await boundsOverride.count()) await boundsOverride.check();
-    await row.getByRole('button', { name: 'Start' }).click();
+    await row.getByRole('button', { name: /^Start / }).click();
+    const startDialog = page.getByRole('dialog', { name: `Start ${name}?` });
+    await expect(startDialog).toBeVisible();
+    await captureElement(page, '#action-dialog', 'operator-console-start-confirm.png');
+    await startDialog.getByRole('button', { name: 'Start on simulator' }).click();
     const progress = row.locator('progress');
     await expect.poll(() => progress.evaluate((node) => node.value), { timeout: 15000 }).toBeGreaterThan(0);
-    await row.getByRole('button', { name: 'View', exact: true }).click();
+    await row.getByRole('button', { name: /^View / }).click();
     await expect(page.locator('#program-panel')).toBeVisible();
     await expect(row.locator('.toolpath-live')).toBeVisible();
     await expect(row.locator('.toolpath-summary')).toContainText(/estimated/i);
     await capture(page, 'operator-console-running-view.png');
 
-    await row.getByRole('button', { name: 'Pause' }).click();
+    await row.getByRole('button', { name: /^Pause / }).click();
     await expect(row).toContainText(/paused/i, { timeout: 15000 });
     await expect(row).toContainText('Last controller report: Hold:0');
     const holdReports = [];
@@ -252,7 +256,7 @@ async function main() {
       if (job) holdReports.push(job.controller_state);
       return holdReports.filter((state) => state === 'Hold:0').length;
     }, { timeout: 5000, intervals: [250] }).toBeGreaterThanOrEqual(2);
-    await row.getByRole('button', { name: 'View', exact: true }).click();
+    await row.getByRole('button', { name: /^View / }).click();
     await capture(page, 'operator-console-paused.png');
 
     await page.setViewportSize({ width: 390, height: 844 });
@@ -260,14 +264,14 @@ async function main() {
     await page.setViewportSize({ width: 1440, height: 1000 });
 
     await page.locator('#operator-confirmation').check();
-    await row.getByRole('button', { name: 'Resume' }).click();
+    await row.getByRole('button', { name: /^Resume / }).click();
     await expect(page.locator('#operator-confirmation')).not.toBeChecked();
     await expect(row).toContainText(/completed/i, { timeout: 120000 });
-    await row.getByRole('button', { name: 'View', exact: true }).click();
+    await row.getByRole('button', { name: /^View / }).click();
     await capture(page, 'operator-console-completed.png');
 
     page.once('dialog', (dialog) => dialog.accept());
-    await row.getByRole('button', { name: 'Delete' }).click();
+    await row.getByRole('button', { name: /^Delete / }).click();
     await expect(page.locator('#job-list li')).toHaveCount(0);
     const canceledName = 'documented-paused-cancel.gcode';
     const canceledProgram = `${Array.from({ length: 1200 }, () => 'G1 X1 F100').join('\n')}\n`;
@@ -279,16 +283,21 @@ async function main() {
     await page.locator('#operator-confirmation').check();
     const canceledBoundsOverride = canceledRow.getByRole('checkbox', { name: /Override .* bounds review/ });
     if (await canceledBoundsOverride.count()) await canceledBoundsOverride.check();
-    await canceledRow.getByRole('button', { name: 'Start' }).click();
+    await canceledRow.getByRole('button', { name: /^Start / }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Start on simulator' }).click();
     const canceledProgress = canceledRow.locator('progress');
     await expect.poll(() => canceledProgress.evaluate((node) => node.value), { timeout: 15000 }).toBeGreaterThan(0);
-    await canceledRow.getByRole('button', { name: 'Pause' }).click();
+    await canceledRow.getByRole('button', { name: /^Pause / }).click();
     await expect(canceledRow).toContainText(/paused/i, { timeout: 15000 });
     await expect(canceledRow).toContainText('Last controller report: Hold:0');
-    await canceledRow.getByRole('button', { name: 'Cancel' }).click();
+    await canceledRow.getByRole('button', { name: /^Cancel / }).click();
+    const cancelDialog = page.getByRole('dialog', { name: `Cancel ${canceledName}?` });
+    await expect(cancelDialog).toBeVisible();
+    await captureElement(page, '#action-dialog', 'operator-console-cancel-confirm.png');
+    await cancelDialog.getByRole('button', { name: 'Cancel job' }).click();
     await expect(canceledRow).toContainText(/canceled/i, { timeout: 10000 });
-    await expect(canceledRow.getByRole('button', { name: 'Delete' })).toBeVisible();
-    await canceledRow.getByRole('button', { name: 'View' }).click();
+    await expect(canceledRow.getByRole('button', { name: /^Delete / })).toBeVisible();
+    await canceledRow.getByRole('button', { name: /^View / }).click();
     await capture(page, 'operator-console-canceled.png');
     await captureDocumentationNavigation(browser);
     await context.close();
