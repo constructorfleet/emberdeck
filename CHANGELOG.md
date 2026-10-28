@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/constructorfleet/emberdeck/compare/v0.9.0...v0.10.0) (2026-10-28)
+
+
+### Features
+
+* import bounded monoline SVG text ([#112](https://github.com/constructorfleet/emberdeck/issues/112)) ([27ca326](https://github.com/constructorfleet/emberdeck/commit/27ca326fbb30ad4a071eee9732d905ba70379f0c))
+
 ## [0.9.0](https://github.com/constructorfleet/emberdeck/compare/v0.8.0...v0.9.0) (2026-10-28)
 
 
