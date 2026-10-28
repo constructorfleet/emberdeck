@@ -90,17 +90,21 @@ window.EmberDeckJobHistory = (() => {
     host.append(list);
   }
 
-  // load fetches and renders one job's history into host. A response for a
-  // job that is no longer shown is ignored.
+  let latestRequest = 0;
+
+  // load fetches and renders one job's history into host. Only the newest
+  // request renders, so a slow earlier response cannot replace newer history
+  // or show a job that is no longer open.
   async function load(host, id, api) {
+    const request = ++latestRequest;
     host.dataset.jobId = id;
     host.hidden = false;
     try {
       const body = await api(`/api/v1/jobs/${encodeURIComponent(id)}/events`);
-      if (host.dataset.jobId !== id) return;
+      if (request !== latestRequest) return;
       renderEvents(host, Array.isArray(body.events) ? body.events : []);
     } catch (error) {
-      if (host.dataset.jobId !== id) return;
+      if (request !== latestRequest) return;
       host.replaceChildren(element("h3", "job-history-title", "Event history"), element("p", "job-history-empty", `History unavailable: ${error.message}`));
     }
   }
