@@ -1142,12 +1142,6 @@ footer {
   cursor: nwse-resize;
 }
 
-.vector-resize-handle:focus-visible,
-.vector-path:focus-visible {
-  outline: 3px solid var(--accent);
-  outline-offset: 4px;
-}
-
 .vector-path.engrave-path {
   stroke: var(--accent);
 }
