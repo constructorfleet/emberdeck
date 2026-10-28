@@ -115,3 +115,23 @@ func TestFailedPersistenceDoesNotPublishJob(t *testing.T) {
 		t.Fatalf("published unpersisted job: %s", w.Body.String())
 	}
 }
+
+func TestOperatorDeletesQueuedJob(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := request(t, s, "POST", "/api/v1/jobs", `{"name":"scrap","gcode":"M5"}`, "test-key")
+	var job struct{ ID string }
+	if err := json.Unmarshal(w.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	w = request(t, s, "DELETE", "/api/v1/jobs/"+job.ID, "", "test-key")
+	if w.Code != 204 {
+		t.Fatalf("delete: %d %s", w.Code, w.Body.String())
+	}
+	w = request(t, s, "GET", "/api/v1/jobs/"+job.ID, "", "test-key")
+	if w.Code != 404 {
+		t.Fatalf("deleted job remains visible: %d", w.Code)
+	}
+}

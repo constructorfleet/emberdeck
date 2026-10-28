@@ -58,6 +58,7 @@ func Open(dir, key string) (*Server, error) {
 	s.mux.HandleFunc("POST /api/v1/jobs", s.upload)
 	s.mux.HandleFunc("GET /api/v1/jobs", s.list)
 	s.mux.HandleFunc("GET /api/v1/jobs/{id}", s.get)
+	s.mux.HandleFunc("DELETE /api/v1/jobs/{id}", s.delete)
 	return s, nil
 }
 
@@ -176,4 +177,21 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, 200, job)
+}
+
+func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := r.PathValue("id")
+	if _, ok := s.jobs[id]; !ok {
+		fail(w, 404, "job not found")
+		return
+	}
+	jobs := s.copyJobs()
+	delete(jobs, id)
+	if err := s.save(jobs); err != nil {
+		fail(w, 500, "could not persist deletion")
+		return
+	}
+	w.WriteHeader(204)
 }
