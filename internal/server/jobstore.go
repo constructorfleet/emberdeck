@@ -60,8 +60,9 @@ type workerJob struct {
 // jobRecord is one durable metadata entry in jobs.json (format version 3).
 type jobRecord struct {
 	Job
-	Lease  string `json:"lease,omitempty"`
-	SHA256 string `json:"sha256"`
+	Lease                 string `json:"lease,omitempty"`
+	SHA256                string `json:"sha256"`
+	TerminalReceiptDigest string `json:"terminal_receipt_digest,omitempty"`
 	// segments is the toolpath segment count, derived at dispatch for telemetry
 	// validation so progress reports never re-read the program.
 	segments int
