@@ -53,6 +53,10 @@ that page. Choose **Job library** to return to G-code intake and stored
 programs. Generating a design creates a separate queued job; inspect and
 explicitly dispatch it from the job library.
 
+On phones, page links move to a second row below the brand and driver selection
+stacks below its label. The library uses a two-column layout on wide screens and
+expands to 1600 px at viewport widths of 1600 px and above.
+
 ![The dedicated designer page with profile and project editing separated from the job library](assets/screenshots/designer-dedicated-page.png)
 
 ## Find the job library controls

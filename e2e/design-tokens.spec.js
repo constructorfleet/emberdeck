@@ -84,7 +84,7 @@ test('console text meets measured contrast and minimum type sizes', async ({ pag
   const samples = await page.evaluate(() => {
     const selectors = [
       ['metadata', '.version'],
-      ['metadata', '.step-number'],
+      ['metadata', '.top-meta > span:nth-child(2)'],
       ['functional', '.hint'],
       ['metadata', '.dropzone > span:not(.upload-icon)'],
       ['metadata', 'footer'],
