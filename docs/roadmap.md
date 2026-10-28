@@ -23,10 +23,12 @@ where indicated. This is an early foundation, not a production certification.
 - [ ] Supported-controller hardware qualification matrix and test evidence
 - [ ] Installer/package validation on actual Pi, Windows, Mac, Linux, and LXC
 
-Only the GRBL protocol and a rectangle vector-engraving generator are implemented.
-Ruida, proprietary DSP protocols, image rasterization, general CAD/CAM geometry,
-and OctoPrint plugin compatibility are outside the current implementation.
-Plugins can add adapters in later work.
+The designer supports a rectangle-only v1 project and schema-v2 rectangle,
+ellipse, line, and generic path geometry with vector cutting and engraving.
+SVG/text import, rotation/alignment, arbitrary path editing, and raster
+engraving remain outside the current implementation. Ruida, proprietary DSP
+protocols, and OctoPrint plugin compatibility are also unsupported. Plugins
+can add adapters in later work.
 
 ## Feature requests
 
