@@ -5,6 +5,15 @@
 one controller connection for the assigned lease and sends progress, controller
 state, and command responses through the same poll endpoint.
 
+Embedding Go applications can instead build a `worker.AdapterRegistry`, call
+`Register(driverID, adapter, deviceID, config)`, and pass it to
+`worker.RunWithAdapterRegistry`. This routes the same HTTP-assigned job and
+server-owned lease through the registered in-process adapter. Registration is
+explicit Go wiring; it does not load code dynamically or add a command-line
+configuration screen. Adapters without settings-probe support report that
+limitation to the server, and control commands must be declared by the device's
+capabilities or the worker fails the lease closed.
+
 ## Verified program transfer
 
 The server advertises immutable content size and SHA-256 in protocol 2

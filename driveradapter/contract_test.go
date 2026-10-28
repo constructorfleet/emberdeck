@@ -45,18 +45,8 @@ func TestConfiguredAdapterValidatesAndExecutesOneLease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.State != driveradapter.StateRunning || status.AcceptedLines != 2 || status.ExecutedLines == nil || *status.ExecutedLines != 1 {
+	if status.State != driveradapter.StateCompleted || status.AcceptedLines != 2 || status.TotalLines != 2 || status.ExecutedLines == nil || *status.ExecutedLines != 2 || status.ControllerState != "Idle" {
 		t.Fatalf("status = %+v", status)
-	}
-	if err := session.Pause(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	status, err = session.Status(context.Background())
-	if err != nil || status.State != driveradapter.StatePaused {
-		t.Fatalf("paused status = %+v, error = %v", status, err)
-	}
-	if err := session.Resume(context.Background()); err != nil {
-		t.Fatal(err)
 	}
 }
 

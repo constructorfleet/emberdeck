@@ -3,13 +3,17 @@ package server_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/ConstructorFleet/emberdeck/driver"
+	"github.com/ConstructorFleet/emberdeck/driveradapter"
+	"github.com/ConstructorFleet/emberdeck/driveradapter/simulator"
 	"github.com/ConstructorFleet/emberdeck/worker"
 )
 
@@ -70,6 +74,167 @@ func TestDistributedWorkerExecutesAndCancelsJobs(t *testing.T) {
 		t.Fatalf("cancel: %d %s", w.Code, w.Body.String())
 	}
 	await(t, func() bool { state, _ := state(id); return state == "canceled" })
+}
+
+func TestRegisteredAdapterExecutesHTTPAssignedJob(t *testing.T) {
+	s := openServer(t)
+	remote := httptest.NewServer(s)
+	defer remote.Close()
+	adapter := simulator.New()
+	registry := worker.NewAdapterRegistry()
+	if err := registry.Register("adapter-simulator", adapter, "simulator-1", nil); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	workerDone := make(chan error, 1)
+	go func() {
+		workerDone <- worker.RunWithAdapterRegistry(ctx, remote.URL, "test-key", "adapter-simulator", registry, worker.Options{})
+	}()
+	defer func() {
+		cancel()
+		select {
+		case <-workerDone:
+		case <-time.After(5 * time.Second):
+			t.Error("adapter worker did not stop")
+		}
+	}()
+	await(t, func() bool {
+		w := request(t, s, "GET", "/api/v1/drivers", "", "test-key")
+		return strings.Contains(w.Body.String(), `"id":"adapter-simulator"`)
+	})
+	data, _ := json.Marshal(map[string]string{"name": "adapter.gcode", "gcode": "G21\nG90\nG1 X10 F100\nM5"})
+	w := request(t, s, "POST", "/api/v1/jobs", string(data), "test-key")
+	var job struct{ ID string }
+	if err := json.Unmarshal(w.Body.Bytes(), &job); err != nil || w.Code != 201 {
+		t.Fatalf("upload: %d %s", w.Code, w.Body.String())
+	}
+	w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"adapter-simulator","confirmed":true,"bounds_override":true}`, "test-key")
+	if w.Code != 200 {
+		t.Fatalf("dispatch: %d %s", w.Code, w.Body.String())
+	}
+	await(t, func() bool {
+		w := request(t, s, "GET", "/api/v1/jobs/"+job.ID, "", "test-key")
+		var receipt struct {
+			State string
+			Acked int
+			Total int
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &receipt); err != nil {
+			t.Fatal(err)
+		}
+		return receipt.State == "completed" && receipt.Acked == 4 && receipt.Total == 4
+	})
+	if got := adapter.StartCount(); got != 1 {
+		t.Fatalf("adapter Start count = %d, want exactly one", got)
+	}
+}
+
+func TestRegisteredAdapterFailuresFailLeaseWithoutReplay(t *testing.T) {
+	for _, failurePoint := range []string{"start", "status"} {
+		t.Run(failurePoint, func(t *testing.T) {
+			s := openServer(t)
+			remote := httptest.NewServer(s)
+			defer remote.Close()
+			adapter := &failingAdapter{inner: simulator.New(), failurePoint: failurePoint}
+			registry := worker.NewAdapterRegistry()
+			if err := registry.Register("adapter-failure", adapter, "simulator-1", nil); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			workerDone := make(chan error, 1)
+			go func() {
+				workerDone <- worker.RunWithAdapterRegistry(ctx, remote.URL, "test-key", "adapter-failure", registry, worker.Options{})
+			}()
+			defer func() {
+				cancel()
+				select {
+				case <-workerDone:
+				case <-time.After(5 * time.Second):
+					t.Error("adapter worker did not stop")
+				}
+			}()
+			await(t, func() bool {
+				w := request(t, s, "GET", "/api/v1/drivers", "", "test-key")
+				return strings.Contains(w.Body.String(), `"id":"adapter-failure"`)
+			})
+			data, _ := json.Marshal(map[string]string{"name": "adapter-failure.gcode", "gcode": "G21\nG90\nG1 X10 F100\nM5"})
+			w := request(t, s, "POST", "/api/v1/jobs", string(data), "test-key")
+			var job struct{ ID string }
+			if err := json.Unmarshal(w.Body.Bytes(), &job); err != nil || w.Code != 201 {
+				t.Fatalf("upload: %d %s", w.Code, w.Body.String())
+			}
+			w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"adapter-failure","confirmed":true,"bounds_override":true}`, "test-key")
+			if w.Code != 200 {
+				t.Fatalf("dispatch: %d %s", w.Code, w.Body.String())
+			}
+			await(t, func() bool {
+				w := request(t, s, "GET", "/api/v1/jobs/"+job.ID, "", "test-key")
+				var receipt struct{ State string }
+				if err := json.Unmarshal(w.Body.Bytes(), &receipt); err != nil {
+					t.Fatal(err)
+				}
+				return receipt.State == "failed"
+			})
+			adapter.mu.Lock()
+			starts, lease := adapter.starts, adapter.lease
+			adapter.mu.Unlock()
+			if starts != 1 || lease == "" {
+				t.Fatalf("adapter Start attempts = %d, lease = %q; want one attempt under a lease", starts, lease)
+			}
+			time.Sleep(1100 * time.Millisecond)
+			adapter.mu.Lock()
+			startsAfterIdle := adapter.starts
+			adapter.mu.Unlock()
+			if startsAfterIdle != 1 {
+				t.Fatalf("adapter Start replayed after failure: %d attempts", startsAfterIdle)
+			}
+		})
+	}
+}
+
+type failingAdapter struct {
+	inner        *simulator.Adapter
+	failurePoint string
+	mu           sync.Mutex
+	starts       int
+	lease        string
+}
+
+func (a *failingAdapter) Manifest() driveradapter.Manifest { return a.inner.Manifest() }
+func (a *failingAdapter) Discover(ctx context.Context) ([]driveradapter.Device, error) {
+	return a.inner.Discover(ctx)
+}
+func (a *failingAdapter) Configure(ctx context.Context, deviceID string, config json.RawMessage) (driveradapter.ControllerSession, error) {
+	session, err := a.inner.Configure(ctx, deviceID, config)
+	if err != nil {
+		return nil, err
+	}
+	return &failingSession{ControllerSession: session, adapter: a}, nil
+}
+
+type failingSession struct {
+	driveradapter.ControllerSession
+	adapter *failingAdapter
+}
+
+func (s *failingSession) Start(ctx context.Context, assignment driveradapter.Assignment) error {
+	s.adapter.mu.Lock()
+	s.adapter.starts++
+	s.adapter.lease = assignment.LeaseID
+	fail := s.adapter.failurePoint == "start"
+	s.adapter.mu.Unlock()
+	if fail {
+		return errors.New("injected Start failure")
+	}
+	return s.ControllerSession.Start(ctx, assignment)
+}
+func (s *failingSession) Status(ctx context.Context) (driveradapter.Status, error) {
+	if s.adapter.failurePoint == "status" {
+		return driveradapter.Status{}, errors.New("injected Status failure")
+	}
+	return s.ControllerSession.Status(ctx)
 }
 
 func await(t *testing.T, predicate func() bool) {
