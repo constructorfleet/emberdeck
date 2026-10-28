@@ -270,7 +270,9 @@ camera source with `PUT /drivers/{id}/camera` and
 `{"url":"http://camera.local/mjpeg","username":"viewer","password":"secret"}`.
 Use `{}` to remove the source. The URL must not contain embedded user-info;
 optional Basic Auth credentials are stored server-side and never returned by
-the API. EmberDeck accepts an MJPEG multipart stream or a single JPEG response,
+the API. Basic Auth over HTTP sends credentials without encryption: use HTTPS
+where the camera supports it, or restrict HTTP sources to a trusted, isolated
+network. EmberDeck accepts an MJPEG multipart stream or a single JPEG response,
 refuses redirects, and reads at most one 2 MiB frame within three seconds.
 
 `GET /drivers/{id}/camera` returns the first JPEG frame from the configured
