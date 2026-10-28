@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -1521,5 +1522,255 @@ func TestStreamSendsBeamOffCleanupBeforeFinalIdle(t *testing.T) {
 	}
 	if acked != 1 || total != 1 {
 		t.Fatalf("source progress = %d/%d", acked, total)
+	}
+}
+
+// slowMovePeer is a scripted GRBL wire peer for long-move acknowledgement
+// tests. It answers the readiness query with Idle, then reports status(elapsed)
+// for every later query, where elapsed is measured from receipt of the first
+// source line. It withholds that line's ok until ackAfter (never when zero),
+// acknowledges M5 immediately, and then reports Idle.
+type slowMovePeer struct {
+	conn     net.Conn
+	status   func(elapsed time.Duration) string
+	ackAfter time.Duration
+
+	lineSeen chan time.Time
+	errs     chan error
+	wireMu   sync.Mutex
+	wire     strings.Builder
+}
+
+func newSlowMovePeer(conn net.Conn, ackAfter time.Duration, status func(time.Duration) string) *slowMovePeer {
+	p := &slowMovePeer{conn: conn, status: status, ackAfter: ackAfter, lineSeen: make(chan time.Time, 1), errs: make(chan error, 1)}
+	go p.serve()
+	return p
+}
+
+func (p *slowMovePeer) wireBytes() string {
+	p.wireMu.Lock()
+	defer p.wireMu.Unlock()
+	return p.wire.String()
+}
+
+func (p *slowMovePeer) serve() {
+	bytes := make(chan byte, 64)
+	go func() {
+		defer close(bytes)
+		reader := bufio.NewReader(p.conn)
+		for {
+			b, err := reader.ReadByte()
+			if err != nil {
+				return
+			}
+			p.wireMu.Lock()
+			p.wire.WriteByte(b)
+			p.wireMu.Unlock()
+			bytes <- b
+		}
+	}()
+	var lineStart time.Time
+	var ack <-chan time.Time
+	finished := false
+	var line strings.Builder
+	reply := func(s string) bool { _, err := io.WriteString(p.conn, s); return err == nil }
+	for {
+		select {
+		case b, ok := <-bytes:
+			if !ok {
+				return
+			}
+			switch b {
+			case '?':
+				status := "<Idle|MPos:0.000,0.000,0.000|Bf:15,128>"
+				if !lineStart.IsZero() && !finished {
+					status = p.status(time.Since(lineStart))
+				}
+				if !reply(status + "\r\n") {
+					return
+				}
+			case '\n':
+				command := line.String()
+				line.Reset()
+				switch {
+				case command == "M5":
+					finished = true
+					if !reply("ok\r\n") {
+						return
+					}
+				case lineStart.IsZero():
+					lineStart = time.Now()
+					p.lineSeen <- lineStart
+					if p.ackAfter > 0 {
+						ack = time.After(p.ackAfter)
+					}
+				default:
+					select {
+					case p.errs <- fmt.Errorf("unexpected controller line %q", command):
+					default:
+					}
+					return
+				}
+			default:
+				line.WriteByte(b)
+			}
+		case <-ack:
+			ack = nil
+			if !reply("ok\r\n") {
+				return
+			}
+		}
+	}
+}
+
+func movingRunStatus(elapsed time.Duration) string {
+	return fmt.Sprintf("<Run|MPos:%.3f,0.000,0.000|Bf:0,100>", elapsed.Seconds())
+}
+
+func TestDefaultTimeoutsMatchDocumentedBounds(t *testing.T) {
+	got := DefaultTimeouts()
+	if got.Response != 30*time.Second || got.Liveness != 30*time.Second {
+		t.Fatalf("DefaultTimeouts() = %+v; want 30 s response and liveness bounds", got)
+	}
+}
+
+// GRBL withholds ok while its planner is full, so one long, slow move can keep
+// a line unacknowledged far beyond the per-line response bound. This scales the
+// issue #50 scenario (a 120 s ok against a 30 s bound) by the injected bounds.
+func TestStreamCompletesWhenDelayedAckIsCoveredByRunProgress(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	client, machine := net.Pipe()
+	defer client.Close()
+	defer machine.Close()
+	timeouts := Timeouts{Response: time.Second, Liveness: time.Second}
+	ackDelay := 4 * timeouts.Liveness // 120 s against 30 s bounds, scaled.
+	peer := newSlowMovePeer(machine, ackDelay, movingRunStatus)
+
+	var acked int
+	started := time.Now()
+	err := StreamWithOptions(ctx, client, "G1 X300 F300", Options{
+		Timeouts:   timeouts,
+		OnProgress: func(a, _ int) { acked = a },
+	})
+	if err != nil {
+		t.Fatalf("stream with delayed ack and continuous Run progress: %v (wire %q)", err, peer.wireBytes())
+	}
+	if elapsed := time.Since(started); elapsed < ackDelay {
+		t.Fatalf("stream completed after %v, before the delayed ack at %v", elapsed, ackDelay)
+	}
+	if acked != 1 {
+		t.Fatalf("acknowledged lines = %d; want 1", acked)
+	}
+	if wire := peer.wireBytes(); strings.ContainsAny(wire, "!\x18") {
+		t.Fatalf("healthy slow move received stop bytes: %q", wire)
+	}
+}
+
+func TestStreamCompletesWhenDelayedAckIsCoveredByPlannerProgress(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	client, machine := net.Pipe()
+	defer client.Close()
+	defer machine.Close()
+	timeouts := Timeouts{Response: time.Second, Liveness: time.Second}
+	ackDelay := 4 * timeouts.Liveness
+	reports := 0
+	peer := newSlowMovePeer(machine, ackDelay, func(time.Duration) string {
+		reports++
+		// Position is unchanged at reporting resolution, but planner occupancy moves.
+		return fmt.Sprintf("<Run|MPos:1.000,0.000,0.000|Bf:%d,100>", reports%2)
+	})
+	if err := StreamWithOptions(ctx, client, "G1 X300 F0.001", Options{Timeouts: timeouts}); err != nil {
+		t.Fatalf("stream with delayed ack and changing planner occupancy: %v (wire %q)", err, peer.wireBytes())
+	}
+}
+
+func TestStreamFailsClosedWhenSilentControllerWithholdsAck(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client, machine := net.Pipe()
+	defer client.Close()
+	defer machine.Close()
+	timeouts := Timeouts{Response: time.Second, Liveness: time.Second}
+	silentAfterLine := make(chan time.Time, 1)
+	var wireMu sync.Mutex
+	var wire strings.Builder
+	go func() {
+		reader := bufio.NewReader(machine)
+		readyAnswered := false
+		for {
+			b, err := reader.ReadByte()
+			if err != nil {
+				return
+			}
+			wireMu.Lock()
+			wire.WriteByte(b)
+			wireMu.Unlock()
+			if b == '?' && !readyAnswered {
+				readyAnswered = true
+				io.WriteString(machine, "<Idle|MPos:0.000,0.000,0.000>\r\n")
+			}
+			if b == '\n' {
+				select {
+				case silentAfterLine <- time.Now():
+				default:
+				}
+			}
+		}
+	}()
+	err := StreamWithOptions(ctx, client, "G1 X300 F300", Options{Timeouts: timeouts})
+	failedAt := time.Now()
+	if err == nil || !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("silent controller error = %v; want a timeout", err)
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("silent controller was not bounded by the driver: %v", err)
+	}
+	lineSentAt := <-silentAfterLine
+	if bound := timeouts.Response + 400*time.Millisecond; failedAt.Sub(lineSentAt) > bound {
+		t.Fatalf("silent controller failed after %v; documented bound is the %v response timeout", failedAt.Sub(lineSentAt), timeouts.Response)
+	}
+	wireMu.Lock()
+	got := wire.String()
+	wireMu.Unlock()
+	if !strings.HasSuffix(got, "!\x18") {
+		t.Fatalf("silent-controller wire = %q; want feed hold and soft reset", got)
+	}
+}
+
+func TestStreamFailsClosedWhenRunProgressStopsWithoutAck(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client, machine := net.Pipe()
+	defer client.Close()
+	defer machine.Close()
+	timeouts := Timeouts{Response: time.Second, Liveness: time.Second}
+	moving := 2 * timeouts.Liveness
+	peer := newSlowMovePeer(machine, 0, func(elapsed time.Duration) string {
+		if elapsed > moving {
+			elapsed = moving // Run continues, but the position freezes.
+		}
+		return movingRunStatus(elapsed)
+	})
+	err := StreamWithOptions(ctx, client, "G1 X300 F300", Options{Timeouts: timeouts})
+	failedAt := time.Now()
+	if err == nil || !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("stalled Run error = %v; want a timeout", err)
+	}
+	lineStart := <-peer.lineSeen
+	frozenAt := lineStart.Add(moving)
+	if failedAt.Before(frozenAt) {
+		t.Fatalf("stream failed %v before motion stopped", frozenAt.Sub(failedAt))
+	}
+	if late := failedAt.Sub(frozenAt); late > timeouts.Liveness+600*time.Millisecond {
+		t.Fatalf("stalled Run failed %v after progress stopped; liveness bound is %v", late, timeouts.Liveness)
+	}
+	if wire := peer.wireBytes(); !strings.HasSuffix(wire, "!\x18") {
+		t.Fatalf("stalled-Run wire = %q; want feed hold and soft reset", wire)
 	}
 }

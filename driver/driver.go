@@ -15,7 +15,46 @@ const (
 	// MaxLineLength is GRBL 1.1's 80-byte line buffer, excluding its NUL byte.
 	MaxLineLength   = 79
 	responseTimeout = 30 * time.Second
+	livenessTimeout = 30 * time.Second
 )
+
+// Timeouts bounds how long a stream waits for controller evidence before it
+// fails closed with a feed hold and soft reset. A zero field uses the matching
+// DefaultTimeouts value.
+type Timeouts struct {
+	// Response bounds each controller reply: a line acknowledgement when no
+	// motion progress is reported, a status-query response, missing status
+	// reports while held or finishing, and a hold or resume transition.
+	Response time.Duration
+	// Liveness bounds the gap between fresh Run status reports that show
+	// progress (a changed position or planner block count) while a line
+	// acknowledgement is outstanding. Each such report extends that line's
+	// acknowledgement deadline to at least this long after the report.
+	Liveness time.Duration
+}
+
+// DefaultTimeouts returns the bounds used by Stream, StreamControlled, and
+// StreamObserved: 30 s for responses and 30 s for motion-progress liveness.
+func DefaultTimeouts() Timeouts {
+	return Timeouts{Response: responseTimeout, Liveness: livenessTimeout}
+}
+
+// Options configures StreamWithOptions. Nil callbacks and a nil command channel
+// are ignored.
+type Options struct {
+	// Commands carries Pause and Resume requests, as for StreamControlled.
+	Commands <-chan Command
+	// OnProgress receives acknowledged source line counts.
+	OnProgress func(acked, total int)
+	// OnState receives exact state fields from fresh status reports.
+	OnState func(string)
+	// OnStatus receives each fresh parsed status report, as for StreamObserved.
+	OnStatus func(StatusReport)
+	// OnApplied runs synchronously after a Pause or Resume byte is written.
+	OnApplied func(Command)
+	// Timeouts overrides the default controller bounds.
+	Timeouts Timeouts
+}
 
 // Command controls a stream while it is running.
 type Command string
@@ -38,7 +77,7 @@ func Stream(ctx context.Context, conn io.ReadWriteCloser, program string, onProg
 // after a Pause or Resume realtime byte is successfully written. It closes conn
 // when it returns.
 func StreamControlled(ctx context.Context, conn io.ReadWriteCloser, program string, commands <-chan Command, onProgress func(acked, total int), onState func(string), onApplied ...func(Command)) (resultErr error) {
-	return streamControlled(ctx, conn, program, commands, onProgress, onState, nil, onApplied...)
+	return StreamWithOptions(ctx, conn, program, Options{Commands: commands, OnProgress: onProgress, OnState: onState, OnApplied: firstApplied(onApplied)})
 }
 
 // StreamObserved behaves like StreamControlled and additionally reports each
@@ -46,10 +85,30 @@ func StreamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 // configured reporting units; callers must not compare them with millimetre
 // paths unless those units have been confirmed.
 func StreamObserved(ctx context.Context, conn io.ReadWriteCloser, program string, commands <-chan Command, onProgress func(acked, total int), onState func(string), onStatus func(StatusReport), onApplied ...func(Command)) (resultErr error) {
-	return streamControlled(ctx, conn, program, commands, onProgress, onState, onStatus, onApplied...)
+	return StreamWithOptions(ctx, conn, program, Options{Commands: commands, OnProgress: onProgress, OnState: onState, OnStatus: onStatus, OnApplied: firstApplied(onApplied)})
 }
 
-func streamControlled(ctx context.Context, conn io.ReadWriteCloser, program string, commands <-chan Command, onProgress func(acked, total int), onState func(string), onStatus func(StatusReport), onApplied ...func(Command)) (resultErr error) {
+func firstApplied(callbacks []func(Command)) func(Command) {
+	if len(callbacks) == 0 {
+		return nil
+	}
+	return callbacks[0]
+}
+
+// StreamWithOptions streams a program with the behavior of StreamObserved and
+// configurable controller timeouts. It closes conn when it returns.
+func StreamWithOptions(ctx context.Context, conn io.ReadWriteCloser, program string, opts Options) (resultErr error) {
+	commands, onProgress, onState, onStatus := opts.Commands, opts.OnProgress, opts.OnState, opts.OnStatus
+	timeouts := DefaultTimeouts()
+	if opts.Timeouts.Response < 0 || opts.Timeouts.Liveness < 0 {
+		return fmt.Errorf("driver: negative timeout")
+	}
+	if opts.Timeouts.Response > 0 {
+		timeouts.Response = opts.Timeouts.Response
+	}
+	if opts.Timeouts.Liveness > 0 {
+		timeouts.Liveness = opts.Timeouts.Liveness
+	}
 	if conn == nil {
 		return fmt.Errorf("driver: nil connection")
 	}
@@ -124,10 +183,8 @@ func streamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 	queryRole, nextQueryRole := "", ""
 	lastQueryWrite := time.Time{}
 	var lastWorkOffset *Vector
-	var appliedCallback func(Command)
-	if len(onApplied) > 0 {
-		appliedCallback = onApplied[0]
-	}
+	var progress motionProgress
+	appliedCallback := opts.OnApplied
 	sendQuery := func(role string) error {
 		if queryOutstanding {
 			nextQueryRole = role
@@ -149,7 +206,7 @@ func streamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 	applyPause := func() error {
 		gate, pauseSent, pauseConfirmed = true, true, false
 		resumeRequested, resuming = false, false
-		controlDeadline = time.Now().Add(responseTimeout)
+		controlDeadline = time.Now().Add(timeouts.Response)
 		controllerTouched = true
 		if queryOutstanding {
 			queryRole, nextQueryRole = "stale", "pause"
@@ -170,7 +227,7 @@ func streamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 			return nil
 		}
 		resumeRequested = true
-		controlDeadline = time.Now().Add(responseTimeout)
+		controlDeadline = time.Now().Add(timeouts.Response)
 		if queryOutstanding {
 			queryRole, nextQueryRole = "stale", "resume"
 		}
@@ -206,7 +263,7 @@ func streamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 				case Pause:
 					if phase == "initial" {
 						gate, pauseSent, pauseConfirmed, resumeRequested, resuming = true, false, false, false, false
-						controlDeadline = time.Now().Add(responseTimeout)
+						controlDeadline = time.Now().Add(timeouts.Response)
 					} else {
 						if err := applyPause(); err != nil {
 							return err
@@ -237,7 +294,7 @@ func streamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 			}
 			pending, sentIndex = true, index
 			controllerTouched = true
-			ackDeadline = time.Now().Add(responseTimeout)
+			ackDeadline = time.Now().Add(timeouts.Response)
 		}
 		if phase == "stream" && !pending && !gate && index == len(lines) {
 			controllerTouched = true
@@ -246,12 +303,12 @@ func streamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 			}
 			pending, cleanupPending, phase = true, true, "cleanup"
 			controllerTouched = true
-			ackDeadline = time.Now().Add(responseTimeout)
+			ackDeadline = time.Now().Add(timeouts.Response)
 		}
 		if pending && !gate && time.Now().After(ackDeadline) {
 			return fmt.Errorf("driver: response timeout")
 		}
-		if (gate || phase == "initial" || phase == "final") && time.Since(lastStatus) > responseTimeout {
+		if (gate || phase == "initial" || phase == "final") && time.Since(lastStatus) > timeouts.Response {
 			return fmt.Errorf("driver: status timeout")
 		}
 		if !controlDeadline.IsZero() && time.Now().After(controlDeadline) {
@@ -269,7 +326,7 @@ func streamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 			case Pause:
 				if phase == "initial" {
 					gate, pauseSent, pauseConfirmed = true, false, false
-					controlDeadline = time.Now().Add(responseTimeout)
+					controlDeadline = time.Now().Add(timeouts.Response)
 					continue
 				}
 				if err := applyPause(); err != nil {
@@ -284,7 +341,7 @@ func streamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 				return fmt.Errorf("driver: unknown command %q", cmd)
 			}
 		case <-ticker.C:
-			if queryOutstanding && time.Since(querySentAt) >= responseTimeout {
+			if queryOutstanding && time.Since(querySentAt) >= timeouts.Response {
 				return fmt.Errorf("driver: status response timeout")
 			} else if !queryOutstanding {
 				role := "normal"
@@ -378,6 +435,15 @@ func streamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 				}
 				if fresh {
 					lastStatus = time.Now()
+					// GRBL withholds ok while its planner is full, so a long move can
+					// legitimately outlast the response bound. Fresh Run reports that
+					// show motion or planner progress prove the controller is alive and
+					// extend the pending acknowledgement by the liveness bound.
+					if progress.observe(report, reportErr == nil, plannerBlocksAvailable(line)) && state == "Run" && pending && !gate {
+						if extended := lastStatus.Add(timeouts.Liveness); extended.After(ackDeadline) {
+							ackDeadline = extended
+						}
+					}
 				}
 				if onState != nil && (fresh || (phase == "initial" && responseRole == "initial")) {
 					onState(state)
@@ -448,7 +514,7 @@ func streamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 						externalHold = false
 						controlDeadline = time.Time{}
 						if pending {
-							ackDeadline = time.Now().Add(responseTimeout)
+							ackDeadline = time.Now().Add(timeouts.Response)
 						}
 					}
 					if phase == "final" && !gate && !resuming && fresh && responseRole == "final" {
@@ -460,7 +526,7 @@ func streamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 						externalHold = false
 						controlDeadline = time.Time{}
 						if pending {
-							ackDeadline = time.Now().Add(responseTimeout)
+							ackDeadline = time.Now().Add(timeouts.Response)
 						}
 					} else if fresh && gate && (pauseConfirmed || externalHold) {
 						return fmt.Errorf("driver: controller resumed without explicit Resume command")

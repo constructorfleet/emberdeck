@@ -6,11 +6,23 @@
 
 The program is validated in full before any bytes are sent. Input must be ASCII; GRBL realtime characters (`!`, `?`, `~`, Ctrl-X) in executable text are rejected. Semicolon and parenthetical comments are stripped safely; nested or unterminated parenthetical comments are rejected. Lines are trimmed, blank lines are skipped, CRLF is accepted, and executable lines may contain at most 79 bytes, matching GRBL's 80-byte line buffer including its terminator.
 
-A controller error or unexpected response returns an error. Missing acknowledgements time out after 30 seconds during active streaming; a healthy confirmed hold suspends that deadline until resume is confirmed. The initial status handshake ignores a GRBL welcome banner if the serial device emits one, but fails closed on busy, alarm, or other non-Idle states. On cancellation or a streaming error after controller interaction, the driver makes a bounded best-effort feed-hold and soft-reset write, then closes the connection to interrupt pending I/O. This is a software request only; it is not an emergency stop and does not guarantee that motion has stopped. Keep physical emergency stops and enclosure interlocks independent.
+A controller error or unexpected response returns an error. A line acknowledgement normally must arrive within the 30-second response bound; a healthy confirmed hold suspends that deadline until resume is confirmed. The initial status handshake ignores a GRBL welcome banner if the serial device emits one, but fails closed on busy, alarm, or other non-Idle states. On cancellation or a streaming error after controller interaction, the driver makes a bounded best-effort feed-hold and soft-reset write, then closes the connection to interrupt pending I/O. This is a software request only; it is not an emergency stop and does not guarantee that motion has stopped. Keep physical emergency stops and enclosure interlocks independent.
 
 The wire boundary is `io.ReadWriteCloser`, so a serial adapter and simulator can provide the same interface. `driver.NewSimulator()` returns an in-memory endpoint that acknowledges commands and reports `Hold:1` followed by `Hold:0`; it supports resume and reset for development and tests. It does not model physical motion. The package does not open a serial port or manage job persistence. Tests exercise the public wire protocol with both `net.Pipe` and the simulator.
 
 Protocol basis: [gnea/grbl interface documentation](https://github.com/gnea/grbl/blob/master/doc/markdown/interface.md) and [realtime commands](https://github.com/gnea/grbl/blob/master/doc/markdown/commands.md).
+
+## Long moves and controller liveness
+
+GRBL withholds `ok` while its planner buffer is full, so a slow, long move can keep one line unacknowledged for much longer than 30 seconds while the machine is working normally. While an acknowledgement is outstanding, each fresh `Run` status report whose position (`MPos` or `WPos`) or planner block count (`Bf`) differs from the previous fresh report extends that line's deadline to at least 30 seconds after the report (the liveness bound). A line therefore has no fixed maximum duration while the controller keeps reporting progress.
+
+The driver still fails closed, with the bounded best-effort feed hold and soft reset described above, when evidence of progress stops:
+
+- A controller that stops answering status queries fails within 30 seconds of the unanswered query (status queries are sent at up to 5 Hz).
+- A controller that sends no acknowledgement and no progress after a line fails 30 seconds after the line was sent.
+- A controller that keeps reporting `Run` with an unchanged position and planner count fails 30 seconds after its last progress report, or 30 seconds after the line was sent if that is later.
+
+Progress is judged at the controller's reporting resolution. A move slow enough that neither its reported position nor its planner count changes for 30 seconds is treated as stalled. `driver.DefaultTimeouts()` returns these bounds. `driver.StreamWithOptions(ctx, conn, program, driver.Options{...})` accepts the same commands and callbacks as `StreamObserved` plus a `Timeouts` value with `Response` and `Liveness` durations; zero fields use the defaults and negative values are rejected. Bounds should stay well above the 200 ms status polling interval. `Stream`, `StreamControlled`, `StreamObserved`, and the worker use the defaults.
 
 ## Worker package
 
