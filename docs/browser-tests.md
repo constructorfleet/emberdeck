@@ -19,8 +19,9 @@ program and provenance for review without starting it. It refuses generation
 while edits are unsaved and clears an already checked readiness box when a new
 program is generated. The test then checks the existing readiness gate,
 dispatches explicitly to the simulator, and verifies the job completes. It also
-checks narrow-screen overflow. The browser test uses the rendered UI and real
-HTTP API rather than mocking storage.
+checks narrow-screen overflow with both editor forms open at tablet boundaries.
+An open profile draft also blocks generation until it is saved or canceled. The
+browser test uses the rendered UI and real HTTP API rather than mocking storage.
 
 ## Run locally
 

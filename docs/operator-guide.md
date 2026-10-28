@@ -53,6 +53,9 @@ Saved profiles and projects can be reopened, edited, and deleted. Editing a
 profile makes its projects require review against the new revision; save the
 project against the selected revision before generating. Deleting a referenced
 profile is blocked by the server.
+While a profile editor is open, generation is disabled. Save or cancel those
+profile edits first; after saving a changed profile, review and save the project
+against its new revision before generating.
 
 **Generate queued job** creates a normal library program. It does not dispatch
 the job, and it clears any earlier supervision confirmation. Use **View** to

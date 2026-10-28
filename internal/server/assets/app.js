@@ -159,6 +159,7 @@
     $("#profile-min-s").value = "0";
     $("#profile-form").scrollIntoView({ behavior: "smooth", block: "nearest" });
     $(profileFields.name).focus();
+    updateProjectValidation();
   }
 
   function projectPayload(profile) {
@@ -252,7 +253,9 @@
     const warning = $("#project-validation");
     const stale = Boolean(openProject && profile && (openProject.profile_id !== profile.id || openProject.profile_revision !== profile.revision));
     const matchesSaved = matchesSavedProject(profile);
+    const profileDraftOpen = !$("#profile-form").hidden;
     $("#stale-profile-warning").hidden = !stale;
+    $("#profile-save-hint").hidden = !profileDraftOpen || !openProject;
     $("#stale-preview").hidden = !stale;
     const error = projectValidation();
     warning.textContent = error;
@@ -260,7 +263,7 @@
     const valuesReady = !error && Boolean($(projectFields.name).value.trim());
     $("#project-form").querySelector('button[type="submit"]').disabled = !valuesReady;
     $("#project-save-hint").hidden = matchesSaved || !$(projectFields.name).value.trim();
-    $("#generate-project").disabled = !valuesReady || !openProject || stale || !matchesSaved;
+    $("#generate-project").disabled = !valuesReady || !openProject || stale || !matchesSaved || profileDraftOpen;
     renderPreview(profile);
   }
 
@@ -336,7 +339,7 @@
 
   $("#new-profile").addEventListener("click", () => beginProfileEdit());
   $("#edit-profile").addEventListener("click", () => beginProfileEdit(selectedProfile()));
-  $("#cancel-profile").addEventListener("click", () => { $("#profile-form").hidden = true; });
+  $("#cancel-profile").addEventListener("click", () => { $("#profile-form").hidden = true; updateProjectValidation(); });
   $("#profile-select").addEventListener("change", () => { if (!$("#project-form").hidden) updateProjectValidation(); });
   $("#profile-form").addEventListener("submit", async (event) => {
     event.preventDefault();

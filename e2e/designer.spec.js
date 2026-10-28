@@ -4,7 +4,7 @@ const apiKey = 'emberdeck-e2e-test-key';
 
 test('operator saves a declared profile, edits a bounded rectangle, and reviews a queued generated job', async ({ page }) => {
   test.setTimeout(90000);
-  const attempt = `${test.info().repeatEachIndex}-${test.info().retry}`;
+  const attempt = `${test.info().repeatEachIndex}-${test.info().retry}-${Date.now()}`;
   const profileName = `E2E declared GRBL ${attempt}`;
   const projectName = `E2E panel outline ${attempt}`;
   const startRequests = [];
@@ -59,6 +59,8 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
   await expect(page.locator('#designer-status')).toContainText('Project saved');
 
   await page.getByRole('button', { name: 'Edit profile' }).click();
+  await expect(page.getByRole('button', { name: 'Generate queued job' })).toBeDisabled();
+  await expect(page.locator('#profile-save-hint')).toBeVisible();
   await page.getByLabel('Work area width (mm)').fill('290');
   await page.getByRole('button', { name: 'Save profile' }).click();
   await expect(page.locator('#designer-status')).toContainText('Profile saved');
@@ -67,6 +69,13 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
   await page.getByRole('button', { name: 'Save project' }).click();
   await expect(page.locator('#designer-status')).toContainText('Project saved');
   await expect(page.locator('#stale-profile-warning')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Generate queued job' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Edit profile' }).click();
+  await expect(page.getByRole('button', { name: 'Generate queued job' })).toBeDisabled();
+  await expect(page.locator('#profile-save-hint')).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.locator('#profile-save-hint')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Generate queued job' })).toBeEnabled();
 
   await page.locator('#operator-confirmation').check();
   await expect(page.locator('#operator-confirmation')).toBeChecked();
