@@ -3,7 +3,9 @@
 Use a feature branch and open a pull request targeting main. Direct pushes to
 main are prohibited by branch protection. Use Conventional Commit PR titles and
 commit messages, for example `feat: persist uploaded jobs`. Squash merging uses
-the PR title. Run `scripts/check.sh` before pushing.
+the PR title. Run `scripts/check.sh` before pushing (install `docs/requirements.txt` in a
+Python virtual environment first). Browser tests have their own documented
+command in `docs/browser-tests.md`.
 
 Write one failing behavior test, observe failure, implement the slice, then run
 the full checks before committing. Public test seams: HTTP API, browser UI,

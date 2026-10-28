@@ -1,0 +1,43 @@
+name: Browser e2e
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  console:
+    name: Browser flow
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install browser test dependencies
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Build EmberDeck
+        run: mkdir -p bin && go build -o bin/emberdeck ./cmd/emberdeck
+      - name: Run browser tests
+        run: npm test
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-test-failures
+          path: |
+            .verification/playwright-results/
+            .verification/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14

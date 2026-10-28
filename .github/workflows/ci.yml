@@ -40,4 +40,6 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
           TITLE: ${{ github.event.pull_request.title }}
-        run: python3 scripts/check-commits.py
+        run: |
+          python3 scripts/check-commits.py
+          python3 scripts/check-docs.py

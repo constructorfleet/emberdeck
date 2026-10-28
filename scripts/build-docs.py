@@ -8,6 +8,8 @@ import subprocess
 import markdown
 
 out = Path('dist/docs')
+if out.exists():
+    shutil.rmtree(out)
 out.mkdir(parents=True, exist_ok=True)
 sources = [Path('README.md'), Path('CONTRIBUTING.md'), *sorted(Path('docs').glob('*.md'))]
 pages = {('index' if p.name == 'README.md' else p.stem): p.read_text() for p in sources}
@@ -32,3 +34,20 @@ for name, text in pages.items():
     html = '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>EmberDeck | ' + escape(name) + '</title><style>' + style + '</style>' + nav + '<main>' + body + '<footer>Documentation for v' + escape(version) + ' · <a href="https://github.com/ConstructorFleet/emberdeck">Release source</a> · <a href="LICENSE.txt">AGPL-3.0</a></footer></main></html>'
     (out / (name + '.html')).write_text(html, encoding='utf-8')
 shutil.copy('LICENSE', out / 'LICENSE.txt')
+
+# Broken internal links fail CI instead of reaching the release site.
+from html.parser import HTMLParser
+class LinkChecker(HTMLParser):
+    def handle_starttag(self, tag, attrs):
+        if tag != 'a':
+            return
+        href = dict(attrs).get('href', '')
+        if not href or href.startswith(('#', 'https://', 'http://', 'mailto:')):
+            return
+        target = href.split('#', 1)[0]
+        if not (out / target).is_file():
+            raise SystemExit(f'Broken documentation link in {self.page}: {href}')
+checker = LinkChecker()
+for path in out.glob('*.html'):
+    checker.page = path.name
+    checker.feed(path.read_text(encoding='utf-8'))

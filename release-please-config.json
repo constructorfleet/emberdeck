@@ -1,5 +1,13 @@
 {
   "packages": {
-    ".": {"release-type": "simple", "package-name": "emberdeck", "include-v-in-tag": true}
+    ".": {
+      "release-type": "simple",
+      "package-name": "emberdeck",
+      "include-v-in-tag": true,
+      "initial-version": "0.1.0",
+      "include-component-in-tag": false,
+      "bump-minor-pre-major": true,
+      "prerelease": true
+    }
   }
 }

@@ -30,6 +30,7 @@ jobs:
           if [ -n "$branch" ]; then
             gh workflow run ci.yml --ref "$branch"
             gh workflow run container.yml --ref "$branch"
+            gh workflow run browser.yml --ref "$branch"
           fi
   publish:
     needs: release

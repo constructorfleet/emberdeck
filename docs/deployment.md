@@ -1,8 +1,8 @@
 # Deployment
 
 EmberDeck currently supports the job manager, simulator, a TCP-connected GRBL
-worker, and a Go serial transport package. The CLI does not yet expose serial
-port selection. No particular cutter, controller, enclosure, or emergency-stop
+worker, and serial-connected GRBL workers. The CLI exposes serial port
+selection and enumeration. No particular cutter, controller, enclosure, or emergency-stop
 setup has been qualified. The simulator is software only and must be selected
 explicitly.
 
@@ -85,7 +85,8 @@ An LXC container can use the same systemd unit and binary installation steps
 inside a supported Linux guest. Allocate persistent storage for
 `/var/lib/emberdeck`, allow outbound access to the worker/controller endpoints
 that you intentionally use, and expose port 8080 only to trusted clients. The
-CLI does not yet expose serial port selection or configure USB passthrough.
+CLI can select serial ports, but LXC USB/serial passthrough must be configured
+by the host administrator before a worker can open a device.
 
 ## macOS native CLI
 
@@ -137,3 +138,20 @@ not open a local serial port, configure a USB adapter, or establish TLS to the
 controller. The software driver and simulator have not been qualified against
 physical hardware; maintain independent enclosure interlocks and emergency
 stop controls.
+
+## Serial workers and all-in-one hardware mode
+
+List ports using `emberdeck driver -list-ports`. Then select the correct device:
+
+```sh
+./emberdeck driver -server https://emberdeck.example.net -id bench -serial /dev/ttyUSB0 -baud 115200
+# Alternatively, one local server and controller worker:
+./emberdeck serve -serial /dev/ttyUSB0 -baud 115200 -data ./data
+```
+
+Windows names are typically `COM3`; macOS names often begin `/dev/cu.`. Use the
+OS-reported name instead of assuming either convention. The Linux service user
+needs access to the selected device (see [serial transport](serial.md)). Docker
+needs explicit `--device` or Compose `devices` plus appropriate group permissions;
+no device passthrough is configured by default. These commands expose the
+transport; they do not qualify a physical machine for use.
