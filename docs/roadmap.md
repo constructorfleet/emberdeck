@@ -74,7 +74,7 @@ unsupported milestone.
   milestones. [Feasibility decision](research/esp32-feasibility.md): conditionally
   viable as an ESP-IDF worker bridging an existing GRBL controller. Firmware
   support remains unimplemented and unqualified.
-- [ ] [#57: Chunked, digest-verified job transfer for constrained workers](https://github.com/constructorfleet/emberdeck/issues/57).
+- [x] [#57: Chunked, digest-verified job transfer for constrained workers](https://github.com/constructorfleet/emberdeck/issues/57).
   The server and Go worker negotiate protocol 2 for immutable, 4 MiB-bounded
   programs transferred in lease-bound 64 KiB ranges; the worker verifies the
   complete size, SHA-256, and G-code before opening the controller. Protocol 1
