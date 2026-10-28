@@ -50,6 +50,8 @@ menus keep the top bar compact; the current page name remains visible in its
 category summary, and the matching link carries `aria-current="page"`. A skip
 link appears first in the keyboard order. At narrow widths, the menu summaries
 stack into full-width rows; opening one expands its links below that row.
+At wider widths, categories wrap across rows when their labels do not fit, which
+keeps the nav usable with larger text settings.
 
 `e2e/docs-navigation.spec.js` builds and opens the public rendered HTML. It
 checks every generated page for one current link, all four complete groups,

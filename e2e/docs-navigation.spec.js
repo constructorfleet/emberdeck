@@ -51,6 +51,11 @@ test('rendered documentation has grouped, current, keyboard accessible navigatio
     for (const width of [1024, 768, 721, 720, 681, 390]) {
       await page.setViewportSize({ width, height: 900 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${pageName} fits ${width}px`).toBe(true);
+      if (width === 768) {
+        await page.locator('nav').evaluate((nav) => { nav.style.fontSize = '20px'; });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${pageName} fits 768px with larger navigation text`).toBe(true);
+        await page.locator('nav').evaluate((nav) => { nav.style.fontSize = ''; });
+      }
     }
     await page.setViewportSize({ width: 1440, height: 1000 });
 

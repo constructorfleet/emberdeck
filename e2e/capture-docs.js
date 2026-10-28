@@ -60,10 +60,11 @@ async function captureDocumentationNavigation(browser) {
     await page.goto(guide);
     await expect(page.getByRole('navigation', { name: 'Documentation' })).toBeVisible();
     await expect(page.locator('nav a[aria-current="page"]')).toHaveAttribute('href', 'operator-guide.html');
-    const firstMenu = page.locator('nav summary').first();
-    if (isMobile) await firstMenu.tap();
-    else await firstMenu.click();
-    await expect(page.locator('nav details').first()).toHaveAttribute('open', '');
+    const menu = page.locator('nav details').nth(isMobile ? 0 : 3);
+    const summary = menu.locator('summary');
+    if (isMobile) await summary.tap();
+    else await summary.click();
+    await expect(menu).toHaveAttribute('open', '');
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: path.join(screenshotDir, `docs-navigation-after-${name}.png`) });
     await page.close();
