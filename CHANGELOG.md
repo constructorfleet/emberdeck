@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.0](https://github.com/constructorfleet/emberdeck/compare/v0.8.0...v0.9.0) (2026-10-28)
+
+
+### Features
+
+* support nested SVG group transforms ([#109](https://github.com/constructorfleet/emberdeck/issues/109)) ([355cde4](https://github.com/constructorfleet/emberdeck/commit/355cde4fcd463e2358f606af636ce7494e32797c))
+
+
+### Bug Fixes
+
+* improve responsive console layout ([#108](https://github.com/constructorfleet/emberdeck/issues/108)) ([2aec1f6](https://github.com/constructorfleet/emberdeck/commit/2aec1f649bf39ae0acfa63047bc47eb920899786)), closes [#32](https://github.com/constructorfleet/emberdeck/issues/32)
+
 ## [0.8.0](https://github.com/constructorfleet/emberdeck/compare/v0.7.0...v0.8.0) (2026-10-28)
 
 
