@@ -10,6 +10,12 @@ services:
     volumes:
       - emberdeck-data:/data
     command: ["serve", "-listen", "0.0.0.0:8080", "-data", "/data"]
+    # Optional private monitoring example (disabled by default): add the metrics
+    # key under environment, add this item under the existing ports list, and
+    # replace command with the following:
+    #   EMBERDECK_METRICS_KEY: ${EMBERDECK_METRICS_KEY:?Set a separate metrics secret}
+    #   - "127.0.0.1:9090:9090"
+    # command: ["serve", "-listen", "0.0.0.0:8080", "-metrics-listen", "0.0.0.0:9090", "-data", "/data"]
 
   # Deliberate software-only demonstration; omit this profile for normal use.
   demo:

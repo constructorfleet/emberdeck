@@ -85,6 +85,7 @@ func (s *Server) expire() error {
 	}
 	for _, id := range expired {
 		delete(s.drivers, id)
+		s.metrics.driverExpires.Inc()
 	}
 	return nil
 }

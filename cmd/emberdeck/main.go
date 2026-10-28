@@ -52,12 +52,14 @@ func run(args []string) error {
 func runServe(args []string) error {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	listenAddress := flags.String("listen", "127.0.0.1:8080", "HTTP listen address")
+	metricsListenAddress := flags.String("metrics-listen", "", "optional Prometheus metrics listen address (disabled by default)")
 	data := flags.String("data", "data", "job library directory")
 	plugins := flags.String("plugins", "", "optional directory of plugins to load")
 	simulate := flags.Bool("simulate", false, "run a simulated local driver")
 	tcpAddress := flags.String("tcp", "", "run a driver connected to a GRBL TCP controller")
 	serialPort := flags.String("serial", "", "run a driver connected to a serial controller")
 	baud := flags.Int("baud", 115200, "serial connection baud rate")
+	serialDTR, serialRTS := addSerialModemFlags(flags)
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -73,6 +75,10 @@ func runServe(args []string) error {
 	if *serialPort != "" && *baud <= 0 {
 		return errors.New("-baud must be positive")
 	}
+	modemBits, err := parseSerialModemBits(*serialDTR, *serialRTS)
+	if err != nil {
+		return err
+	}
 	key := os.Getenv("EMBERDECK_API_KEY")
 	if key == "" {
 		return errors.New("EMBERDECK_API_KEY is required")
@@ -86,9 +92,29 @@ func runServe(args []string) error {
 			log.Printf("close job library: %v", err)
 		}
 	}()
+	handler.SetBuildVersion(version)
 	listener, err := net.Listen("tcp", *listenAddress)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
+	}
+	var metricsServer *http.Server
+	var metricsServeErr chan error
+	if *metricsListenAddress != "" {
+		metricsListener, err := net.Listen("tcp", *metricsListenAddress)
+		if err != nil {
+			_ = listener.Close()
+			return fmt.Errorf("metrics listen: %w", err)
+		}
+		metricsServer = &http.Server{
+			Handler:           handler.MetricsHandler(os.Getenv("EMBERDECK_METRICS_KEY")),
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       15 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       60 * time.Second,
+		}
+		metricsServeErr = make(chan error, 1)
+		go func() { metricsServeErr <- metricsServer.Serve(metricsListener) }()
+		defer func() { _ = metricsServer.Close() }()
 	}
 	httpServer := &http.Server{
 		Handler:           handler,
@@ -113,7 +139,7 @@ func runServe(args []string) error {
 			id = "simulator"
 		}
 		label := localDriverLabel(mode, *tcpAddress, *serialPort)
-		connect := connectionConnector(mode, *tcpAddress, *serialPort, *baud)
+		connect := connectionConnectorWithModemBits(mode, *tcpAddress, *serialPort, *baud, modemBits)
 		logf := func(format string, args ...any) { log.Printf(label+": "+format, args...) }
 		go func() {
 			// A local worker failure marks the driver offline (its heartbeat
@@ -137,6 +163,13 @@ func runServe(args []string) error {
 				return nil
 			}
 			return fmt.Errorf("serve HTTP: %w", err)
+		case err := <-metricsServeErr:
+			metricsServeErr = nil
+			_ = httpServer.Close()
+			if errors.Is(err, http.ErrServerClosed) {
+				return nil
+			}
+			return fmt.Errorf("serve metrics: %w", err)
 		case <-ctx.Done():
 			waiting = false
 		case err := <-workerErr:
@@ -152,6 +185,15 @@ func runServe(args []string) error {
 		_ = httpServer.Close()
 		return fmt.Errorf("shut down HTTP server: %w", err)
 	}
+	if metricsServer != nil {
+		if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+			_ = metricsServer.Close()
+			return fmt.Errorf("shut down metrics server: %w", err)
+		}
+		if err := <-metricsServeErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("serve metrics: %w", err)
+		}
+	}
 	if err := <-serveErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("serve HTTP: %w", err)
 	}
@@ -166,6 +208,7 @@ func runDriver(args []string) error {
 	tcpAddress := flags.String("tcp", "", "connect to a GRBL controller over TCP")
 	serialPort := flags.String("serial", "", "connect to a serial controller")
 	baud := flags.Int("baud", 115200, "serial connection baud rate")
+	serialDTR, serialRTS := addSerialModemFlags(flags)
 	listPorts := flags.Bool("list-ports", false, "list available serial ports and exit")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -199,6 +242,10 @@ func runDriver(args []string) error {
 	if *serialPort != "" && *baud <= 0 {
 		return errors.New("-baud must be positive")
 	}
+	modemBits, err := parseSerialModemBits(*serialDTR, *serialRTS)
+	if err != nil {
+		return err
+	}
 	if err := validateServerURL(*serverURLFlag); err != nil {
 		return err
 	}
@@ -208,7 +255,7 @@ func runDriver(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	err := worker.Run(ctx, *serverURLFlag, key, *id, connectionConnector(connectionMode(*simulate, *tcpAddress, *serialPort), *tcpAddress, *serialPort, *baud))
+	err = worker.Run(ctx, *serverURLFlag, key, *id, connectionConnectorWithModemBits(connectionMode(*simulate, *tcpAddress, *serialPort), *tcpAddress, *serialPort, *baud, modemBits))
 	if errors.Is(err, context.Canceled) && ctx.Err() != nil {
 		return nil
 	}
@@ -255,6 +302,10 @@ func localDriverLabel(mode, tcpAddress, serialPort string) string {
 }
 
 func connectionConnector(mode, tcpAddress, serialPort string, baud int) worker.Connector {
+	return connectionConnectorWithModemBits(mode, tcpAddress, serialPort, baud, transport.ModemBits{})
+}
+
+func connectionConnectorWithModemBits(mode, tcpAddress, serialPort string, baud int, modemBits transport.ModemBits) worker.Connector {
 	return func(ctx context.Context) (io.ReadWriteCloser, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -265,11 +316,39 @@ func connectionConnector(mode, tcpAddress, serialPort string, baud int) worker.C
 		case "tcp":
 			return (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, "tcp", tcpAddress)
 		case "serial":
-			return transport.OpenSerial(ctx, serialPort, baud)
+			return transport.OpenSerialWithBits(ctx, serialPort, baud, modemBits)
 		default:
 			return nil, errors.New("no driver connection type configured")
 		}
 	}
+}
+
+func addSerialModemFlags(flags *flag.FlagSet) (*string, *string) {
+	dtr := flags.String("serial-dtr", "off", "initial serial DTR output state (on or off; default off)")
+	rts := flags.String("serial-rts", "off", "initial serial RTS output state (on or off; default off)")
+	return dtr, rts
+}
+
+func parseSerialModemBits(dtr, rts string) (transport.ModemBits, error) {
+	parse := func(flagName, value string) (bool, error) {
+		switch value {
+		case "off":
+			return false, nil
+		case "on":
+			return true, nil
+		default:
+			return false, fmt.Errorf("-%s must be on or off", flagName)
+		}
+	}
+	dtrOn, err := parse("serial-dtr", dtr)
+	if err != nil {
+		return transport.ModemBits{}, err
+	}
+	rtsOn, err := parse("serial-rts", rts)
+	if err != nil {
+		return transport.ModemBits{}, err
+	}
+	return transport.ModemBits{DTR: dtrOn, RTS: rtsOn}, nil
 }
 
 func validateServerURL(raw string) error {

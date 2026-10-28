@@ -1,5 +1,10 @@
 # Deployment
 
+Prometheus metrics are disabled by default and use a separate listener. See
+[metrics and monitoring](metrics.md) for native, systemd, Docker, and distributed
+worker configuration, authentication, scrape setup, and alerts. Do not expose
+the metrics port publicly.
+
 EmberDeck currently supports the job manager, simulator, a TCP-connected GRBL
 worker, and serial-connected GRBL workers. The CLI exposes serial port
 selection and enumeration. No particular cutter, controller, enclosure, or emergency-stop
@@ -26,6 +31,12 @@ The service listens on port 8080 and stores jobs in the named
 non-root user. No source tree is mounted into the container, and no simulated
 driver starts by default. Open `http://localhost:8080/` and enter the same API
 key in the browser.
+
+The optional listener is not published in the default Compose configuration.
+For a private monitoring setup, add `-metrics-listen 0.0.0.0:9090` to the
+command, publish `127.0.0.1:9090:9090` (or attach Prometheus to a private Compose
+network), and set `EMBERDECK_METRICS_KEY` to a separate secret. A commented
+Compose sketch is in `compose.yaml`.
 
 To run an explicitly software-only demo with an in-process simulator:
 
@@ -145,10 +156,29 @@ stop controls.
 List ports using `emberdeck driver -list-ports`. Then select the correct device:
 
 ```sh
-./emberdeck driver -server https://emberdeck.example.net -id bench -serial /dev/ttyUSB0 -baud 115200
+./emberdeck driver -server https://emberdeck.example.net -id bench -serial /dev/ttyUSB0 -baud 115200 -serial-dtr off -serial-rts off
 # Alternatively, one local server and controller worker:
-./emberdeck serve -serial /dev/ttyUSB0 -baud 115200 -data ./data
+./emberdeck serve -serial /dev/ttyUSB0 -baud 115200 -serial-dtr off -serial-rts off -data ./data
 ```
+
+Serial opens explicitly request DTR off and RTS off by default. These can be
+set independently with `-serial-dtr on|off` and `-serial-rts on|off` on either
+`driver` or `serve`; leave them off unless the specific controller and USB
+adapter require otherwise. Asserting DTR can reset Arduino-class GRBL boards.
+The serial library notes that Unix-like systems may briefly pulse modem lines
+while opening a port even when the requested initial state is off, so this
+policy does not guarantee that opening a port cannot reset a controller. EmberDeck
+still opens a connection per job and closes it after the stream; it does not
+keep a serial port persistent between jobs because stream/worker connection
+ownership currently closes each connection, and changing that lifecycle safely
+requires a separate design and wire validation.
+
+If a `Grbl ` startup banner appears during job readiness, the worker refuses
+the job before sending its program and reports that the controller reset and
+work coordinates must be re-verified. No physical controller has been bench
+confirmed for this behavior or modem-bit policy; issue #48's hardware
+confirmation criterion remains open. Check the specific machine setup before
+any physical operation.
 
 In all-in-one mode, a local worker failure is logged with its transport (for
 example `serial driver /dev/ttyUSB0: ...`). The driver shows as offline while the
@@ -178,7 +208,7 @@ sudo sh -c 'umask 077; cat > /etc/emberdeck/driver.env' <<'ENV'
 EMBERDECK_API_KEY=the-same-server-key
 EMBERDECK_SERVER_URL=https://emberdeck.example.net
 EMBERDECK_DRIVER_ID=bench
-EMBERDECK_DRIVER_CONNECTION=-serial /dev/ttyUSB0 -baud 115200
+EMBERDECK_DRIVER_CONNECTION=-serial /dev/ttyUSB0 -baud 115200 -serial-dtr off -serial-rts off
 ENV
 sudo install -o root -g root -m 0644 deploy/emberdeck-driver.service /etc/systemd/system/emberdeck-driver.service
 sudo systemctl daemon-reload

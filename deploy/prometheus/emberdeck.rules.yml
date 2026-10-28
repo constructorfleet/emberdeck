@@ -1,0 +1,28 @@
+groups:
+  - name: emberdeck
+    rules:
+      - alert: EmberDeckNoDriversOnline
+        expr: emberdeck_drivers_online == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: No EmberDeck drivers are online
+          description: No worker heartbeat has been observed within the server expiration interval.
+      - alert: EmberDeckJobFailureRateHigh
+        expr: |
+          sum(rate(emberdeck_job_state_transitions_total{to="failed"}[15m]))
+          / clamp_min(sum(rate(emberdeck_job_state_transitions_total{to=~"completed|failed"}[15m])), 1e-9) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: EmberDeck job failure rate is above 20%
+          description: More than one fifth of completed or failed job outcomes have failed over the recent window.
+      - alert: EmberDeckWorkInterrupted
+        expr: sum(emberdeck_jobs{state="interrupted"}) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: EmberDeck has interrupted work that needs operator inspection
+          description: Inspect the machine and job; interrupted work is not automatically replayed.

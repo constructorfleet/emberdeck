@@ -56,6 +56,7 @@ type Server struct {
 	profiles   map[string]MachineProfile
 	projects   map[string]DesignerProject
 	mux        *http.ServeMux
+	metrics    *serverMetrics
 }
 
 // Open owns the data directory and loads its job, profile, and project libraries.
@@ -81,6 +82,7 @@ func Open(dir, key string) (*Server, error) {
 		}
 	}()
 	s := &Server{lock: lock, drivers: make(map[string]Driver), dir: dir, key: key, jobs: make(map[string]Job), profiles: make(map[string]MachineProfile), projects: make(map[string]DesignerProject), mux: http.NewServeMux()}
+	s.metrics = newServerMetrics(s)
 	data, err := os.ReadFile(filepath.Join(dir, "jobs.json"))
 	if err == nil {
 		if err = json.Unmarshal(data, &s.jobs); err != nil {
@@ -120,6 +122,7 @@ func Open(dir, key string) (*Server, error) {
 	if err := s.recoverInterrupted(); err != nil {
 		return nil, err
 	}
+	s.metrics.syncJobStates(s.jobs)
 	s.mux.HandleFunc("GET /api/v1/drivers", s.listDrivers)
 	s.mux.HandleFunc("POST /api/v1/drivers/{id}/poll", s.pollDriver)
 	s.mux.HandleFunc("POST /api/v1/jobs/{id}/start", s.startJob)
@@ -181,6 +184,16 @@ func validHexID(id string) bool {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
+	tracked := &statusRecorder{ResponseWriter: w}
+	defer func() {
+		status := tracked.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		s.metrics.observeHTTP(r.Method, status, time.Since(started))
+	}()
+	w = tracked
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if s.serveUI(w, r) {
@@ -251,8 +264,28 @@ func (s *Server) save(jobs map[string]Job) error {
 		s.storageErr = err
 		return err
 	}
+	for id, job := range jobs {
+		previous, exists := s.jobs[id]
+		from := "new"
+		if exists {
+			from = previous.State
+		}
+		if from != job.State && (from == "new" || isMetricJobState(from)) && isMetricJobState(job.State) {
+			s.metrics.transitions.WithLabelValues(from, job.State).Inc()
+		}
+	}
 	s.jobs = jobs
+	s.metrics.syncJobStates(jobs)
 	return nil
+}
+
+func isMetricJobState(state string) bool {
+	for _, known := range metricJobStates {
+		if state == known {
+			return true
+		}
+	}
+	return false
 }
 func (s *Server) copyJobs() map[string]Job {
 	jobs := make(map[string]Job, len(s.jobs))

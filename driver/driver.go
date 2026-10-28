@@ -363,12 +363,11 @@ func StreamWithOptions(ctx context.Context, conn io.ReadWriteCloser, program str
 				return fmt.Errorf("driver: controller alarm: %s", line)
 			}
 			if strings.HasPrefix(line, "Grbl ") {
-				if phase != "initial" {
-					return fmt.Errorf("driver: controller reset: %s", line)
+				phaseName := "during streaming"
+				if phase == "initial" {
+					phaseName = "during readiness"
 				}
-				queryOutstanding = false
-				nextQueryRole = "initial"
-				continue
+				return fmt.Errorf("driver: controller reset %s (%s); work coordinates must be re-verified before starting a job", phaseName, line)
 			}
 			if strings.HasPrefix(line, "error:") {
 				return fmt.Errorf("driver: controller %s", line)
@@ -550,8 +549,8 @@ func StreamWithOptions(ctx context.Context, conn io.ReadWriteCloser, program str
 }
 
 // requireIdle performs a fresh status query before any program bytes are sent.
-// A serial port may emit its startup banner when opened, so only this first
-// handshake tolerates that banner; a state other than Idle fails closed.
+// A startup banner means the controller reset, so the job must be refused until
+// the operator re-verifies work coordinates.
 func requireIdle(ctx context.Context, conn io.ReadWriteCloser, r *bufio.Reader) error {
 	if _, err := io.WriteString(conn, "?"); err != nil {
 		return fmt.Errorf("driver: query initial status: %w", err)
@@ -566,7 +565,7 @@ func requireIdle(ctx context.Context, conn io.ReadWriteCloser, r *bufio.Reader) 
 			return fmt.Errorf("driver: controller alarm before job: %s", line)
 		}
 		if strings.HasPrefix(line, "Grbl ") {
-			continue
+			return fmt.Errorf("driver: controller reset during readiness (%s); work coordinates must be re-verified before starting a job", line)
 		}
 		if strings.HasPrefix(line, "<") && strings.HasSuffix(line, ">") {
 			state := strings.SplitN(line[1:len(line)-1], "|", 2)[0]

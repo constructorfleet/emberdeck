@@ -18,6 +18,33 @@ type fakeOpener struct {
 
 func (f fakeOpener) Open(string, int) (io.ReadWriteCloser, error) { return f.conn, f.err }
 
+type modemBitsOpener struct {
+	conn io.ReadWriteCloser
+	got  transport.ModemBits
+}
+
+func (f *modemBitsOpener) Open(string, int) (io.ReadWriteCloser, error) { return f.conn, nil }
+
+func (f *modemBitsOpener) OpenWithModemBits(_ string, _ int, bits transport.ModemBits) (io.ReadWriteCloser, error) {
+	f.got = bits
+	return f.conn, nil
+}
+
+func TestOpenSerialWithOpenerRequestsConfiguredModemBits(t *testing.T) {
+	left, right := net.Pipe()
+	defer right.Close()
+	opener := &modemBitsOpener{conn: left}
+	want := transport.ModemBits{DTR: true, RTS: false}
+	conn, err := transport.OpenSerialWithOpener(context.Background(), "fake", 115200, opener, want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if opener.got != want {
+		t.Fatalf("requested modem bits = %+v, want %+v", opener.got, want)
+	}
+}
+
 func TestOpenSerialWithRejectsInvalidConfiguration(t *testing.T) {
 	for _, tc := range []struct {
 		name string

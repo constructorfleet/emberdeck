@@ -42,3 +42,8 @@ successful execution. This protocol does not claim OctoPrint compatibility.
 The public Go API is `plugin.Discover(root)` and `Plugin.Run(ctx, Request)`.
 Discovery fails if any manifest is malformed or invalid, rather than silently
 ignoring that plugin.
+
+Configured preflight invocations contribute bounded `ok`, `error`, and `rejected`
+outcomes and duration histograms to the optional server metrics endpoint. No
+plugin names, messages, G-code, or raw errors are exported. See
+[metrics and monitoring](metrics.md) for the contract and deployment guidance.
