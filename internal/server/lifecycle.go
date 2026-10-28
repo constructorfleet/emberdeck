@@ -24,6 +24,7 @@ type Driver struct {
 	LastSeen        time.Time `json:"last_seen"`
 	Busy            bool      `json:"busy"`
 	Session         string    `json:"-"`
+	CredentialID    string    `json:"-"`
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -239,7 +240,7 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "worker session is required")
 		return
 	}
-	assignment, needsProgram, ok := s.pollLocked(w, id, &in)
+	assignment, needsProgram, ok := s.pollLocked(w, id, requestPrincipal(r).ID, &in)
 	if !ok {
 		return
 	}
@@ -281,14 +282,27 @@ type pollAssignment struct {
 
 // pollLocked applies one worker report under the mutex. Progress-only reports
 // update memory; state transitions are persisted before acknowledgement.
-func (s *Server) pollLocked(w http.ResponseWriter, id string, in *pollReport) (*pollAssignment, bool, bool) {
+func (s *Server) pollLocked(w http.ResponseWriter, id, credentialID string, in *pollReport) (*pollAssignment, bool, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	credential, credentialActive := s.credentials[credentialID]
+	if !credentialActive || credential.Revoked {
+		fail(w, http.StatusUnauthorized, "authentication required")
+		return nil, false, false
+	}
+	if credential.Role == "worker" && !containsDriver(credential.DriverIDs, id) {
+		fail(w, http.StatusForbidden, "worker credential is not authorized for this driver ID")
+		return nil, false, false
+	}
 	if err := s.expire(); err != nil {
 		fail(w, 500, "could not persist driver expiration")
 		return nil, false, false
 	}
 	d, ok := s.drivers[id]
+	if ok && d.CredentialID != credentialID {
+		fail(w, 409, "driver ID is already owned by another credential")
+		return nil, false, false
+	}
 	if ok && d.Session != in.Session {
 		fail(w, 409, "driver ID already owned by another session")
 		return nil, false, false
@@ -311,6 +325,7 @@ func (s *Server) pollLocked(w http.ResponseWriter, id string, in *pollReport) (*
 	}
 	d.ID = id
 	d.Session = in.Session
+	d.CredentialID = credentialID
 	d.LastSeen = time.Now().UTC()
 	if in.JobID != "" {
 		j, exists := s.jobs[in.JobID]
