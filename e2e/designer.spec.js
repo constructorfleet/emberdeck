@@ -136,3 +136,32 @@ test('rectangle bounds accept exact three-decimal millimetre edges', async ({ pa
   await page.locator('#rect-x').fill('0.1');
   await expect(page.locator('#project-validation')).toBeHidden();
 });
+
+test('open profile and rectangle editors fit tablet and phone viewports', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#api-key').fill(apiKey);
+  await page.getByRole('button', { name: /Connect/ }).click();
+  await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
+  await page.getByRole('button', { name: 'New profile' }).click();
+  await page.locator('#profile-name').fill(`Viewport profile ${test.info().retry}`);
+  await page.locator('#profile-width').fill('300');
+  await page.locator('#profile-height').fill('200');
+  await page.locator('#profile-max-s').fill('1000');
+  await page.locator('#profile-min-feed').fill('1');
+  await page.locator('#profile-max-feed').fill('6000');
+  await page.locator('#profile-max-power').fill('100');
+  await page.getByRole('button', { name: 'Save profile' }).click();
+  await expect(page.locator('#designer-status')).toContainText('Profile saved');
+  await page.getByRole('button', { name: 'New rectangle project' }).click();
+  await page.locator('#project-name').fill('Viewport rectangle');
+  await page.getByRole('button', { name: 'Edit profile' }).click();
+  await expect(page.locator('#profile-form')).toBeVisible();
+  await expect(page.locator('#project-form')).toBeVisible();
+
+  for (const width of [1440, 1024, 900, 800, 768, 761, 760, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    const fits = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+    expect(fits, `document width fits at ${width}px`).toBe(true);
+    if (width === 800) await page.screenshot({ path: test.info().outputPath('designer-editors-800.png'), fullPage: true });
+  }
+});
