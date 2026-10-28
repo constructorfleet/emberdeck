@@ -60,7 +60,10 @@ machine may need re-homing. If reset cannot be confirmed, EmberDeck records a
 driver quarantine that survives server restarts and blocks jobs and manual
 actions. The worker retries reset confirmation; if the controller is
 unreachable, inspect or power-cycle it at the machine, then wait for the worker
-to confirm the reset before releasing the lease or starting work.
+to confirm the reset before releasing the lease or starting work. If recovery
+leaves the controller in **Alarm** while a manual lease is interrupted, unlock
+it through the controller's own interface, then wait for EmberDeck to report
+**Idle** before releasing that lease.
 
 A queued manual request reserves the driver separately from the job queue. If
 worker support is unavailable, no action capability is advertised and the
