@@ -60,14 +60,21 @@ func (s *Simulator) serve() {
 			}
 		case '!':
 			stateMu.Lock()
-			state = "Hold"
+			state = "Hold:1"
 			if timer != nil {
 				timer.Stop()
 			}
+			timer = time.AfterFunc(25*time.Millisecond, func() {
+				stateMu.Lock()
+				if state == "Hold:1" {
+					state = "Hold:0"
+				}
+				stateMu.Unlock()
+			})
 			stateMu.Unlock()
 		case '~':
 			stateMu.Lock()
-			if state == "Hold" {
+			if state == "Hold:0" || state == "Hold:1" {
 				state = "Run"
 				timer = time.AfterFunc(150*time.Millisecond, func() {
 					stateMu.Lock()
