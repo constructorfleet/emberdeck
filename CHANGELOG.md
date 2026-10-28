@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/constructorfleet/emberdeck/compare/v0.2.2...v0.3.0) (2026-10-28)
+
+
+### Features
+
+* add categorized documentation navigation ([#13](https://github.com/constructorfleet/emberdeck/issues/13)) ([8e6df8e](https://github.com/constructorfleet/emberdeck/commit/8e6df8ee7e8358d7d60f9abd1dd8b93fc7011fde))
+
 ## [0.2.2](https://github.com/constructorfleet/emberdeck/compare/v0.2.1...v0.2.2) (2026-10-28)
 
 
