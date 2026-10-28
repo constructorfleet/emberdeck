@@ -116,7 +116,7 @@ Windows examples bind loopback. Expose a non-loopback listener only on a trusted
 network or behind a TLS reverse proxy. Remote workers should use HTTPS or a
 trusted TLS tunnel. A raw TCP controller connection is separate from the
 worker's authenticated HTTP connection. See
-[the API credential contract](api.md#credential-roles-and-lifecycle) for roles,
+[the API credential contract](api.md#authentication-and-roles) for roles,
 rotation, revocation, and recovery.
 
 ## Logs

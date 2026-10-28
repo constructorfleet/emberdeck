@@ -5,7 +5,12 @@ from pathlib import Path
 import struct
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from docs_validation import validate_markdown_sources, validate_rendered_docs
+from docs_validation import (
+    validate_api_reference,
+    validate_cli_reference,
+    validate_markdown_sources,
+    validate_rendered_docs,
+)
 
 
 class RenderedDocsValidationTests(unittest.TestCase):
@@ -148,6 +153,99 @@ class RenderedDocsValidationTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(SystemExit, "full-size screenshot link"):
             validate_rendered_docs(self.site)
+
+
+class ReferencePageValidationTests(unittest.TestCase):
+    route = "GET /api/v1/jobs"
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.site = Path(self.temp.name)
+        self.pages = {"api.html": True, "api-routes.html": True}
+        self.write_api()
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def write_api(self, section=None, index=True):
+        if section is None:
+            section = (
+                f'<h3 id="get-apiv1jobs"><code>{self.route}</code>'
+                '<a class="headerlink" href="#get-apiv1jobs">¶</a></h3>'
+                "<table><tr><th>Request</th><th>Response</th><th>Errors</th></tr>"
+                "<tr><td>No body.</td><td><code>200</code></td><td><code>401</code></td></tr></table>"
+            )
+        curl = (
+            "<pre><code>curl --fail-with-body https://example.test/api/v1/jobs"
+            " -H 'Authorization: Bearer KEY'</code></pre>"
+        )
+        (self.site / "api.html").write_text(section + curl, encoding="utf-8")
+        links = (
+            f'<a href="api.html#get-apiv1jobs"><code>{self.route}</code></a>'
+            if index
+            else ""
+        )
+        (self.site / "api-routes.html").write_text(links, encoding="utf-8")
+
+    def validate(self, routes=None):
+        validate_api_reference(self.site, self.pages, routes or {self.route})
+
+    def test_accepts_linked_endpoint_with_contract_columns(self):
+        self.validate()
+
+    def test_rejects_missing_endpoint_section(self):
+        self.write_api(section="")
+        with self.assertRaisesRegex(SystemExit, "missing endpoint sections"):
+            self.validate()
+
+    def test_rejects_endpoint_without_error_column(self):
+        self.write_api(
+            '<h3 id="get-apiv1jobs"><code>GET /api/v1/jobs</code></h3>'
+            "<table><tr><th>Request</th><th>Response</th></tr></table>"
+        )
+        with self.assertRaisesRegex(SystemExit, "column labelled Errors"):
+            self.validate()
+
+    def test_rejects_unlinked_route_index_entry(self):
+        self.write_api(index=False)
+        with self.assertRaisesRegex(SystemExit, "route index must link"):
+            self.validate()
+
+    def test_rejects_unformatted_json_example(self):
+        self.write_api(
+            '<h3 id="get-apiv1jobs"><code>GET /api/v1/jobs</code></h3>'
+            "<table><tr><th>Request</th><th>Response</th><th>Errors</th></tr></table>"
+            "<pre><code>curl -H 'Authorization: Bearer KEY' https://example.test"
+            '</code></pre><pre><code>{"jobs":[]}</code></pre>'
+        )
+        with self.assertRaisesRegex(SystemExit, "pretty-printed"):
+            self.validate()
+
+    def test_rejects_missing_bearer_curl_example(self):
+        self.write_api(
+            '<h3 id="get-apiv1jobs"><code>GET /api/v1/jobs</code></h3>'
+            "<table><tr><th>Request</th><th>Response</th><th>Errors</th></tr></table>"
+        )
+        api = (self.site / "api.html").read_text(encoding="utf-8")
+        (self.site / "api.html").write_text(
+            api.replace("Authorization: Bearer KEY", ""), encoding="utf-8"
+        )
+        with self.assertRaisesRegex(SystemExit, "bearer header"):
+            self.validate()
+
+    def test_cli_reference_requires_environment_and_examples(self):
+        (self.site / "cli.html").write_text(
+            "<h1>CLI</h1><p>EMBERDECK_API_KEY and EMBERDECK_METRICS_KEY</p>"
+            "<pre><code>emberdeck serve\nemberdeck driver\n"
+            "emberdeck driver -list-ports\nemberdeck -version</code></pre>"
+            '<a href="deployment.html">Deploy</a><a href="driver.html">Driver</a>'
+            '<a href="worker.html">Worker</a><a href="metrics.html">Metrics</a>',
+            encoding="utf-8",
+        )
+        validate_cli_reference(self.site, {"cli.html": True})
+        (self.site / "cli.html").write_text("<p>Usage</p>", encoding="utf-8")
+        with self.assertRaisesRegex(SystemExit, "EMBERDECK_API_KEY"):
+            validate_cli_reference(self.site, {"cli.html": True})
 
 
 class MarkdownSourceValidationTests(unittest.TestCase):

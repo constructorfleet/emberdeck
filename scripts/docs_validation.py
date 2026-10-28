@@ -1,5 +1,6 @@
-"""Checks links and image references in rendered documentation pages."""
+"""Checks links, references, and reference-page contracts in rendered docs."""
 
+from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 import re
@@ -86,7 +87,104 @@ def _png_dimensions(path: Path):
     return width, height
 
 
-def validate_rendered_docs(site: Path) -> None:
+_ROUTE_HEADING = re.compile(
+    r'<h3 id="([^"]+)"><code>((?:GET|POST|PUT|DELETE) /api/v1/[^<]+)</code>'
+)
+_ROUTE_INDEX_LINK = re.compile(r'<a href="api\.html#([^"]+)">(.*?)</a>')
+_CODE_BLOCK = re.compile(r"<pre[^>]*>(?:<span[^>]*></span>)?<code>(.*?)</code></pre>", re.DOTALL)
+_TAG = re.compile(r"<[^>]+>")
+
+
+def _code_text(block_html: str) -> str:
+    return unescape(_TAG.sub("", block_html))
+
+
+def validate_api_reference(site: Path, pages, routes) -> None:
+    """Require a scannable, linked section for every registered API route."""
+    if not routes:
+        return
+    api_page = pages.get("api.html")
+    api_routes_page = pages.get("api-routes.html")
+    if api_page is None or api_routes_page is None:
+        raise SystemExit("Documentation must include API and API route reference pages")
+    api_html = (site / "api.html").read_text(encoding="utf-8")
+    index_html = (site / "api-routes.html").read_text(encoding="utf-8")
+
+    matches = list(_ROUTE_HEADING.finditer(api_html))
+    endpoints = {}
+    for position, match in enumerate(matches):
+        anchor, route = match.group(1), match.group(2)
+        if route in endpoints:
+            raise SystemExit(f"API reference documents {route} more than once")
+        end = matches[position + 1].start() if position + 1 < len(matches) else len(api_html)
+        endpoints[route] = (anchor, api_html[match.end():end])
+
+    expected = set(routes)
+    missing = sorted(expected - set(endpoints))
+    extra = sorted(set(endpoints) - expected)
+    if missing:
+        raise SystemExit("API reference is missing endpoint sections: " + ", ".join(missing))
+    if extra:
+        raise SystemExit("API reference documents unknown endpoints: " + ", ".join(extra))
+
+    for route, (anchor, section) in endpoints.items():
+        for heading in ("Request", "Response", "Errors"):
+            if f"<th>{heading}</th>" not in section:
+                raise SystemExit(
+                    f"API endpoint {route} needs a column labelled {heading} in its contract table"
+                )
+        if f'id="{anchor}"' not in api_html:
+            raise SystemExit(f"API endpoint {route} has an unreachable section anchor")
+
+    indexed = {}
+    for anchor, label in _ROUTE_INDEX_LINK.findall(index_html):
+        indexed[_code_text(label).strip()] = anchor
+    if set(indexed) != expected:
+        missing = sorted(expected - set(indexed))
+        extra = sorted(set(indexed) - expected)
+        detail = []
+        if missing:
+            detail.append("missing " + ", ".join(missing))
+        if extra:
+            detail.append("unknown " + ", ".join(extra))
+        raise SystemExit("API route index must link every registered route: " + "; ".join(detail))
+    for route, anchor in indexed.items():
+        if endpoints[route][0] != anchor:
+            raise SystemExit(f"API route index link for {route} does not match its section")
+
+    blocks = [_code_text(block) for block in _CODE_BLOCK.findall(api_html)]
+    if not any("curl" in block and "Authorization: Bearer" in block for block in blocks):
+        raise SystemExit("API reference needs a complete curl example with a bearer header")
+    for block in blocks:
+        text = block.strip()
+        if not text.startswith("{"):
+            continue
+        if "\n" not in text:
+            raise SystemExit("API reference JSON examples must be pretty-printed")
+        if max(len(line) for line in text.splitlines()) > 160:
+            raise SystemExit("API reference JSON example lines must wrap for narrow screens")
+
+
+def validate_cli_reference(site: Path, pages) -> None:
+    """Require an operator-oriented CLI page instead of raw flag dumps."""
+    if "cli.html" not in pages:
+        raise SystemExit("Documentation must include a CLI reference page")
+    html = (site / "cli.html").read_text(encoding="utf-8")
+    text = _code_text(html)
+    for required in ("EMBERDECK_API_KEY", "EMBERDECK_METRICS_KEY"):
+        if required not in text:
+            raise SystemExit(f"CLI reference must explain required environment variable {required}")
+    blocks = [_code_text(block) for block in _CODE_BLOCK.findall(html)]
+    for example in ("emberdeck serve", "emberdeck driver", "emberdeck driver -list-ports", "emberdeck -version"):
+        if not any(example in block for block in blocks):
+            raise SystemExit(f"CLI reference needs an example for {example}")
+    links = set(re.findall(r'href="([^"]+)"', html))
+    for target in ("deployment.html", "driver.html", "worker.html", "metrics.html"):
+        if target not in links:
+            raise SystemExit(f"CLI reference must link to {target}")
+
+
+def validate_rendered_docs(site: Path, routes=()) -> None:
     """Fail for broken local files, fragments, or image references in a built site."""
     pages = {}
     for page in sorted(site.glob("*.html")):
@@ -121,6 +219,10 @@ def validate_rendered_docs(site: Path) -> None:
                 target_page = pages.get(target.name)
                 if target_page is None or fragment not in target_page.ids:
                     raise SystemExit(f"Broken documentation missing fragment in {page_name}: {reference}")
+
+    if routes:
+        validate_api_reference(site, pages, routes)
+        validate_cli_reference(site, pages)
 
     guide = pages.get("operator-guide.html")
     if guide:
