@@ -210,9 +210,19 @@ Every path must be assigned before generation. Lines can be engraved; cutting
 requires closed shapes with nonzero area. The preview uses green for engraving,
 red dashed outlines for cutting, and gray dotted paths for unassigned geometry.
 
+Use the shape checkboxes to select two or more shapes for alignment; the native
+checkboxes work with the keyboard. Alignment controls stay disabled until at
+least two shapes are selected. Left/center/right and top/middle/bottom alignment
+use each path's transformed bounds, then update the per-shape translation. The
+preview and profile bounds check update immediately, and any out-of-workspace
+warning still blocks saving. Select a shape name to edit its geometry and
+transform while keeping the group selection.
+
 ![Multi-path designer with editable shapes, ordered engraving and cutting layers, and profile-aware preview](assets/screenshots/designer-vector-project.png)
 
 ![Selected vector shape with saved translation, X/Y scale, and rotation controls](assets/screenshots/designer-vector-transform.png)
+
+![Two transformed shapes selected for alignment with updated preview and alignment status](assets/screenshots/designer-vector-alignment.png)
 
 Choose **Import SVG** inside an open vector project to add static geometry. The
 importer supports straight path commands (M/L/H/V/Z), cubic and quadratic
@@ -240,6 +250,8 @@ existing readiness confirmation and **Start** control to dispatch.
 ![Generated multi-path program showing ordered operation provenance](assets/screenshots/designer-vector-review.png)
 
 ![Multi-path vector editor on a narrow screen](assets/screenshots/designer-vector-mobile.png)
+
+![Keyboard-accessible group alignment controls in the mobile vector editor](assets/screenshots/designer-vector-alignment-mobile.png)
 
 ## Monitor a running program
 
@@ -339,8 +351,8 @@ Regenerate the screenshots from the current console and simulator with
 
 ## Requested UI that is not available yet
 
-The current designer does not have multi-selection, rotation/alignment, text
-import, undo/redo, or raster engraving. SVG import supports straight paths and
+The current designer does not have text import, undo/redo, or raster engraving.
+SVG import supports straight paths and
 C/c/Q/q Bezier curves; nested groups, S/s/T/t smooth commands, and A/a arcs are
 not available. Live path correlation currently covers supported linear XY
 moves; arcs and unsupported coordinate modes are reported as warnings, and the
