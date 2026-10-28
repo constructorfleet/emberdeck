@@ -136,18 +136,22 @@ replacement session to replay work after disconnect or reboot.
 
 The current worker adapter path handles job assignments, pause/resume, and
 cancel, with position feedback where declared. It does not execute manual
-preparation actions. The separate #52 capability names `manual_home`,
-`manual_unlock`, `manual_jog`, `manual_set_zero`, and `manual_frame` require a
-distinct manual lease/session and `laser_off=true`; that execution path is not
-implemented here.
+preparation actions. The adapter's `manual_home`, `manual_unlock`,
+`manual_jog`, `manual_set_zero`, and `manual_frame` fields are declarations
+only: the worker does not project them as runtime driver capabilities or accept
+manual assignments for registered adapters. The #52 manual lease and action
+runtime currently applies to direct GRBL workers. An adapter must not expose
+these declarations as usable controls until it implements the manual action
+execution and stop-confirmation contract.
 
 `Status` separates accepted lines from optional executed lines and may provide
 controller state and position with `confirmed`, `estimated`, `unknown`, or
 `unavailable` confidence. Acceptance is not execution evidence. Accepted and
-executed counters cannot regress during a lease. Controls return an unsupported
-error unless the device declares that capability. Adapters must honor context
-cancellation, return bounded errors, and identify uncertainty after connection
-loss. This API does not establish physical safety or replace machine interlocks.
+executed counters cannot regress during a lease. Job pause, resume, and cancel
+controls return an unsupported error unless the device declares that capability.
+Adapters must honor context cancellation, return bounded errors, and identify
+uncertainty after connection loss. This API does not establish physical safety
+or replace machine interlocks.
 
 The API is trusted in-process Go code, not an isolated plugin process. The
 software-only simulator is registered explicitly by the embedding application;

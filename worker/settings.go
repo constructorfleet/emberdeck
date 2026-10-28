@@ -30,6 +30,8 @@ type controllerReport struct {
 	reset               string
 	capabilities        []string
 	adapterCapabilities bool
+	manualCapabilities  bool
+	controllerState     string
 }
 
 func (r *controllerReport) poll(session string, p *progress) pollRequest {
@@ -39,12 +41,30 @@ func (r *controllerReport) poll(session string, p *progress) pollRequest {
 	if r.adapterCapabilities {
 		capabilities = append([]string{jobtransfer.Capability}, r.capabilities...)
 	}
-	request := pollRequest{Session: session, Capabilities: capabilities, progress: p, SettingsError: r.err}
+	if r.manualCapabilities {
+		capabilities = append(capabilities, "manual_home", "manual_unlock", "manual_jog", "manual_set_zero", "manual_frame")
+	}
+	request := pollRequest{Session: session, Capabilities: capabilities, progress: p, SettingsError: r.err, ControllerState: r.controllerState}
+	if p != nil {
+		request.ControllerState = p.ControllerState
+	}
 	if r.settings != nil {
 		settings, readAt := *r.settings, r.readAt
 		request.ControllerSettings, request.SettingsReadAt = &settings, &readAt
 	}
 	return request
+}
+
+func (r *controllerReport) enableManualCapabilities() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.manualCapabilities = true
+}
+
+func (r *controllerReport) setControllerState(state string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.controllerState = state
 }
 
 func (r *controllerReport) setCapabilities(capabilities driveradapter.Capabilities) {
@@ -67,7 +87,7 @@ func (r *controllerReport) failed(err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// Earlier values may be stale; the server must not compare against them.
-	r.settings, r.err = nil, truncate(err.Error(), 500)
+	r.settings, r.err, r.controllerState = nil, truncate(err.Error(), 500), ""
 	if strings.Contains(err.Error(), "controller reset") {
 		r.reset = err.Error()
 	}
@@ -114,6 +134,32 @@ func (r *controllerReport) probe(ctx context.Context, connect Connector) {
 		return
 	}
 	r.record(settings)
+	status, err := driver.ReadStatus(probeCtx, conn, settingsProbeTimeout)
+	if err != nil {
+		r.setControllerState("")
+		return
+	}
+	r.setControllerState(status.State)
+}
+
+func (r *controllerReport) probeStatus(ctx context.Context, connect Connector) {
+	probeCtx, cancel := context.WithTimeout(ctx, settingsProbeTimeout)
+	defer cancel()
+	conn, err := connect(probeCtx)
+	if err == nil && conn == nil {
+		err = errors.New("connector returned nil connection")
+	}
+	if err != nil {
+		r.setControllerState("")
+		return
+	}
+	defer conn.Close()
+	status, err := driver.ReadStatus(probeCtx, conn, settingsProbeTimeout)
+	if err != nil {
+		r.setControllerState("")
+		return
+	}
+	r.setControllerState(status.State)
 }
 
 func truncate(value string, limit int) string {

@@ -35,6 +35,7 @@ type Driver struct {
 	SettingsError      string           `json:"settings_error,omitempty"`
 	CameraAvailable    bool             `json:"camera_available"`
 	settingsRequested  time.Time
+	statusRequested    time.Time
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -296,6 +297,14 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 		respond(w, 200, s.idleCommand(id))
 		return
 	}
+	if assignment.manual != nil {
+		if assignment.command == "manual" {
+			respond(w, http.StatusOK, map[string]any{"command": assignment.command, "lease": assignment.manual.Lease, "manual": manualWorkerAssignment(assignment.manual)})
+		} else {
+			respond(w, http.StatusOK, map[string]any{"command": assignment.command})
+		}
+		return
+	}
 	if needsProgram {
 		if assignment.chunked {
 			assignment.job.Content = &jobtransfer.Manifest{Size: assignment.record.Size, SHA256: assignment.record.SHA256}
@@ -348,6 +357,9 @@ type pollReport struct {
 	ControllerSettings *driver.Settings `json:"controller_settings"`
 	SettingsReadAt     *time.Time       `json:"settings_read_at"`
 	SettingsError      string           `json:"settings_error"`
+	ManualLease        string           `json:"manual_lease,omitempty"`
+	ManualState        string           `json:"manual_state,omitempty"`
+	ManualError        string           `json:"manual_error,omitempty"`
 }
 
 type pollAssignment struct {
@@ -355,6 +367,7 @@ type pollAssignment struct {
 	job     workerJob
 	record  jobRecord
 	chunked bool
+	manual  *manualControlLease
 }
 
 type terminalReceiptFields struct {
@@ -466,6 +479,47 @@ func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCa
 	d.Session = in.Session
 	d.CredentialID = cause.actor.ID
 	d.LastSeen = time.Now().UTC()
+	manual := s.manualControls[id]
+	if in.ManualLease != "" {
+		if err := manualReceiptError(manual, in); err != nil {
+			fail(w, http.StatusConflict, err.Error())
+			return nil, false, false
+		}
+		if in.JobID != "" || in.State != "" || in.Acked != 0 || in.Total != 0 || in.Execution != nil || in.Error != "" {
+			fail(w, http.StatusBadRequest, "manual-control reports cannot include job progress or G-code execution data")
+			return nil, false, false
+		}
+		switch in.ManualState {
+		case manualStateRunning:
+			if manual.State != manualStateCanceling {
+				manual.State = manualStateRunning
+			}
+		case manualStateCompleted, manualStateFailed, manualStateCanceled:
+			if in.ManualState == manualStateCanceled && manual.State != manualStateCanceling {
+				fail(w, http.StatusConflict, "manual-control cancellation was not requested")
+				return nil, false, false
+			}
+			if manualMotion(manual.Action) && in.ControllerState != "Idle" {
+				manual.State = manualStateInterrupted
+				manual.Error = "motion ended without a fresh Idle controller report; inspect the machine before release"
+			} else {
+				manual.State = in.ManualState
+				manual.Error = in.ManualError
+			}
+		default:
+			fail(w, http.StatusBadRequest, "invalid manual-control state")
+			return nil, false, false
+		}
+		if len(manual.Error) > 1000 {
+			manual.Error = manual.Error[:1000]
+		}
+		manual.Updated = d.LastSeen
+		manual.ExpiresAt = d.LastSeen.Add(driverTTL)
+		d.Busy = manualAssignmentActive(manual.State)
+	} else if in.ManualState != "" || in.ManualError != "" {
+		fail(w, http.StatusBadRequest, "manual state and error require a manual lease")
+		return nil, false, false
+	}
 	if in.JobID != "" {
 		j, exists := s.jobs[in.JobID]
 		if !exists || j.DriverID != id || j.Lease == "" || j.Lease != in.Lease {
@@ -554,8 +608,26 @@ func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCa
 		}
 	}
 	d.Busy = false
-	if manual := s.manualControls[id]; manual != nil && manualAssignmentActive(manual.State) {
+	if manual != nil && manualAssignmentActive(manual.State) {
 		d.Busy = true
+		if manual.State == manualStateQueued || manual.State == manualStateAssigned && manual.Session == in.Session {
+			manual.State = manualStateAssigned
+			manual.Session = in.Session
+			manual.Updated = d.LastSeen
+			manual.ExpiresAt = d.LastSeen.Add(driverTTL)
+			s.drivers[id] = d
+			return &pollAssignment{command: "manual", manual: manual}, false, true
+		}
+		s.drivers[id] = d
+		if manual.State == manualStateCanceling {
+			return &pollAssignment{command: "manual_cancel", manual: manual}, false, true
+		}
+		if in.ManualLease != "" && manual.State == manualStateRunning {
+			return &pollAssignment{command: "manual_running", manual: manual}, false, true
+		}
+		// Do not replay an assignment after a worker session changes. Keep the
+		// driver busy until the operator inspects and releases this lease.
+		return nil, false, true
 	}
 	for _, j := range s.jobs {
 		if j.DriverID == id && activeJob(j.State) {

@@ -203,7 +203,7 @@ func TestManualCommandUnlockAndSetZeroWire(t *testing.T) {
 			client, machine := net.Pipe()
 			defer client.Close()
 			defer machine.Close()
-			wire := make(chan string, 2)
+			wire := make(chan string, 3)
 			go func() {
 				r := bufio.NewReader(machine)
 				b, _ := r.ReadByte()
@@ -212,6 +212,11 @@ func TestManualCommandUnlockAndSetZeroWire(t *testing.T) {
 				line, _ := r.ReadString('\n')
 				wire <- line
 				io.WriteString(machine, "ok\r\n")
+				if tc.action == "unlock" {
+					b, _ = r.ReadByte()
+					wire <- string([]byte{b})
+					io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+				}
 			}()
 			if err := ManualCommand(context.Background(), client, ManualCommandRequest{Action: tc.action, Confirmed: true}); err != nil {
 				t.Fatalf("ManualCommand %s: %v", tc.action, err)
@@ -221,6 +226,11 @@ func TestManualCommandUnlockAndSetZeroWire(t *testing.T) {
 			}
 			if got := <-wire; got != tc.want {
 				t.Fatalf("wire command = %q; want %q", got, tc.want)
+			}
+			if tc.action == "unlock" {
+				if got := <-wire; got != "?" {
+					t.Fatalf("unlock verification query = %q", got)
+				}
 			}
 		})
 	}

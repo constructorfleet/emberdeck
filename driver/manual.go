@@ -333,6 +333,15 @@ func ManualCommand(ctx context.Context, conn io.ReadWriteCloser, request ManualC
 		}
 		return e
 	}
+	if request.Action == "unlock" {
+		state, e = status()
+		if e != nil {
+			return e
+		}
+		if state.State != "Idle" {
+			return fmt.Errorf("driver: unlock did not return controller to Idle; got %s", state.State)
+		}
+	}
 	if moving {
 		ticker := time.NewTicker(manualPoll)
 		defer ticker.Stop()

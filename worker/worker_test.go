@@ -127,7 +127,7 @@ func TestRunFetchesAndVerifiesChunkedContentBeforeOpeningController(t *testing.T
 		}
 		body := pollSession(t, r)
 		caps, _ := body["capabilities"].([]any)
-		if len(caps) != 2 || caps[1] != jobtransfer.Capability {
+		if len(caps) != 7 || caps[0] != "pause_resume" || caps[1] != jobtransfer.Capability || caps[2] != "manual_home" || caps[6] != "manual_frame" {
 			t.Errorf("worker capabilities = %#v", body["capabilities"])
 		}
 		if body["state"] == "completed" {
@@ -749,7 +749,7 @@ func TestRunInitialPauseSendsNoProgramUntilResumeAndReportsController(t *testing
 			t.Error(err)
 		}
 		caps, _ := body["capabilities"].([]any)
-		if len(caps) != 2 || caps[0] != "pause_resume" || caps[1] != jobtransfer.Capability {
+		if len(caps) != 7 || caps[0] != "pause_resume" || caps[1] != jobtransfer.Capability || caps[2] != "manual_home" || caps[6] != "manual_frame" {
 			t.Errorf("capabilities = %#v", body["capabilities"])
 		}
 		mu.Lock()

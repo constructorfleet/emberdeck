@@ -43,7 +43,16 @@ test('manual jog requires advertised capability, Idle, preparation check, and a 
   await expect(jog).toBeDisabled();
   await expect(page.locator('#manual-home')).toBeDisabled();
   await page.locator('#manual-confirmation').check();
+  await expect(page.locator('#manual-home')).toBeEnabled();
   await expect(jog).toBeEnabled();
+
+  await page.locator('#manual-home').click();
+  await expect(page.locator('#action-dialog-title')).toHaveText('Home machine?');
+  await expect(page.locator('#action-dialog-body')).toContainText('home switches');
+  expect(submitted).toBeNull();
+  await page.locator('#action-dialog-dismiss').click();
+  await expect(page.locator('#action-dialog')).toBeHidden();
+
   await page.locator('#manual-jog-distance').fill('26');
   await jog.click();
   await expect(page.locator('#manual-status')).toContainText('within ±25 mm');
@@ -80,6 +89,7 @@ test('unlock is gated to Alarm and manual actions require the matching capabilit
   await expect(page.locator('#manual-unlock')).toBeEnabled();
   await expect(page.locator('#manual-home')).toBeDisabled();
   await page.locator('#manual-unlock').click();
+  await expect(page.locator('#action-dialog-body')).toContainText('clears the controller alarm state');
   await page.locator('#action-dialog-confirm').click();
   await expect.poll(() => submitted).toMatchObject({ action: 'unlock', confirmed: true });
 });

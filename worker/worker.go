@@ -97,7 +97,9 @@ type assignment struct {
 	Command string `json:"command"`
 	Lease   string `json:"lease"`
 	// ReadSettings asks an idle worker to probe the controller with `$$`.
-	ReadSettings bool `json:"read_settings"`
+	ReadSettings bool              `json:"read_settings"`
+	ReadStatus   bool              `json:"read_status"`
+	Manual       *manualAssignment `json:"manual,omitempty"`
 	Job          struct {
 		ID      string                `json:"id"`
 		GCode   string                `json:"gcode"`
@@ -125,6 +127,10 @@ type pollRequest struct {
 	ControllerSettings *driver.Settings `json:"controller_settings,omitempty"`
 	SettingsReadAt     *time.Time       `json:"settings_read_at,omitempty"`
 	SettingsError      string           `json:"settings_error,omitempty"`
+	ControllerState    string           `json:"controller_state,omitempty"`
+	ManualLease        string           `json:"manual_lease,omitempty"`
+	ManualState        string           `json:"manual_state,omitempty"`
+	ManualError        string           `json:"manual_error,omitempty"`
 	*progress
 }
 
@@ -327,6 +333,8 @@ func run(ctx context.Context, serverURL, key, id string, connect Connector, regi
 	report := &controllerReport{}
 	if registration != nil {
 		report.setCapabilities(registration.capabilities)
+	} else {
+		report.enableManualCapabilities()
 	}
 	for {
 		if err := ctx.Err(); err != nil {
@@ -363,6 +371,13 @@ func run(ctx context.Context, serverURL, key, id string, connect Connector, regi
 		}
 		switch assignment.Command {
 		case "idle":
+			if assignment.ReadStatus && registration == nil {
+				report.probeStatus(ctx, connect)
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				continue
+			}
 			if assignment.ReadSettings {
 				if registration != nil {
 					report.failed(errors.New("controller settings probe is unsupported by the registered adapter"))
@@ -378,6 +393,18 @@ func run(ctx context.Context, serverURL, key, id string, connect Connector, regi
 			if err := wait(ctx, pollInterval); err != nil {
 				return err
 			}
+		case "manual":
+			if registration != nil {
+				return errors.New("worker: manual assignment is unsupported by this adapter")
+			}
+			if assignment.Lease == "" || assignment.Manual == nil {
+				return errors.New("worker: server returned incomplete manual assignment")
+			}
+			if err := runManualLease(ctx, client, endpoint, key, session, connect, assignment, report); err != nil {
+				return err
+			}
+		case "manual_running", "manual_cancel":
+			return fmt.Errorf("worker: received %s without owning a manual lease", assignment.Command)
 		case "cancel":
 			if assignment.Job.ID == "" || assignment.Lease == "" {
 				return errors.New("worker: cancel command has no assignment")

@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -269,4 +270,20 @@ func manualWorkerAssignment(record *manualControlLease) manualControlAssignment 
 		FeedMMMin: record.FeedMMMin, JobID: record.JobID, Bounds: record.Bounds,
 		LaserOff: record.LaserOff, MaxDurationMS: record.MaxDurationMS,
 	}
+}
+
+func manualReceiptError(record *manualControlLease, in *pollReport) error {
+	if record == nil || in.ManualLease == "" || in.ManualLease != record.Lease {
+		return errors.New("stale or invalid manual-control lease")
+	}
+	if record.Session == "" || in.Session != record.Session {
+		return errors.New("manual-control lease belongs to another worker session")
+	}
+	if record.State != manualStateAssigned && record.State != manualStateRunning && record.State != manualStateCanceling && record.State != in.ManualState {
+		return errors.New("manual-control lease is not assigned to a worker")
+	}
+	if len(in.ManualError) > 1000 {
+		return errors.New("manual-control error is too long")
+	}
+	return nil
 }
