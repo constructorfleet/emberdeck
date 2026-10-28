@@ -1,0 +1,306 @@
+#include "worker_cycle.h"
+
+#include <stdio.h>
+#include <string.h>
+
+typedef struct {
+    const unsigned char *source;
+    size_t source_size;
+    unsigned char staged[64];
+    size_t staged_size;
+    unsigned char uart[64];
+    size_t uart_size;
+    size_t next_offset;
+    int sealed;
+    int no_assignment;
+    int short_fetch;
+    int incomplete_terminal;
+    int fetch_rejected;
+    int report_rejected;
+    int open_calls;
+    int poll_calls;
+    int fetch_calls;
+    int wait_calls;
+    int report_calls;
+    int close_calls;
+    int callback_error;
+    ed_terminal_state reported_state;
+    char reported_error[ED_WORKER_ERROR_BYTES];
+    char session[ED_WORKER_SESSION_BYTES];
+    const char *expected_lease;
+} fixture;
+
+static int open_session(void *context, char *session, size_t capacity) {
+    fixture *f = (fixture *)context;
+    f->open_calls++;
+    if (capacity < sizeof("session-fresh-1")) return -1;
+    strcpy(session, "session-fresh-1");
+    strcpy(f->session, session);
+    return 0;
+}
+
+static int poll_assignment(void *context, const char *session,
+                           ed_worker_assignment *assignment,
+                           int *has_assignment) {
+    fixture *f = (fixture *)context;
+    f->poll_calls++;
+    if (strcmp(session, f->session) != 0) return -1;
+    strcpy(assignment->job_id, "job-7");
+    strcpy(assignment->lease, "lease-one");
+    assignment->content.size = f->source_size;
+    ed_sha256(f->source, f->source_size, assignment->content.sha256);
+    *has_assignment = f->no_assignment ? 0 : 1;
+    return 0;
+}
+
+static int fetch_range(void *context, const char *session, const char *job_id,
+                       const char *lease, size_t offset, size_t max_length,
+                       unsigned char *destination, size_t capacity,
+                       size_t *received) {
+    fixture *f = (fixture *)context;
+    size_t amount;
+    f->fetch_calls++;
+    if (strcmp(session, f->session) != 0 || strcmp(job_id, "job-7") != 0 ||
+        strcmp(lease, f->expected_lease) != 0 ||
+        offset != f->next_offset ||
+        max_length > capacity || offset > f->source_size) {
+        if (strcmp(lease, f->expected_lease) != 0) f->fetch_rejected = 1;
+        else f->callback_error = 1;
+        return -1;
+    }
+    amount = f->source_size - offset;
+    if (amount > max_length) amount = max_length;
+    if (f->short_fetch && amount > 0) amount--;
+    memcpy(destination, f->source + offset, amount);
+    *received = amount;
+    f->next_offset += amount;
+    return 0;
+}
+
+static int storage_reset(void *context, size_t expected_size) {
+    fixture *f = (fixture *)context;
+    if (expected_size > sizeof(f->staged)) return -1;
+    f->staged_size = 0;
+    return 0;
+}
+
+static int storage_write(void *context, size_t offset,
+                         const unsigned char *bytes, size_t length) {
+    fixture *f = (fixture *)context;
+    if (f->sealed || offset + length > sizeof(f->staged)) return -1;
+    memcpy(f->staged + offset, bytes, length);
+    if (f->staged_size < offset + length) f->staged_size = offset + length;
+    return 0;
+}
+
+static int storage_read(void *context, size_t offset, unsigned char *bytes,
+                        size_t length) {
+    fixture *f = (fixture *)context;
+    if (offset + length > f->staged_size) return -1;
+    memcpy(bytes, f->staged + offset, length);
+    return 0;
+}
+
+static int storage_seal(void *context, size_t expected_size) {
+    fixture *f = (fixture *)context;
+    if (f->staged_size != expected_size) return -1;
+    f->sealed = 1;
+    return 0;
+}
+
+static void storage_unseal(void *context) {
+    ((fixture *)context)->sealed = 0;
+}
+
+static int uart_sink(void *context, const unsigned char *bytes, size_t length) {
+    fixture *f = (fixture *)context;
+    if (!f->sealed || f->uart_size + length > sizeof(f->uart)) return -1;
+    memcpy(f->uart + f->uart_size, bytes, length);
+    f->uart_size += length;
+    return 0;
+}
+
+static int wait_terminal(void *context, ed_terminal_receipt *receipt) {
+    fixture *f = (fixture *)context;
+    f->wait_calls++;
+    if (f->uart_size != f->source_size ||
+        memcmp(f->uart, f->source, f->source_size) != 0) return -1;
+    receipt->state = ED_TERMINAL_COMPLETED;
+    receipt->acked = f->incomplete_terminal ? 1u : 2u;
+    receipt->total = 2;
+    receipt->controller_idle = f->incomplete_terminal ? 0 : 1;
+    strcpy(receipt->controller_state, f->incomplete_terminal ? "Run" : "Idle");
+    return 0;
+}
+
+static int report_terminal(void *context, const char *session,
+                           const char *job_id, const char *lease,
+                           const ed_terminal_receipt *receipt) {
+    fixture *f = (fixture *)context;
+    f->report_calls++;
+    f->reported_state = receipt->state;
+    if (strcmp(session, f->session) != 0 || strcmp(job_id, "job-7") != 0 ||
+        strcmp(lease, f->expected_lease) != 0) {
+        if (strcmp(lease, f->expected_lease) != 0) f->report_rejected = 1;
+        else f->callback_error = 1;
+        return -1;
+    }
+    strcpy(f->reported_error, receipt->error);
+    if (receipt->state == ED_TERMINAL_COMPLETED &&
+        (receipt->acked != 2 || receipt->total != 2 || !receipt->controller_idle ||
+         strcmp(receipt->controller_state, "Idle") != 0)) {
+        f->callback_error = 1;
+        return -1;
+    }
+    if (receipt->state == ED_TERMINAL_FAILED &&
+        (receipt->acked > receipt->total || receipt->error[0] == '\0')) {
+        f->callback_error = 1;
+        return -1;
+    }
+    if (receipt->state != ED_TERMINAL_COMPLETED &&
+        receipt->state != ED_TERMINAL_FAILED &&
+        receipt->state != ED_TERMINAL_CANCELED) {
+        f->callback_error = 1;
+        return -1;
+    }
+    return 0;
+}
+
+static void close_session(void *context, const char *session) {
+    fixture *f = (fixture *)context;
+    if (strcmp(session, f->session) != 0) f->callback_error = 1;
+    f->close_calls++;
+}
+
+static int check(int condition, const char *message) {
+    if (!condition) fprintf(stderr, "FAIL: %s\n", message);
+    return condition;
+}
+
+static void prepare(fixture *f, ed_worker_adapters *adapters,
+                    const unsigned char *program, size_t length) {
+    memset(f, 0, sizeof(*f));
+    memset(adapters, 0, sizeof(*adapters));
+    f->source = program;
+    f->source_size = length;
+    f->expected_lease = "lease-one";
+    adapters->http.context = f;
+    adapters->http.open_fresh_session = open_session;
+    adapters->http.poll_assignment = poll_assignment;
+    adapters->http.fetch_range = fetch_range;
+    adapters->http.report_terminal = report_terminal;
+    adapters->http.close_session = close_session;
+    adapters->controller.context = f;
+    adapters->controller.wait_terminal = wait_terminal;
+    adapters->storage.context = f;
+    adapters->storage.reset = storage_reset;
+    adapters->storage.write = storage_write;
+    adapters->storage.read = storage_read;
+    adapters->storage.seal = storage_seal;
+    adapters->storage.unseal = storage_unseal;
+    adapters->uart_sink = uart_sink;
+    adapters->uart_context = f;
+}
+
+static int test_successful_assignment(void) {
+    static const unsigned char program[] = "G1 X1\nM5\n";
+    fixture f = {0};
+    ed_worker_adapters adapters = {0};
+    ed_worker_result result;
+    ed_result status;
+
+    prepare(&f, &adapters, program, sizeof(program) - 1);
+
+    status = ed_worker_run_one(&adapters, &result);
+    if (!check(status == ED_OK, "one valid assignment completes")) return 0;
+    if (!check(result.outcome == ED_WORKER_COMPLETED && result.acked == 2 &&
+               result.total == 2, "terminal result is returned")) return 0;
+    if (!check(f.open_calls == 1 && f.poll_calls == 1,
+               "one fresh session and one poll are used")) return 0;
+    if (!check(f.fetch_calls == 1 && f.next_offset == f.source_size,
+               "content is fetched under the one assignment")) return 0;
+    if (!check(f.uart_size == f.source_size && f.wait_calls == 1 &&
+               f.report_calls == 1, "verified content reaches UART before report")) return 0;
+    if (!check(f.close_calls == 1 && !f.callback_error,
+               "session closes after terminal report")) return 0;
+    return 1;
+}
+
+static int test_no_assignment_closes_session(void) {
+    static const unsigned char program[] = "G1 X1\nM5\n";
+    fixture f;
+    ed_worker_adapters adapters;
+    ed_worker_result result;
+    prepare(&f, &adapters, program, sizeof(program) - 1);
+    f.no_assignment = 1;
+    if (!check(ed_worker_run_one(&adapters, &result) == ED_OK,
+               "empty poll is a normal one-cycle result")) return 0;
+    return check(result.outcome == ED_WORKER_NO_ASSIGNMENT &&
+                 f.open_calls == 1 && f.poll_calls == 1 && f.close_calls == 1 &&
+                 f.fetch_calls == 0 && f.uart_size == 0 && f.report_calls == 0,
+                 "no assignment closes its fresh session without side effects");
+}
+
+static int test_wrong_lease_is_rejected(void) {
+    static const unsigned char program[] = "G1 X1\nM5\n";
+    fixture f;
+    ed_worker_adapters adapters;
+    ed_worker_result result;
+    prepare(&f, &adapters, program, sizeof(program) - 1);
+    f.expected_lease = "different-lease";
+    if (!check(ed_worker_run_one(&adapters, &result) == ED_ERR_REPORT,
+               "wrong lease prevents the failure receipt from releasing it")) return 0;
+    return check(f.fetch_calls == 1 && f.uart_size == 0 && f.wait_calls == 0 &&
+                 f.report_calls == 1 && f.reported_state == ED_TERMINAL_FAILED &&
+                 f.fetch_rejected && f.report_rejected &&
+                 f.close_calls == 1,
+                 "wrong lease never reaches controller and cannot claim terminal ownership");
+}
+
+static int test_invalid_content_never_reaches_uart_or_completion(void) {
+    static const unsigned char malformed[] = "G1 X1\n(unterminated\n";
+    static const unsigned char valid[] = "G1 X1\nM5\n";
+    const unsigned char *programs[] = {malformed, valid};
+    const size_t lengths[] = {sizeof(malformed) - 1, sizeof(valid) - 1};
+    const int short_fetch[] = {0, 1};
+    const ed_result expected[] = {ED_ERR_GCODE, ED_ERR_SIZE};
+    const char *names[] = {"malformed G-code", "truncated content"};
+    size_t i;
+    for (i = 0; i < sizeof(programs) / sizeof(programs[0]); i++) {
+        fixture f;
+        ed_worker_adapters adapters;
+        ed_worker_result result;
+        prepare(&f, &adapters, programs[i], lengths[i]);
+        f.short_fetch = short_fetch[i];
+        if (!check(ed_worker_run_one(&adapters, &result) == expected[i], names[i])) return 0;
+        if (!check(f.uart_size == 0 && f.wait_calls == 0 && f.report_calls == 1 &&
+                   f.reported_state == ED_TERMINAL_FAILED && f.close_calls == 1,
+                   "invalid or truncated content cannot reach UART/completed report")) return 0;
+    }
+    return 1;
+}
+
+static int test_incomplete_controller_result_is_not_reported_completed(void) {
+    static const unsigned char program[] = "G1 X1\nM5\n";
+    fixture f;
+    ed_worker_adapters adapters;
+    ed_worker_result result;
+    prepare(&f, &adapters, program, sizeof(program) - 1);
+    f.incomplete_terminal = 1;
+    if (!check(ed_worker_run_one(&adapters, &result) == ED_ERR_PROTOCOL,
+               "completed requires all acknowledgments and controller Idle")) return 0;
+    return check(f.uart_size == f.source_size && f.wait_calls == 1 &&
+                 f.report_calls == 1 && f.reported_state == ED_TERMINAL_FAILED &&
+                 f.close_calls == 1 &&
+                 result.outcome == ED_WORKER_ERROR,
+                 "incomplete controller result is not reported as terminal");
+}
+
+int main(void) {
+    if (!test_successful_assignment()) return 1;
+    if (!test_no_assignment_closes_session()) return 1;
+    if (!test_wrong_lease_is_rejected()) return 1;
+    if (!test_invalid_content_never_reaches_uart_or_completion()) return 1;
+    if (!test_incomplete_controller_result_is_not_reported_completed()) return 1;
+    return 0;
+}
