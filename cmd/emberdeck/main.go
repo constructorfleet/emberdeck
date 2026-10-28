@@ -59,6 +59,7 @@ func runServe(args []string) error {
 	tcpAddress := flags.String("tcp", "", "run a driver connected to a GRBL TCP controller")
 	serialPort := flags.String("serial", "", "run a driver connected to a serial controller")
 	baud := flags.Int("baud", 115200, "serial connection baud rate")
+	serialDTR, serialRTS := addSerialModemFlags(flags)
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -73,6 +74,10 @@ func runServe(args []string) error {
 	}
 	if *serialPort != "" && *baud <= 0 {
 		return errors.New("-baud must be positive")
+	}
+	modemBits, err := parseSerialModemBits(*serialDTR, *serialRTS)
+	if err != nil {
+		return err
 	}
 	key := os.Getenv("EMBERDECK_API_KEY")
 	if key == "" {
@@ -134,7 +139,7 @@ func runServe(args []string) error {
 			id = "simulator"
 		}
 		label := localDriverLabel(mode, *tcpAddress, *serialPort)
-		connect := connectionConnector(mode, *tcpAddress, *serialPort, *baud)
+		connect := connectionConnectorWithModemBits(mode, *tcpAddress, *serialPort, *baud, modemBits)
 		logf := func(format string, args ...any) { log.Printf(label+": "+format, args...) }
 		go func() {
 			// A local worker failure marks the driver offline (its heartbeat
@@ -203,6 +208,7 @@ func runDriver(args []string) error {
 	tcpAddress := flags.String("tcp", "", "connect to a GRBL controller over TCP")
 	serialPort := flags.String("serial", "", "connect to a serial controller")
 	baud := flags.Int("baud", 115200, "serial connection baud rate")
+	serialDTR, serialRTS := addSerialModemFlags(flags)
 	listPorts := flags.Bool("list-ports", false, "list available serial ports and exit")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -236,6 +242,10 @@ func runDriver(args []string) error {
 	if *serialPort != "" && *baud <= 0 {
 		return errors.New("-baud must be positive")
 	}
+	modemBits, err := parseSerialModemBits(*serialDTR, *serialRTS)
+	if err != nil {
+		return err
+	}
 	if err := validateServerURL(*serverURLFlag); err != nil {
 		return err
 	}
@@ -245,7 +255,7 @@ func runDriver(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	err := worker.Run(ctx, *serverURLFlag, key, *id, connectionConnector(connectionMode(*simulate, *tcpAddress, *serialPort), *tcpAddress, *serialPort, *baud))
+	err = worker.Run(ctx, *serverURLFlag, key, *id, connectionConnectorWithModemBits(connectionMode(*simulate, *tcpAddress, *serialPort), *tcpAddress, *serialPort, *baud, modemBits))
 	if errors.Is(err, context.Canceled) && ctx.Err() != nil {
 		return nil
 	}
@@ -292,6 +302,10 @@ func localDriverLabel(mode, tcpAddress, serialPort string) string {
 }
 
 func connectionConnector(mode, tcpAddress, serialPort string, baud int) worker.Connector {
+	return connectionConnectorWithModemBits(mode, tcpAddress, serialPort, baud, transport.ModemBits{})
+}
+
+func connectionConnectorWithModemBits(mode, tcpAddress, serialPort string, baud int, modemBits transport.ModemBits) worker.Connector {
 	return func(ctx context.Context) (io.ReadWriteCloser, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -302,11 +316,39 @@ func connectionConnector(mode, tcpAddress, serialPort string, baud int) worker.C
 		case "tcp":
 			return (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, "tcp", tcpAddress)
 		case "serial":
-			return transport.OpenSerial(ctx, serialPort, baud)
+			return transport.OpenSerialWithBits(ctx, serialPort, baud, modemBits)
 		default:
 			return nil, errors.New("no driver connection type configured")
 		}
 	}
+}
+
+func addSerialModemFlags(flags *flag.FlagSet) (*string, *string) {
+	dtr := flags.String("serial-dtr", "off", "initial serial DTR output state (on or off; default off)")
+	rts := flags.String("serial-rts", "off", "initial serial RTS output state (on or off; default off)")
+	return dtr, rts
+}
+
+func parseSerialModemBits(dtr, rts string) (transport.ModemBits, error) {
+	parse := func(flagName, value string) (bool, error) {
+		switch value {
+		case "off":
+			return false, nil
+		case "on":
+			return true, nil
+		default:
+			return false, fmt.Errorf("-%s must be on or off", flagName)
+		}
+	}
+	dtrOn, err := parse("serial-dtr", dtr)
+	if err != nil {
+		return transport.ModemBits{}, err
+	}
+	rtsOn, err := parse("serial-rts", rts)
+	if err != nil {
+		return transport.ModemBits{}, err
+	}
+	return transport.ModemBits{DTR: dtrOn, RTS: rtsOn}, nil
 }
 
 func validateServerURL(raw string) error {

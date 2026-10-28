@@ -1,8 +1,12 @@
 package main
 
 import (
+	"flag"
+	"io"
 	"strings"
 	"testing"
+
+	"github.com/ConstructorFleet/emberdeck/transport"
 )
 
 func TestLocalDriverLogsNameTheRealTransport(t *testing.T) {
@@ -26,5 +30,49 @@ func TestServeMetricsListenFlagIsOptionalAndRecognized(t *testing.T) {
 	}
 	if err := runServe(nil); err == nil || !strings.Contains(err.Error(), "EMBERDECK_API_KEY is required") {
 		t.Fatalf("default serve behavior changed: %v", err)
+	}
+}
+
+func TestSerialModemFlagsDefaultOffAndApplyRequestedBits(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		flags := flag.NewFlagSet("driver", flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		dtr, rts := addSerialModemFlags(flags)
+		if err := flags.Parse(nil); err != nil {
+			t.Fatal(err)
+		}
+		got, err := parseSerialModemBits(*dtr, *rts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != (transport.ModemBits{}) {
+			t.Fatalf("default modem bits = %+v; want DTR/RTS off", got)
+		}
+	})
+
+	t.Run("configured", func(t *testing.T) {
+		flags := flag.NewFlagSet("driver", flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		dtr, rts := addSerialModemFlags(flags)
+		if err := flags.Parse([]string{"-serial-dtr=on", "-serial-rts=off"}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := parseSerialModemBits(*dtr, *rts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := transport.ModemBits{DTR: true, RTS: false}
+		if got != want {
+			t.Fatalf("configured modem bits = %+v; want %+v", got, want)
+		}
+	})
+}
+
+func TestParseSerialModemBitsRejectsUnknownValues(t *testing.T) {
+	if _, err := parseSerialModemBits("pulse", "off"); err == nil {
+		t.Fatal("invalid DTR policy was accepted")
+	}
+	if _, err := parseSerialModemBits("off", "pulse"); err == nil {
+		t.Fatal("invalid RTS policy was accepted")
 	}
 }

@@ -1389,6 +1389,41 @@ func TestStreamRejectsBusyControllerBeforeSendingProgram(t *testing.T) {
 	}
 }
 
+func TestStreamRejectsStartupBannerDuringReadinessBeforeProgramBytes(t *testing.T) {
+	client, machine := net.Pipe()
+	defer client.Close()
+	defer machine.Close()
+	done := make(chan error, 1)
+	go func() { done <- Stream(context.Background(), client, "G0 X1\nM3 S100", nil) }()
+
+	reader := bufio.NewReader(machine)
+	machine.SetReadDeadline(time.Now().Add(time.Second))
+	query, err := reader.ReadByte()
+	machine.SetReadDeadline(time.Time{})
+	if err != nil || query != '?' {
+		t.Fatalf("initial status query = %q, %v", query, err)
+	}
+	if _, err := io.WriteString(machine, "Grbl 1.1h ['$' for help]\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "controller reset") || !strings.Contains(err.Error(), "work coordinates must be re-verified") {
+			t.Fatalf("startup-banner error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stream did not fail on startup banner")
+	}
+
+	_ = machine.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+	var trailing [32]byte
+	if n, err := reader.Read(trailing[:]); err == nil {
+		if strings.ContainsAny(string(trailing[:n]), "GM") {
+			t.Fatalf("program bytes sent after reset banner: %q", trailing[:n])
+		}
+	}
+}
+
 func TestStreamStripsCommentsWithoutSendingRealtimeBytes(t *testing.T) {
 	client, machine := net.Pipe()
 	defer client.Close()
