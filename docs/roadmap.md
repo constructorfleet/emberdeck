@@ -56,10 +56,12 @@ Simulator and software checks do not qualify a physical machine. See
 
 Review the current open GitHub feature requests and their acceptance criteria
 before choosing the next work slice. Issues [#3](https://github.com/constructorfleet/emberdeck/issues/3)
-and [#4](https://github.com/constructorfleet/emberdeck/issues/4) remain part of
-the active product goal: #3's feasibility investigation is complete, while its
-firmware path remains unimplemented and unqualified; #4 remains open until the
-designer's remaining capabilities are delivered.
+and [#4](https://github.com/constructorfleet/emberdeck/issues/4) are required
+parts of the active product goal. Both are closed against their stated scope:
+#3's feasibility investigation is complete, while its firmware path remains
+unimplemented and unqualified; #4's designer workflow and illustrated-guide
+acceptance criteria are complete. Raster engraving remains a separate,
+unsupported milestone.
 
 - [x] [#3: ESP32 driver firmware and ESPHome feasibility](https://github.com/constructorfleet/emberdeck/issues/3).
   Compare standalone firmware, an ESPHome component, and existing bridges;
@@ -75,7 +77,7 @@ designer's remaining capabilities are delivered.
   SHA-256, and G-code before opening the controller. Protocol 1 whole-program
   assignments remain compatible. The open request stays tracked for MCU-side
   bounded staging and firmware qualification under #3.
-- [ ] [#4: Browser-based laser job designer](https://github.com/constructorfleet/emberdeck/issues/4).
+- [x] [#4: Browser-based laser job designer](https://github.com/constructorfleet/emberdeck/issues/4).
   Review SketchForge-3D interaction patterns and licensing; specify the laser
   designer architecture and formats; implement design creation/import, editing,
   operations, profile-aware preview, saved editable projects, generated jobs,
@@ -103,8 +105,9 @@ designer's remaining capabilities are delivered.
   stroke geometry for preview and G-code. The fixed hand-authored
   `emberdeck-stick-v1` font supports ASCII A–Z/a–z, digits, space, and
   `. , : ; ! ? + - / _ ( )`; text is limited to 1–32 characters and 1–100 mm
-  high and can only be engraved. Raster engraving remains unsupported. The full
-  issue stays open.
+  high and can only be engraved. Raster engraving remains unsupported. The
+  [designer architecture review](research/designer-architecture.md) documents
+  the remaining scope and limits; raster engraving is a separate milestone.
 - [ ] [#7: Live completed/remaining toolpath progress](https://github.com/constructorfleet/emberdeck/issues/7).
   Implement camera-independent execution monitoring for supported uploaded G-code
   as well as designer-generated jobs. Share the coordinate/toolpath renderer
