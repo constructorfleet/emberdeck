@@ -223,9 +223,11 @@ confirmation and **Start** control when ready.
 
 Select **New vector project** to add multiple rectangle, ellipse, and line
 shapes. Click a path in the workspace to select it; drag the path to translate
-it, or drag the corner handle to scale it in X and Y. The numeric fields remain
-available for exact translation, nonuniform scaling, and rotation around the
-source bounding-box center. The preview and profile bounds check use the
+it, or drag the corner handle to scale it in X and Y. The handle follows the
+shape's transformed top-right corner, and resizing follows the shape's local
+axes even when it is rotated. The object list also supports keyboard selection.
+The numeric fields remain available for exact translation, nonuniform scaling,
+and rotation around the source bounding-box center. The preview and profile bounds check use the
 transformed geometry. Assign the shape to an
 operation layer or remove it. Add engraving or cutting layers, set each
 layer's feed and commanded power, and move layers to change execution order.
