@@ -32,6 +32,8 @@ test.afterAll(async () => {
 });
 
 test('rendered documentation has grouped, current, keyboard accessible navigation without broken assets or overflow', async ({ browser }) => {
+  // This exhaustive flow opens every generated page and checks many viewport
+  // sizes. CI runners need more time than the focused local browser run.
   test.setTimeout(120_000);
   const pages = fs.readdirSync(docs).filter((name) => name.endsWith('.html'));
   expect(pages).toContain('operator-guide.html');
@@ -40,7 +42,7 @@ test('rendered documentation has grouped, current, keyboard accessible navigatio
   expect(pages).toContain('404.html');
   const expectedGroups = {
     'Getting Started': [['Overview', 'index.html'], ['Install', 'install.html'], ['Operator console guide', 'operator-guide.html']],
-    'Deploy & Run': [['Deployment', 'deployment.html'], ['Prometheus metrics', 'metrics.html'], ['Troubleshooting', 'troubleshooting.html'], ['Glossary', 'glossary.html'], ['Safety & Limitations', 'safety.html']],
+    'Deploy & Run': [['Deployment', 'deployment.html'], ['Prometheus metrics', 'metrics.html'], ['Troubleshooting', 'troubleshooting.html'], ['Glossary', 'glossary.html'], ['Safety & Limitations', 'safety.html'], ['Hardware qualification', 'hardware-qualification.html']],
     'Develop & Extend': [['Contributing', 'CONTRIBUTING.html'], ['Architecture', 'architecture.html'], ['Process plugins', 'plugins.html'], ['Browser console tests', 'browser-tests.html'], ['Shipped binary smoke test', 'artifact-tests.html'], ['Product status', 'roadmap.html'], ['Browser laser designer: architecture review', 'designer-architecture.html'], ['ESP32 worker feasibility', 'esp32-feasibility.html'], ['GRBL driver package', 'driver.html'], ['Worker control behavior', 'worker.html'], ['Serial transport', 'serial.html']],
     Reference: [['HTTP API and worker contract', 'api.html'], ['API route index', 'api-routes.html'], ['CLI reference', 'cli.html']],
   };
