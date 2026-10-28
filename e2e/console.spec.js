@@ -229,7 +229,7 @@ test('operator pauses on controller acknowledgement, confirms resume, and comple
   page.on('response', async (response) => {
     if (response.request().method() !== 'GET' || new URL(response.url()).pathname !== '/api/v1/jobs') return;
     try {
-      const jobs = await response.json();
+      const { jobs } = await response.json();
       for (const job of jobs) if (job.name === name && job.controller_state) controllerStates.push(job.controller_state);
     } catch (_) { /* Non-JSON responses are reported by the page assertions. */ }
   });
@@ -286,4 +286,52 @@ test('operator can cancel a paused job and delete the interrupted job', async ({
   page.once('dialog', (dialog) => dialog.accept());
   await row.getByRole('button', { name: 'Delete' }).click();
   await expect(row).toHaveCount(0);
+});
+
+test('operator pages and filters the library while programs load only on view', async ({ page }) => {
+  const listBodies = [];
+  page.on('response', async (response) => {
+    if (response.request().method() !== 'GET' || new URL(response.url()).pathname !== '/api/v1/jobs') return;
+    try { listBodies.push(await response.text()); } catch (_) { /* Navigation can discard bodies. */ }
+  });
+  await connect(page);
+  const prefix = `paged-${test.info().repeatEachIndex}-${test.info().retry}-${Date.now()}`;
+  await page.evaluate(async ({ prefix, key }) => {
+    for (let i = 0; i < 21; i += 1) {
+      const response = await fetch('/api/v1/jobs', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: `${prefix}-${String(i).padStart(2, '0')}.gcode`, gcode: 'G21\nG90\nM5\n' }),
+      });
+      if (response.status !== 201) throw new Error(`upload ${i}: ${response.status}`);
+    }
+  }, { prefix, key: apiKey });
+
+  await page.getByLabel('Name', { exact: true }).fill(prefix);
+  const rows = page.locator('#job-list li');
+  await expect(page.locator('#jobs-range')).toHaveText('1–20 of 21');
+  await expect(rows).toHaveCount(20);
+  await expect(rows.first()).toContainText(`${prefix}-20.gcode`);
+  await expect(page.getByRole('button', { name: '← Newer' })).toBeDisabled();
+
+  await page.getByRole('button', { name: 'Older →' }).click();
+  await expect(page.locator('#jobs-range')).toHaveText('21–21 of 21');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText(`${prefix}-00.gcode`);
+  await expect(page.getByRole('button', { name: 'Older →' })).toBeDisabled();
+  await rows.first().getByRole('button', { name: 'View', exact: true }).click();
+  await expect(page.locator('#program-code')).toHaveText('G21\nG90\nM5\n');
+
+  await page.getByLabel('State', { exact: true }).selectOption({ label: 'Completed' });
+  await expect(page.locator('#empty-state')).toContainText('No matching programs');
+  await expect(page.locator('#job-count')).toHaveText('00');
+  await page.getByLabel('State', { exact: true }).selectOption({ label: 'All states' });
+  await page.getByLabel('Name', { exact: true }).fill('');
+  await expect(page.locator('#job-pager')).toBeVisible();
+
+  expect(listBodies.length).toBeGreaterThan(0);
+  for (const body of listBodies) {
+    expect(body).not.toContain('"gcode"');
+    expect(body).not.toContain('"lease"');
+  }
 });

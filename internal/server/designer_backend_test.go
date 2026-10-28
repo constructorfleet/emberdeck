@@ -140,7 +140,11 @@ func TestGenerateRoundsExactHalfPowerUp(t *testing.T) {
 		t.Fatalf("create project: %d %s %v", w.Code, w.Body.String(), err)
 	}
 	w = request(t, s, "POST", "/api/v1/projects/"+created.ID+"/generate", `{"revision":1}`, "test-key")
-	if w.Code != http.StatusCreated || !strings.Contains(w.Body.String(), `F600 S5`) {
+	if w.Code != http.StatusCreated {
+		t.Fatalf("generate: %d %s", w.Code, w.Body.String())
+	}
+	w = request(t, s, "GET", w.Header().Get("Location"), "", "test-key")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `F600 S5`) {
 		t.Fatalf("half-up power should emit S5: %d %s", w.Code, w.Body.String())
 	}
 }
@@ -168,6 +172,11 @@ func TestVectorProjectCreatesOrderedCutAndEngraveJob(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("generate vector project: %d %s", w.Code, w.Body.String())
 	}
+	if strings.Contains(w.Body.String(), `"gcode"`) {
+		t.Fatalf("creation response must not echo program bytes: %s", w.Body.String())
+	}
+	// Program bytes are served only by the single-job endpoint.
+	w = request(t, s, "GET", w.Header().Get("Location"), "", "test-key")
 	var job struct {
 		State      string `json:"state"`
 		Gcode      string `json:"gcode"`
@@ -456,6 +465,11 @@ func TestGenerateCreatesValidatedQueuedJobWithImmutableSourceSnapshots(t *testin
 	if w.Code != http.StatusCreated {
 		t.Fatalf("generate job: %d %s", w.Code, w.Body.String())
 	}
+	if strings.Contains(w.Body.String(), `"gcode"`) {
+		t.Fatalf("creation response must not echo program bytes: %s", w.Body.String())
+	}
+	// Program bytes are served only by the single-job endpoint.
+	w = request(t, s, "GET", w.Header().Get("Location"), "", "test-key")
 	var job struct {
 		ID         string `json:"id"`
 		Name       string `json:"name"`

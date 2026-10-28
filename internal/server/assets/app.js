@@ -21,6 +21,13 @@
   let connected = false;
   let jobs = [];
   let hasLoadedJobs = false;
+  // GET /jobs returns one page of metadata; program bytes come from GET /jobs/{id}.
+  const jobPageSize = 20;
+  let jobTotal = 0;
+  let jobOffset = 0;
+  let refreshQueued = false;
+  const jobFilterName = $("#job-filter-name");
+  const jobFilterState = $("#job-filter-state");
   let drivers = [];
   let selectedDriver = "";
   let shownJobID = "";
@@ -61,6 +68,8 @@
     $("#refresh").disabled = !isConnected;
     $("#driver-select").disabled = !isConnected || !drivers.length;
     confirmation.disabled = !isConnected;
+    jobFilterName.disabled = !isConnected;
+    jobFilterState.disabled = !isConnected;
     $("#new-profile").disabled = !isConnected;
     $("#new-project").disabled = !isConnected || !selectedProfile();
     $("#new-vector-project").disabled = !isConnected || !selectedProfile();
@@ -81,6 +90,9 @@
     setSessionConnected(false);
     jobs = [];
     hasLoadedJobs = false;
+    jobTotal = 0;
+    jobOffset = 0;
+    refreshQueued = false;
     drivers = [];
     selectedDriver = "";
     toolpathCache.clear();
@@ -929,12 +941,18 @@
   function renderJobs() {
     const checked = confirmation.checked;
     list.replaceChildren();
-    $("#job-count").textContent = hasLoadedJobs ? String(jobs.length).padStart(2, "0") : "—";
+    const filtered = Boolean(jobFilterName.value.trim() || jobFilterState.value);
+    $("#job-count").textContent = hasLoadedJobs ? String(jobTotal).padStart(2, "0") : "—";
     empty.hidden = jobs.length > 0;
     if (!jobs.length) {
-      empty.querySelector("strong").textContent = connected ? "No programs yet" : "Your library is ready";
-      empty.querySelector("span:last-child").textContent = connected ? "Add a G-code file to get started." : "Connect to load saved programs.";
+      empty.querySelector("strong").textContent = !connected ? "Your library is ready" : filtered ? "No matching programs" : "No programs yet";
+      empty.querySelector("span:last-child").textContent = !connected ? "Connect to load saved programs." : filtered ? "Clear the name or state filter to see every stored program." : "Add a G-code file to get started.";
     }
+    const pager = $("#job-pager");
+    pager.hidden = jobTotal <= jobPageSize && jobOffset === 0;
+    $("#jobs-range").textContent = jobs.length ? `${jobOffset + 1}–${jobOffset + jobs.length} of ${jobTotal}` : `0 of ${jobTotal}`;
+    $("#jobs-newer").disabled = jobOffset === 0;
+    $("#jobs-older").disabled = jobOffset + jobs.length >= jobTotal;
     for (const job of jobs) {
       const item = document.createElement("li");
       item.className = "job-item";
@@ -1177,14 +1195,33 @@
     }
   }
 
-  async function refresh() {
-    if (!connected || polling) return;
+  function jobsPath() {
+    const query = new URLSearchParams({ limit: String(jobPageSize), offset: String(jobOffset) });
+    const name = jobFilterName.value.trim();
+    if (name) query.set("name", name);
+    if (jobFilterState.value) query.set("state", jobFilterState.value);
+    return `/api/v1/jobs?${query}`;
+  }
+
+  // Filter and page changes queue a follow-up refresh when a poll is already in
+  // flight; other callers keep the existing skip-while-polling behavior.
+  async function refresh({ queue = false } = {}) {
+    if (!connected) return;
+    if (polling) { if (queue === true) refreshQueued = true; return; }
     polling = true;
     const version = sessionVersion;
     try {
-      const results = await Promise.all([api("/api/v1/jobs"), api("/api/v1/drivers")]);
+      const results = await Promise.all([api(jobsPath()), api("/api/v1/drivers")]);
       if (!connected || version !== sessionVersion) return;
-      jobs = results[0];
+      let page = results[0];
+      if (!page.jobs.length && jobOffset > 0 && page.total > 0) {
+        // Deletions or a narrower filter can leave the current page empty.
+        jobOffset = Math.floor((page.total - 1) / jobPageSize) * jobPageSize;
+        page = await api(jobsPath());
+        if (!connected || version !== sessionVersion) return;
+      }
+      jobs = page.jobs;
+      jobTotal = page.total;
       drivers = results[1];
       hasLoadedJobs = true;
       message("");
@@ -1195,7 +1232,12 @@
     } catch (error) {
       if (!connected || version !== sessionVersion) return;
       message(error.message);
-    } finally { if (version === sessionVersion) polling = false; }
+    } finally {
+      if (version === sessionVersion) {
+        polling = false;
+        if (refreshQueued) { refreshQueued = false; refresh(); }
+      }
+    }
   }
 
   function startPolling() {
@@ -1318,6 +1360,7 @@
       await api("/api/v1/jobs", { method: "POST", body: JSON.stringify({ name: jobName.value, gcode, profile_id: uploadProfileSelect.value }) });
       uploadForm.reset();
       $("#file-label").textContent = "Choose a G-code file";
+      jobOffset = 0; // New programs are listed first.
       await refresh();
       message("Program added to the library.");
     } catch (error) { message(error.message); }
@@ -1329,6 +1372,14 @@
     renderJobs();
   });
   confirmation.addEventListener("change", renderJobs);
+  let filterTimer = null;
+  jobFilterName.addEventListener("input", () => {
+    window.clearTimeout(filterTimer);
+    filterTimer = window.setTimeout(() => { jobOffset = 0; refresh({ queue: true }); }, 250);
+  });
+  jobFilterState.addEventListener("change", () => { jobOffset = 0; refresh({ queue: true }); });
+  $("#jobs-newer").addEventListener("click", () => { jobOffset = Math.max(0, jobOffset - jobPageSize); refresh({ queue: true }); });
+  $("#jobs-older").addEventListener("click", () => { jobOffset += jobPageSize; refresh({ queue: true }); });
   $("#refresh").addEventListener("click", refresh);
   $("#close-program").addEventListener("click", () => { shownJobID = ""; programPanel.hidden = true; });
   setSessionConnected(false);

@@ -23,3 +23,11 @@
 @media(max-width:760px){.auth>.section-title{grid-column:1}.auth #connection-state,.auth #connection-controls{grid-column:1;grid-row:auto}}
 .bounds-override{display:flex;align-items:flex-start;gap:7px;margin-top:6px;color:#e0c996;font:10px/1.45 var(--mono)}.bounds-override input{flex:none;accent-color:var(--green);margin:1px 0 0}.toolpath-profile-bounds{fill:rgba(152,201,95,.025);stroke:#98c95f;stroke-width:1.5;stroke-dasharray:5 4;vector-effect:non-scaling-stroke}
 .bounds-status-out_of_bounds{color:#ff9f8d}.bounds-status-unknown{color:#e0c996}.bounds-status-in_bounds{color:#a9d778}
+.job-filters{display:grid;grid-template-columns:auto minmax(0,1fr) auto minmax(0,.8fr);align-items:center;gap:8px 10px;padding:0 0 13px;border-bottom:1px solid var(--line);margin-bottom:13px}
+.job-filters label{font-size:11px;color:#c4cbc1}
+.job-filters input,.job-filters select{min-width:0;width:100%;background:#111514;border:1px solid #343c37;color:var(--text);padding:9px 10px;font:11px var(--mono)}
+.job-filters input:focus-visible,.job-filters select:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.job-pager{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-top:13px;border-top:1px solid var(--line);margin-top:4px;color:#929b92;font:10px var(--mono);letter-spacing:.08em}
+.job-pager[hidden]{display:none}
+.job-pager button:disabled{opacity:.4;cursor:not-allowed}
+@media(max-width:440px){.job-filters{grid-template-columns:auto minmax(0,1fr)}}

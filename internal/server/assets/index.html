@@ -126,8 +126,10 @@
         <div class="section-title jobs-heading"><div><p class="eyebrow">03 / LIBRARY</p><h2 id="jobs-title">Stored programs</h2></div><button id="refresh" class="icon-button" type="button" aria-label="Refresh jobs" title="Refresh" disabled>↻</button></div>
         <div class="driver-controls"><label for="driver-select">Connected driver</label><select id="driver-select" disabled><option value="">Connect to load drivers</option></select><span id="driver-status" class="driver-status">Drivers are not loaded.</span></div>
         <label class="safety-check"><input id="operator-confirmation" type="checkbox" disabled><span>I have checked the program and setup, verified the machine’s interlocks, and will supervise the cut.</span></label>
+        <div class="job-filters" role="search" aria-label="Filter stored programs"><label for="job-filter-name">Name</label><input id="job-filter-name" type="search" disabled maxlength="200" placeholder="Filter by name" autocomplete="off"><label for="job-filter-state">State</label><select id="job-filter-state" disabled><option value="">All states</option><option value="queued">Queued</option><option value="running,pausing,paused,resuming,canceling">Active</option><option value="completed">Completed</option><option value="failed,interrupted">Failed or interrupted</option><option value="canceled">Canceled</option></select></div>
         <div id="empty-state" class="empty-state"><span class="empty-mark" aria-hidden="true">⌁</span><strong>Your library is ready</strong><span>Connect to load saved programs.</span></div>
         <ul id="job-list" class="job-list" aria-label="Stored programs"></ul>
+        <nav id="job-pager" class="job-pager" aria-label="Library pages" hidden><button id="jobs-newer" class="button button-small" type="button">← Newer</button><span id="jobs-range" aria-live="polite"></span><button id="jobs-older" class="button button-small" type="button">Older →</button></nav>
       </section>
     </div>
     <section id="program-panel" class="panel program-panel" hidden aria-labelledby="program-title">

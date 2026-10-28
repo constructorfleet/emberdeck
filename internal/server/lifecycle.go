@@ -60,25 +60,26 @@ func (s *Server) recoverInterrupted() error {
 
 // expire is called under the mutation lock. Offline work is never reassigned.
 func (s *Server) expire() error {
-	jobs := s.copyJobs()
-	changed := false
+	var jobs map[string]jobRecord
 	expired := []string{}
 	for id, d := range s.drivers {
 		if time.Since(d.LastSeen) > driverTTL {
-			for jid, j := range jobs {
+			for jid, j := range s.jobs {
 				if j.DriverID == id && activeJob(j.State) {
+					if jobs == nil {
+						jobs = s.copyJobs()
+					}
 					j.State = "interrupted"
 					j.Error = "driver heartbeat expired; inspect machine"
 					j.Lease = ""
 					j.Execution = markExecutionUnknown(j.Execution)
 					jobs[jid] = j
-					changed = true
 				}
 			}
 			expired = append(expired, id)
 		}
 	}
-	if changed {
+	if jobs != nil {
 		if err := s.save(jobs); err != nil {
 			return err
 		}
@@ -102,6 +103,19 @@ func (s *Server) listDrivers(w http.ResponseWriter, r *http.Request) {
 	}
 	respond(w, 200, drivers)
 }
+
+const boundsOverrideRequired = "program bounds are unknown or outside the selected profile; explicit bounds_override confirmation is required"
+
+// boundsBlocked reports whether an uploaded job needs an explicit bounds
+// override before dispatch. Callers hold the server mutex.
+func (s *Server) boundsBlocked(j jobRecord, override bool) bool {
+	if j.Provenance != nil || override {
+		return false
+	}
+	review := s.currentReview(j.Job)
+	return review == nil || review.BoundsStatus != "in_bounds"
+}
+
 func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		DriverID       string `json:"driver_id"`
@@ -115,28 +129,27 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "operator must confirm supervision and machine readiness")
 		return
 	}
-	s.mu.Lock()
-	preflightJob, exists := s.jobs[r.PathValue("id")]
-	if !exists {
-		s.mu.Unlock()
-		fail(w, 404, "job not found")
+	record, ok := s.lookup(w, r.PathValue("id"))
+	if !ok {
 		return
 	}
-	if preflightJob.State != "queued" {
-		s.mu.Unlock()
+	if record.State != "queued" {
 		fail(w, 409, "only queued jobs can start")
 		return
 	}
-	if preflightJob.Provenance == nil {
-		review := s.currentReview(preflightJob)
-		if (review == nil || review.BoundsStatus != "in_bounds") && !in.BoundsOverride {
-			s.mu.Unlock()
-			fail(w, 409, "program bounds are unknown or outside the selected profile; explicit bounds_override confirmation is required")
-			return
-		}
-	}
+	s.mu.Lock()
+	blocked := s.boundsBlocked(record, in.BoundsOverride)
 	s.mu.Unlock()
-	if err := s.preflight(r.Context(), r.PathValue("id")); err != nil {
+	if blocked {
+		fail(w, 409, boundsOverrideRequired)
+		return
+	}
+	gcode, ok := s.program(w, record)
+	if !ok {
+		return
+	}
+	segments, err := s.preflight(r.Context(), gcode)
+	if err != nil {
 		fail(w, 422, err.Error())
 		return
 	}
@@ -155,12 +168,9 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "only queued jobs can start")
 		return
 	}
-	if j.Provenance == nil {
-		review := s.currentReview(j)
-		if (review == nil || review.BoundsStatus != "in_bounds") && !in.BoundsOverride {
-			fail(w, 409, "program bounds are unknown or outside the selected profile; explicit bounds_override confirmation is required")
-			return
-		}
+	if s.boundsBlocked(j, in.BoundsOverride) {
+		fail(w, 409, boundsOverrideRequired)
+		return
 	}
 	d, ok := s.drivers[in.DriverID]
 	if !ok || d.Busy {
@@ -175,6 +185,7 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 	j.State = "running"
 	j.DriverID = d.ID
 	j.Lease = hex.EncodeToString(lease)
+	j.segments = segments
 	jobs := s.copyJobs()
 	jobs[j.ID] = j
 	if err := s.save(jobs); err != nil {
@@ -183,7 +194,7 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 	}
 	d.Busy = true
 	s.drivers[d.ID] = d
-	respond(w, 200, j)
+	respond(w, 200, j.Job)
 }
 func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
 	var in struct{}
@@ -212,7 +223,7 @@ func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "could not persist cancellation")
 		return
 	}
-	respond(w, 200, j)
+	respond(w, 200, j.Job)
 }
 func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -220,18 +231,7 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid driver ID")
 		return
 	}
-	var in struct {
-		Capabilities    []string            `json:"capabilities"`
-		ControllerState string              `json:"controller_state"`
-		Session         string              `json:"session"`
-		JobID           string              `json:"job_id"`
-		Lease           string              `json:"lease"`
-		State           string              `json:"state"`
-		Acked           int                 `json:"acked"`
-		Total           int                 `json:"total"`
-		Error           string              `json:"error"`
-		Execution       *toolpath.Execution `json:"execution"`
-	}
+	var in pollReport
 	if !decode(w, r, &in) {
 		return
 	}
@@ -239,25 +239,68 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "worker session is required")
 		return
 	}
+	assignment, needsProgram, ok := s.pollLocked(w, id, &in)
+	if !ok {
+		return
+	}
+	if assignment == nil {
+		respond(w, 200, map[string]string{"command": "idle", "protocol": "1"})
+		return
+	}
+	if needsProgram {
+		// A worker picking up an assignment receives the program once. Progress
+		// acknowledgements carry only metadata so polling stays cheap.
+		gcode, ok := s.program(w, assignment.record)
+		if !ok {
+			return
+		}
+		assignment.job.Gcode = gcode
+	}
+	respond(w, 200, map[string]any{"command": assignment.command, "job": assignment.job, "lease": assignment.job.Lease})
+}
+
+// pollReport is one worker poll: session metadata plus optional job progress.
+type pollReport struct {
+	Capabilities    []string            `json:"capabilities"`
+	ControllerState string              `json:"controller_state"`
+	Session         string              `json:"session"`
+	JobID           string              `json:"job_id"`
+	Lease           string              `json:"lease"`
+	State           string              `json:"state"`
+	Acked           int                 `json:"acked"`
+	Total           int                 `json:"total"`
+	Error           string              `json:"error"`
+	Execution       *toolpath.Execution `json:"execution"`
+}
+
+type pollAssignment struct {
+	command string
+	job     workerJob
+	record  jobRecord
+}
+
+// pollLocked applies one worker report under the mutex. Progress-only reports
+// update memory; state transitions are persisted before acknowledgement.
+func (s *Server) pollLocked(w http.ResponseWriter, id string, in *pollReport) (*pollAssignment, bool, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.expire(); err != nil {
 		fail(w, 500, "could not persist driver expiration")
-		return
+		return nil, false, false
 	}
 	d, ok := s.drivers[id]
 	if ok && d.Session != in.Session {
 		fail(w, 409, "driver ID already owned by another session")
-		return
+		return nil, false, false
 	}
 	if len(in.Capabilities) > 16 || len(in.ControllerState) > 32 {
 		fail(w, 400, "invalid controller metadata")
-		return
+		return nil, false, false
 	}
 	for _, capability := range in.Capabilities {
 		if !driverName.MatchString(capability) {
 			fail(w, 400, "invalid driver capability")
-			return
+			return nil, false, false
 		}
 	}
 	if in.Capabilities != nil {
@@ -273,28 +316,29 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 		j, exists := s.jobs[in.JobID]
 		if !exists || j.DriverID != id || j.Lease == "" || j.Lease != in.Lease {
 			fail(w, 409, "stale or invalid job lease")
-			return
+			return nil, false, false
 		}
+		previousState := j.State
 		if !activeJob(j.State) {
 			// Repeated terminal receipts are idempotent after response loss.
 			if j.State != in.State {
 				fail(w, 409, "job is already terminal")
-				return
+				return nil, false, false
 			}
 		} else {
 			if in.Acked < j.Acked || in.Total < 0 || in.Acked > in.Total || in.Acked < 0 || (j.Total != 0 && j.Total != in.Total) {
 				fail(w, 400, "invalid progress")
-				return
+				return nil, false, false
 			}
-			if in.Execution != nil && !validExecution(*in.Execution, j.Gcode, j.Execution, in.State) {
+			if in.Execution != nil && !validExecution(*in.Execution, j.segments, j.Execution, in.State) {
 				fail(w, 400, "invalid execution telemetry")
-				return
+				return nil, false, false
 			}
 			switch in.State {
 			case "pausing", "resuming":
 				if !hasCapability(d, "pause_resume") {
 					fail(w, 400, "worker does not support pause and resume")
-					return
+					return nil, false, false
 				}
 			case "running":
 				if j.State == "resuming" && (in.ControllerState == "Run" || in.ControllerState == "Idle") {
@@ -303,7 +347,7 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 			case "paused":
 				if !hasCapability(d, "pause_resume") || (in.ControllerState != "Hold:0" && in.ControllerState != "Idle") {
 					fail(w, 400, "paused requires confirmed controller hold or Idle")
-					return
+					return nil, false, false
 				}
 				if j.State != "canceling" && j.State != "resuming" {
 					j.State = "paused"
@@ -311,7 +355,7 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 			case "completed":
 				if in.Total == 0 || in.Acked != in.Total || (hasCapability(d, "pause_resume") && in.ControllerState != "Idle") {
 					fail(w, 409, "completion requires all lines acknowledged and controller Idle")
-					return
+					return nil, false, false
 				}
 				j.State = "completed"
 			case "failed":
@@ -319,12 +363,12 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 			case "canceled":
 				if j.State != "canceling" {
 					fail(w, 409, "cancellation was not requested")
-					return
+					return nil, false, false
 				}
 				j.State = "canceled"
 			default:
 				fail(w, 400, "invalid worker state")
-				return
+				return nil, false, false
 			}
 			j.ControllerState = in.ControllerState
 			j.Acked = in.Acked
@@ -337,11 +381,18 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 			if len(j.Error) > 1000 {
 				j.Error = j.Error[:1000]
 			}
-			jobs := s.copyJobs()
-			jobs[j.ID] = j
-			if err := s.save(jobs); err != nil {
-				fail(w, 500, "could not persist progress")
-				return
+			if j.State == previousState {
+				// Progress-only: keep it in memory. Recovery after a crash marks
+				// the job interrupted anyway, so the last transition is enough.
+				s.jobs[j.ID] = j
+				s.progressDirty = true
+			} else {
+				jobs := s.copyJobs()
+				jobs[j.ID] = j
+				if err := s.save(jobs); err != nil {
+					fail(w, 500, "could not persist progress")
+					return nil, false, false
+				}
 			}
 		}
 	}
@@ -359,10 +410,12 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 			case "resuming":
 				command = "resume"
 			}
-			respond(w, 200, map[string]any{"command": command, "job": j, "lease": j.Lease})
-			return
+			// Only an assignment pickup (not a progress report for this job)
+			// carries the program; the current worker reads it from the pickup.
+			needsProgram := in.JobID != j.ID && command != "cancel"
+			return &pollAssignment{command: command, job: workerJob{Job: j.Job, Lease: j.Lease}, record: j}, needsProgram, true
 		}
 	}
 	s.drivers[id] = d
-	respond(w, 200, map[string]string{"command": "idle", "protocol": "1"})
+	return nil, false, true
 }

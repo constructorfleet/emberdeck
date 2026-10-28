@@ -244,10 +244,10 @@ async function main() {
     await expect(row).toContainText('Last controller report: Hold:0');
     const holdReports = [];
     await expect.poll(async () => {
-      const jobs = await page.evaluate(async () => {
-        const response = await fetch('/api/v1/jobs', { headers: { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}` } });
-        return response.json();
-      });
+      const jobs = await page.evaluate(async (jobName) => {
+        const response = await fetch(`/api/v1/jobs?name=${encodeURIComponent(jobName)}`, { headers: { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}` } });
+        return (await response.json()).jobs;
+      }, name);
       const job = jobs.find((candidate) => candidate.name === name);
       if (job) holdReports.push(job.controller_state);
       return holdReports.filter((state) => state === 'Hold:0').length;
