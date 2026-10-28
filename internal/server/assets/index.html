@@ -86,11 +86,13 @@
           <p id="vector-validation" class="designer-warning" role="alert" hidden></p>
           <div class="vector-editor-grid">
             <div>
-              <div class="vector-toolbar" aria-label="Add vector primitive">
+              <div class="vector-toolbar" aria-label="Add or import vector geometry">
                 <button class="button button-small" type="button" data-add-shape="rectangle">Add rectangle</button>
                 <button class="button button-small" type="button" data-add-shape="ellipse">Add ellipse</button>
                 <button class="button button-small" type="button" data-add-shape="line">Add line</button>
+                <label class="button button-small svg-import-button" for="vector-svg-file">Import SVG<input id="vector-svg-file" type="file" accept=".svg,image/svg+xml" disabled></label>
               </div>
+              <p class="hint">Imports static line paths and basic shapes; circles and ellipses become 32-point paths. SVG dimensions convert to millimetres; path commands M/L/H/V/Z are supported. Element transforms are applied. Nested groups, styling, text, and machine settings are not imported.</p>
               <h4 class="vector-subhead">Shapes</h4><ul id="vector-object-list" class="vector-list" aria-label="Project shapes"></ul>
               <div id="vector-geometry" class="numeric-grid vector-fields" hidden>
                 <label>X (mm)<input id="vector-x" type="number" min="0" step="0.001"></label>

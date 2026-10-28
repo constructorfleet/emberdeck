@@ -295,3 +295,73 @@ test('open profile and rectangle editors fit tablet and phone viewports', async 
     if (width === 800) await page.screenshot({ path: test.info().outputPath('designer-editors-800.png'), fullPage: true });
   }
 });
+
+test('operator imports static SVG paths into an editable project and assigns their operation layer', async ({ page }) => {
+  test.setTimeout(90000);
+  const startRequests = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && /\/api\/v1\/jobs\/[^/]+\/start$/.test(new URL(request.url()).pathname)) startRequests.push(request);
+  });
+  const attempt = `${test.info().repeatEachIndex}-${test.info().retry}-${Date.now()}`;
+  const projectName = `SVG import ${attempt}`;
+  await page.goto('/');
+  await page.locator('#api-key').fill(apiKey);
+  await page.getByRole('button', { name: /Connect/ }).click();
+  await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
+  await page.getByRole('button', { name: 'New profile' }).click();
+  await page.locator('#profile-name').fill(`SVG profile ${attempt}`);
+  await page.locator('#profile-width').fill('300');
+  await page.locator('#profile-height').fill('200');
+  await page.locator('#profile-max-s').fill('1000');
+  await page.locator('#profile-min-feed').fill('1');
+  await page.locator('#profile-max-feed').fill('6000');
+  await page.locator('#profile-max-power').fill('100');
+  await page.getByRole('button', { name: 'Save profile' }).click();
+  await expect(page.locator('#designer-status')).toContainText('Profile saved');
+
+  await page.getByRole('button', { name: 'New vector project' }).click();
+  await page.locator('#vector-name').fill(projectName);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300mm" height="200mm" viewBox="0 0 300 200"><path d="M10 190 L40 190 L40 160 L10 160 Z"/><polyline points="60,190 80,170 100,190"/></svg>`;
+  await page.locator('#vector-svg-file').setInputFiles({ name: 'panel.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(svg) });
+  await expect(page.locator('#designer-status')).toContainText('Imported 2 editable SVG paths');
+  await expect(page.locator('#vector-object-list li')).toHaveCount(2);
+  await expect(page.locator('#vector-object-list')).toContainText('Unassigned');
+  await expect(page.locator('#vector-preview-content .vector-path')).toHaveCount(2);
+  await expect(page.locator('#generate-vector-project')).toBeDisabled();
+  const outsideSVG = `<svg width="350mm" height="200mm" viewBox="0 0 350 200"><polyline points="330,190 350,190"/></svg>`;
+  await page.locator('#vector-svg-file').setInputFiles({ name: 'outside.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(outsideSVG) });
+  await expect(page.locator('#vector-validation')).toContainText(/outside the declared workspace/i);
+  await expect(page.locator('#vector-object-list li')).toHaveCount(3);
+  await page.getByRole('button', { name: '3. path' }).click();
+  await page.getByRole('button', { name: 'Remove shape 3' }).click();
+  await expect(page.locator('#vector-validation')).toBeHidden();
+  for (const width of [1024, 760, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `imported vector editor fits at ${width}px`).toBe(true);
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+
+  await page.getByRole('button', { name: '1. path' }).click();
+  await page.locator('#vector-object-operation').selectOption({ label: '1. engrave' });
+  await page.getByRole('button', { name: '2. path' }).click();
+  await page.locator('#vector-object-operation').selectOption({ label: '1. engrave' });
+  await expect(page.locator('#vector-validation')).toBeHidden();
+  await page.getByRole('button', { name: 'Save vector project' }).click();
+  await expect(page.locator('#designer-status')).toContainText('Vector project saved');
+  await page.reload();
+  await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
+  await page.getByRole('button', { name: `Reopen vector ${projectName}` }).click();
+  await expect(page.locator('#vector-object-list li')).toHaveCount(2);
+  await expect(page.locator('#generate-vector-project')).toBeEnabled();
+  await page.locator('#generate-vector-project').click();
+  const row = page.locator('#job-list li').filter({ hasText: `${projectName}.gcode` });
+  await expect(row).toContainText(/queued/i);
+  await expect(page.locator('#program-code')).toContainText('G1 X40 Y40');
+  expect(startRequests).toHaveLength(0);
+  await expect(page.locator('#operator-confirmation')).not.toBeChecked();
+  await expect(page.locator('#driver-select')).toHaveValue('simulator');
+  await page.locator('#operator-confirmation').check();
+  await row.getByRole('button', { name: 'Start' }).click();
+  expect(startRequests).toHaveLength(1);
+  await expect(row).toContainText(/completed/i, { timeout: 30000 });
+});

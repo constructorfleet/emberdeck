@@ -129,8 +129,10 @@ The designer SVG previews show static model geometry. The operator console also
 has a separate camera-free live view for supported uploaded or generated linear
 XY G-code. It shows laser-off travel and available work position; unsupported
 motion is surfaced as warnings. Position matching assumes `$13=0` and is not
-machine-bound or safety-qualified. SVG/text import, rotation, alignment,
-multi-selection, transforms, and raster engraving remain future work; see the
+machine-bound or safety-qualified. The bounded SVG importer supports static line geometry and element-level
+affine transforms; it rejects styles, text, curves, nested groups, and active
+or external content. Rotation/alignment editing, multi-selection, undo/redo,
+curved SVG paths, and raster engraving remain future work; see the
 [designer plan](research/designer-architecture.md) and
 [operator guide](operator-guide.md).
 

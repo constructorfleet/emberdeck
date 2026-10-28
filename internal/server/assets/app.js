@@ -64,6 +64,7 @@
     $("#new-profile").disabled = !isConnected;
     $("#new-project").disabled = !isConnected || !selectedProfile();
     $("#new-vector-project").disabled = !isConnected || !selectedProfile();
+    $("#vector-svg-file").disabled = !isConnected;
   }
 
   function stopPolling() {
@@ -803,6 +804,32 @@
   $("#generate-project").addEventListener("click", generateProject);
   $("#new-vector-project").addEventListener("click", () => fillVectorProject());
   document.querySelectorAll("[data-add-shape]").forEach((control) => control.addEventListener("click", () => addVectorShape(control.dataset.addShape)));
+  $("#vector-svg-file").addEventListener("change", async (event) => {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!connected || $("#vector-form").hidden) { setDesignerError("Open a vector project before importing SVG geometry."); return; }
+    try {
+      const response = await fetch("/api/v1/svg-import", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "image/svg+xml" },
+        body: file,
+      });
+      const imported = await response.json();
+      if (response.status === 401 && token) forgetSession({ focus: true, clearInput: false });
+      if (!response.ok) throw new Error(imported.error || `SVG import failed (${response.status})`);
+      const objects = imported.objects.map((object) => ({
+        id: vectorID("svg"), kind: "path", subpaths: object.subpaths.map((path) => ({
+          closed: path.closed,
+          points: path.points.map((point) => ({ x_mm: point.x_mm, y_mm: point.y_mm })),
+        })),
+      }));
+      vectorObjects.push(...objects);
+      selectedVectorObject = objects[0]?.id || selectedVectorObject;
+      renderVectorEditor();
+      setDesignerStatus(`Imported ${objects.length} editable SVG path${objects.length === 1 ? "" : "s"}. Assign each path to an operation layer; no machine settings were imported.`);
+    } catch (error) { setDesignerError(error.message); }
+  });
   $("#add-operation").addEventListener("click", () => {
     const operation = { id: vectorID("operation"), type: "vector-engrave", feed_mm_min: 600, power_percent: 25 };
     vectorOperations.push(operation);

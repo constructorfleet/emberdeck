@@ -142,6 +142,7 @@ func Open(dir, key string) (*Server, error) {
 	s.mux.HandleFunc("DELETE /api/v1/profiles/{id}", s.deleteProfile)
 	s.mux.HandleFunc("GET /api/v1/projects", s.listProjects)
 	s.mux.HandleFunc("POST /api/v1/projects", s.createProject)
+	s.mux.HandleFunc("POST /api/v1/svg-import", s.importSVG)
 	s.mux.HandleFunc("GET /api/v1/projects/{id}", s.getProject)
 	s.mux.HandleFunc("PUT /api/v1/projects/{id}", s.updateProject)
 	s.mux.HandleFunc("DELETE /api/v1/projects/{id}", s.deleteProject)
