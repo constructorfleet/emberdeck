@@ -490,6 +490,22 @@ async function main() {
     await expect(row.locator('.toolpath-profile-bounds')).toHaveCount(1);
     await expect(row.getByRole('checkbox', { name: /Override out_of_bounds bounds review/ })).toBeVisible();
     await captureElement(page, '#job-list .job-item', 'operator-console-uploaded-bounds-review.png');
+
+    // A fully known program inside the chosen profile reviews in bounds and needs no override.
+    await page.locator('#upload-profile-select').selectOption(await page.locator('#upload-profile-select option').filter({ hasText: 'Documented GRBL' }).getAttribute('value'));
+    const inBoundsName = 'reviewed-in-bounds.gcode';
+    await page.locator('#job-file').setInputFiles({ name: inBoundsName, mimeType: 'text/plain', buffer: Buffer.from('G21\nG90\nG0 X10 Y10\nM4 S100\nG1 X40 Y10 F600\nG1 X40 Y30\nG1 X10 Y30\nG1 X10 Y10\nM5\nG0 X0 Y0\n') });
+    await page.locator('#job-name').fill(inBoundsName);
+    await page.getByRole('button', { name: /Add to library/ }).click();
+    const inBoundsRow = page.locator('#job-list li').filter({ hasText: inBoundsName });
+    await expect(inBoundsRow).toContainText(/queued/i);
+    await expect(inBoundsRow.locator('.toolpath-summary')).toContainText('bounds in_bounds');
+    await expect(inBoundsRow.getByRole('checkbox', { name: /bounds review/ })).toHaveCount(0);
+    await expect(page.locator('#job-list .job-item').first()).toContainText(inBoundsName);
+    await captureElement(page, '#job-list .job-item:first-child', 'operator-console-uploaded-in-bounds-review.png');
+    page.once('dialog', (dialog) => dialog.accept());
+    await inBoundsRow.getByRole('button', { name: `Delete ${inBoundsName}` }).click();
+    await expect(inBoundsRow).toHaveCount(0);
     await expect(row).toContainText(/created/i);
     await expect(row).toContainText(/bytes/i);
     await expect(row).toContainText('Uploaded');

@@ -386,6 +386,57 @@ test('operator can cancel a running job', async ({ page }) => {
   await expect(row.getByRole('button', { name: /Delete/ })).toBeVisible();
 });
 
+test('operator chooses a profile at upload so an in-bounds program starts without a bounds override', async ({ page, request }) => {
+  const suffix = `${test.info().retry}-${Date.now()}`;
+  const created = await request.post('/api/v1/profiles', {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    data: {
+      schema_version: 1, name: `Upload review ${suffix}`, controller: 'grbl-1.1', units: 'mm', origin: 'lower-left',
+      width_mm: 120, height_mm: 80, min_s: 0, max_s: 1000, min_feed_mm_min: 1, max_feed_mm_min: 6000,
+      max_power_percent: 100, laser_mode_enabled: true,
+    },
+  });
+  expect(created.status()).toBe(201);
+  const profile = await created.json();
+  await connect(page);
+  const upload = async (name, program) => {
+    await page.locator('#upload-profile-select').selectOption(profile.id);
+    await page.locator('#job-file').setInputFiles({ name, mimeType: 'text/plain', buffer: Buffer.from(program) });
+    await page.locator('#job-name').fill(name);
+    await page.getByRole('button', { name: /Add to library/ }).click();
+    const row = page.locator('#job-list li').filter({ hasText: name });
+    await expect(row).toContainText(/queued/i);
+    return row;
+  };
+
+  const outside = await upload(`upload-review-outside-${suffix}.gcode`, 'G21 G90\nG0 X10 Y10\nM4 S100\nG1 X150 Y40 F300\nM5\n');
+  await expect(outside.locator('.toolpath-summary')).toContainText('bounds out_of_bounds');
+  await expect(outside.locator('.toolpath-profile-bounds')).toHaveCount(1);
+  await expect(outside.getByRole('checkbox', { name: /Override out_of_bounds bounds review/ })).toBeVisible();
+
+  const name = `upload-review-inside-${suffix}.gcode`;
+  const row = await upload(name, 'G21 G90\nG0 X10 Y10\nM4 S100\nG1 X50 Y40 F300\nG1 X10 Y40\nM5\nG0 X0 Y0\n');
+  await expect(row.locator('.toolpath-summary')).toContainText('bounds in_bounds');
+  await expect(row.getByText('Program bounds: X 0–50 mm · Y 0–40 mm · in bounds.')).toBeVisible();
+  await expect(row.locator('.toolpath-profile-bounds')).toHaveCount(1);
+  await expect(row.locator('.toolpath-svg .toolpath-segment')).toHaveCount(3);
+  await expect(row.getByRole('checkbox', { name: /bounds review/ })).toHaveCount(0);
+  const start = row.getByRole('button', { name: /^Start / });
+  await page.locator('#operator-confirmation').check();
+  await expect(start).toBeEnabled();
+  const startRequest = page.waitForRequest((candidate) => candidate.method() === 'POST' && candidate.url().endsWith('/start'));
+  await confirmStart(page, start);
+  expect((await startRequest).postDataJSON().bounds_override).toBeFalsy();
+  await expect(row).toContainText(/completed/i, { timeout: 15000 });
+  await cleanupJob(page, name);
+  await cleanupJob(page, `upload-review-outside-${suffix}.gcode`);
+  const deleted = await request.delete(`/api/v1/profiles/${profile.id}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    data: { revision: profile.revision },
+  });
+  expect(deleted.ok()).toBe(true);
+});
+
 test('running uploaded G-code shows a fitted camera-free toolpath with estimated controller position', async ({ page }) => {
   await connect(page);
   const name = `operator-toolpath-${test.info().retry}.gcode`;

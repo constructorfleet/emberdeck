@@ -361,7 +361,11 @@ Arcs, machine-coordinate moves, work-coordinate-system changes (G54-G59),
 coordinate-offset mutations, unmodeled M-codes, other axes, and unknown motion
 modes are not approximated. The response sets
 `supported:false` for unmodeled motion and includes warnings when a move is
-omitted, such as an initial move whose start position is unknown. This parser
+omitted, such as an initial move whose start position is unknown. An omitted
+initial move that could fire the laser sets `complete:false`. An omitted initial
+move made with the laser off (no active `M3`/`M4` or `S0`) only positions the
+head: it is listed in `warnings` but keeps `complete:true`, so a fully known
+program inside the profile reviews as `in_bounds`. This parser
 is a visualization aid; the normal GRBL validator and operator review remain
 separate.
 

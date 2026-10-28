@@ -156,9 +156,17 @@ Choose a G-code file, enter a display name, select the declared machine profile,
 and add it to the library. Upload rejects driver line-limit errors with their
 source line before the job is queued. The job row shows known XY bounds and a
 static path preview against the profile work area. Arcs, incremental positioning,
-machine-coordinate moves, work-coordinate writes, an unknown starting position,
-or a stale/missing profile keep the overall bounds status **unknown**. The
-preview cannot establish the current head position or physical machine safety.
+machine-coordinate moves, work-coordinate writes, homing (`G28`/`G30`), a first
+move that could fire the laser from an unknown starting position, or a
+stale/missing profile keep the overall bounds status **unknown**. A first move
+made with the laser off only positions the head: the preview notes that its
+travel from the current position is not drawn, and a program whose every other
+point is known and inside the work area reviews as **in bounds**. Such a job
+needs no bounds override; only the supervision check is required before
+**Start**. The preview cannot establish the current head position or physical
+machine safety.
+
+![Uploaded G-code reviewed in bounds against the chosen profile, with no override control](assets/screenshots/operator-console-uploaded-in-bounds-review.png)
 
 An **in bounds** review does not replace checking the program and machine. For
 **out of bounds** or **unknown** jobs, inspect the warnings, path, and profile;

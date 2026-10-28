@@ -76,8 +76,9 @@ not a measurement of beam output or material removal.
 Uploaded jobs retain a compact profile-review summary and profile revision.
 Line-length validation runs before upload succeeds. Known path bounds are
 compared with the selected lower-left work envelope; unsupported or incomplete
-motion, a missing starting position, or a stale profile leaves the whole-program
-bounds status unknown. Dispatch requires an explicit bounds override for
+motion, a first move that could fire the laser from an unknown starting
+position, or a stale profile leaves the whole-program bounds status unknown. A
+laser-off first positioning move does not, because it cannot mark the work. Dispatch requires an explicit bounds override for
 uploaded jobs whose status is not in bounds. Designer-generated jobs retain
 their separate validated provenance and profile checks.
 

@@ -85,7 +85,7 @@ func TestProgramBoundsUseEveryKnownSegmentEndpoint(t *testing.T) {
 	if !ok || bounds.Min != (Point{X: -2, Y: 0}) || bounds.Max != (Point{X: 12, Y: 9}) {
 		t.Fatalf("bounds = %#v, known = %v", bounds, ok)
 	}
-	partial := Parse("G1 X10 Y10\nG1 X20 Y20")
+	partial := Parse("M4 S100\nG1 X10 Y10\nG1 X20 Y20")
 	if _, ok := ProgramBounds(partial); !ok || partial.Complete {
 		t.Fatal("known subset bounds should remain distinct from complete program bounds")
 	}

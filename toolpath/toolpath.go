@@ -63,7 +63,10 @@ type Segment struct {
 
 // Program contains the supported part of a G-code visualization. Supported is
 // false if an unmodeled motion or coordinate command occurred. Complete is
-// false if any move was omitted, geometry was truncated, or a warning exists.
+// false if any move that could mark the work was omitted, geometry was
+// truncated, or a warning other than a laser-off initial positioning note
+// exists. A laser-off move from the controller's unknown starting position is
+// listed in Warnings but leaves Complete true.
 // Callers must show warnings and must not present this representation as a
 // verified execution trace.
 type Program struct {
@@ -93,6 +96,16 @@ func Parse(source string) Program {
 	feed, power := 0.0, 0.0
 	laserMode := 0
 	current := position{}
+	note := func(message string) {
+		for _, existing := range result.Warnings {
+			if existing == message {
+				return
+			}
+		}
+		if len(result.Warnings) < 32 {
+			result.Warnings = append(result.Warnings, message)
+		}
+	}
 	warn := func(message string, supported bool) {
 		result.Complete = false
 		if !supported {
@@ -282,7 +295,13 @@ func Parse(source string) Program {
 				LaserOn:       blockMotion == 1 && laserMode != 0 && power > 0,
 			})
 		} else if !start.known && next.known {
-			warn(fmt.Sprintf("line %d starts from an unknown position; its initial move is omitted", lineIndex+1), true)
+			if laserMode == 0 || power <= 0 {
+				// A laser-off move from the controller's current position cannot
+				// mark the work area; its known endpoint starts the program path.
+				note(fmt.Sprintf("line %d moves from the controller's current position with the laser off; that travel is not drawn", lineIndex+1))
+			} else {
+				warn(fmt.Sprintf("line %d starts from an unknown position; its initial move is omitted", lineIndex+1), true)
+			}
 		}
 		current = next
 	}

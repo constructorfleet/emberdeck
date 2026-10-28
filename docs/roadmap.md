@@ -43,8 +43,9 @@ Simulator and software checks do not qualify a physical machine. See
 
 - Physical controller, cutter, enclosure, or emergency-stop qualification.
 - Complete coordinate interpretation for every uploaded program. Arcs,
-  incremental or machine-coordinate moves, offset writes, and programs without a
-  known initial head position are reported as unknown rather than guessed, so a
+  incremental or machine-coordinate moves, offset writes, and programs whose
+  first move could fire the laser from an unknown head position are reported as
+  unknown rather than guessed, so a
   review may still require an explicit bounds override.
 - Arbitrary path editing, raster engraving,
   and automatic design-to-machine configuration.
@@ -136,13 +137,14 @@ unsupported milestone.
   separately from acknowledged lines. The issue remains open for broader motion
   coverage, machine-bound visualization, and additional interruption/controller
   validation.
-- [ ] [#54: Profile-aware bounds review for uploaded G-code](https://github.com/constructorfleet/emberdeck/issues/54).
-  The first slice now validates driver line limits during upload, stores a
+- [x] [#54: Profile-aware bounds review for uploaded G-code](https://github.com/constructorfleet/emberdeck/issues/54).
+  Upload validates driver line limits (422 with the source line), stores a
   selected profile revision, reports known bounds and unsupported/incomplete
-  motion, renders a static profile-envelope preview, and requires an explicit
-  override when uploaded-job bounds are unknown or outside the profile. Keep the
-  issue open for broader parser coverage and a review state that can establish
-  fully known in-bounds programs without guessing an initial head position.
+  motion (arcs, `G91`, `G53`, `G28`/`G30`, `G10`), renders a static
+  profile-envelope preview, and requires an explicit override when uploaded-job
+  bounds are unknown or outside the profile. A laser-off first positioning move
+  no longer hides a fully known program, so in-bounds uploads start without an
+  override; a first move that could fire the laser stays unknown.
 - [ ] [#52: Machine-preparation controls](https://github.com/constructorfleet/emberdeck/issues/52).
   Direct GRBL workers now provide confirmed home/unlock, bounded jog, X/Y zero,
   and laser-off frame actions through an exclusive manual lease. Wire and worker
