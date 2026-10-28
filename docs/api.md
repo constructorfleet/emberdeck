@@ -597,6 +597,153 @@ of third-party importers, source retention, and persistence of provenance with
 projects remain open work tracked by
 [#16](https://github.com/constructorfleet/emberdeck/issues/16).
 
+## Implementing a third-party importer
+
+## Implement the interface
+
+An importer declares a stable ID, its version, the exact source-format IDs it
+accepts, its output types, and a JSON options schema. The registry validates
+metadata and request bounds. The importer remains responsible for validating
+options against its schema and for bounding CPU, memory, and any temporary
+storage it uses.
+
+```go
+package sample
+
+import (
+    "context"
+    "encoding/json"
+    "errors"
+
+    "github.com/ConstructorFleet/emberdeck/importer"
+)
+
+type Importer struct{}
+
+func (Importer) Manifest() importer.Manifest {
+    return importer.Manifest{
+        ProtocolVersion: importer.ProtocolVersion,
+        ID:              "example.vector",
+        Name:            "Example vector",
+        Version:         "1.0.0",
+        SourceFormats: []importer.SourceFormat{{
+            ID:         "example-vector",
+            Name:       "Example Vector",
+            Extensions: []string{".evf"},
+            MediaTypes: []string{"application/vnd.example.vector"},
+        }},
+        OutputTypes: []importer.OutputType{importer.OutputEditableDesign},
+        OptionsSchema: json.RawMessage(`{"type":"object","properties":{"scale":{"type":"number","minimum":0.01,"maximum":100}},"additionalProperties":false}`),
+    }
+}
+
+func (Importer) Import(ctx context.Context, request importer.Request) (importer.Result, error) {
+    if err := ctx.Err(); err != nil {
+        return importer.Result{}, err
+    }
+    if request.SourceFormat != "example-vector" || request.OutputType != importer.OutputEditableDesign {
+        return importer.Result{}, errors.New("example importer requires example-vector editable-design input")
+    }
+    // Validate request.Options against Manifest().OptionsSchema, then parse
+    // request.Source and marshal the agreed editable-design representation.
+    payload, err := json.Marshal(map[string]any{"objects": []any{}})
+    if err != nil {
+        return importer.Result{}, err
+    }
+    return importer.Result{
+        OutputType: importer.OutputEditableDesign,
+        Payload:    payload,
+        Warnings: []importer.Warning{{
+            Code: "metadata-dropped", Message: "The source title was not retained.", Lossy: true,
+        }},
+    }, nil
+}
+```
+
+The example's empty `objects` payload only illustrates the interface shape; it
+is not a supported design document. Agree on a payload representation with the
+consumer before registering a real importer. `editable_design` and `gcode_job`
+are output labels, not schemas. Today, `svgimport.Document` is the only editable
+design payload consumed by the EmberDeck server. The generic `gcode_job` output
+has no registered consumer yet and cannot be saved or dispatched through the
+current importer endpoint.
+
+## Register and call it
+
+A Go host creates a registry from implementations it trusts. The registry
+rejects invalid manifests and duplicate IDs. Capability lists are sorted by ID
+and returned as defensive copies.
+
+```go
+registry, err := importer.NewRegistry(sample.Importer{})
+if err != nil {
+    return err
+}
+
+result, err := registry.Import(ctx, "example.vector", importer.Request{
+    SourceFormat: "example-vector",
+    OutputType:   importer.OutputEditableDesign,
+    Source:       sourceBytes,
+    Options:      json.RawMessage(`{"scale":1.5}`),
+})
+if err != nil {
+    return err
+}
+// result.Provenance identifies the importer, version, format, and options.
+// Review result.Warnings before accepting the conversion.
+```
+
+The registry accepts non-empty source data up to 1 MiB, JSON options up to 1 MiB,
+and a JSON result payload up to 4 MiB. It allows at most 64 warnings; each needs
+a non-empty code and message within the documented bounds. It checks that the
+selected format and output were declared and that the result uses the requested
+output type. It does not enforce an import timeout or terminate code that ignores
+context cancellation. Importers must check `ctx` during long work and reject
+malformed input with an actionable error.
+
+The registry requires an options schema to be a JSON object, but does not
+interpret JSON Schema keywords or validate the supplied options against that
+schema. Importer implementations must perform that validation. Do not silently
+choose scale, units, origin, speed, power, or controller settings.
+
+## Compatibility and versioning
+
+`ProtocolVersion` must equal the host's supported `importer.ProtocolVersion`
+(currently `1`); there is no protocol negotiation or fallback. Increment the
+protocol version when changing the shared Go contract incompatibly. `Manifest.Version`
+is recorded verbatim in result provenance but is not parsed or compared by the
+registry; use semantic versions as a publisher convention and document the compatibility
+policy for their releases. Treat importer IDs and source-format IDs
+as stable identifiers. A breaking input or output change should use a new
+importer or format ID so callers can select it deliberately. The registry does
+not infer a format from a filename or MIME type: callers select the declared
+format ID explicitly.
+
+The registry fills provenance after a successful conversion with the importer
+ID/version, selected format, and exact options bytes. It does not retain original
+source files or persist provenance with projects. Preserve source and conversion
+metadata in the host application when reproducibility is required.
+
+## Safety and output handling
+
+Treat source files as untrusted. Reject malformed data, external references,
+active content, and archive traversal unless the importer has a reviewed,
+explicit policy for them. Do not fetch network resources. Bound decompressed
+size, nesting, work, and temporary files in the importer; the generic registry
+only bounds byte payloads and warning counts.
+
+A conversion warning can set `Lossy: true` when information was dropped or
+approximated. Return actionable errors for unsupported features rather than
+silently producing misleading geometry. Geometry import must not assign
+machine operations. A generated G-code payload is only a candidate: the host
+must validate it, review it against a machine profile, show a preview, and ask
+for explicit operator confirmation before saving or dispatching. Importing
+never starts a machine.
+
+See the [HTTP API and worker contract](api.md#importer-interface-go-api) for the
+built-in SVG subset and current server behavior. The implemented SVG upload,
+preview, and save flow is illustrated in the [operator guide](operator-guide.md#create-a-multi-path-vector-project).
+
 ## Editable design projects
 
 Projects are saved independently in the durable `designs.json` library. Schema
