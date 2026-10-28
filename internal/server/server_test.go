@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/ConstructorFleet/emberdeck/internal/server"
@@ -91,5 +93,25 @@ func TestJobLibraryRequiresAuthentication(t *testing.T) {
 		if w.Code != 401 {
 			t.Fatalf("unauthenticated request returned %d", w.Code)
 		}
+	}
+}
+
+func TestFailedPersistenceDoesNotPublishJob(t *testing.T) {
+	dir := t.TempDir()
+	s, err := server.Open(dir, "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A directory at the destination prevents atomic replacement on every OS.
+	if err := os.Mkdir(filepath.Join(dir, "jobs.json"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	w := request(t, s, "POST", "/api/v1/jobs", `{"name":"square","gcode":"M5"}`, "test-key")
+	if w.Code != 500 {
+		t.Fatalf("persistence failure returned %d", w.Code)
+	}
+	w = request(t, s, "GET", "/api/v1/jobs", "", "test-key")
+	if w.Body.String() != "[]\n" {
+		t.Fatalf("published unpersisted job: %s", w.Body.String())
 	}
 }
