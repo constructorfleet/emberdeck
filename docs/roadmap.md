@@ -25,8 +25,9 @@ where indicated. This is an early foundation, not a production certification.
 
 The designer supports a rectangle-only v1 project and schema-v2 rectangle,
 ellipse, line, and generic path geometry with vector cutting and engraving.
-SVG/text import, rotation/alignment, arbitrary path editing, and raster
-engraving remain outside the current implementation. Ruida, proprietary DSP
+The first bounded static SVG importer handles line paths, basic shapes, and
+element transforms. Curved/grouped paths, text import, editor transforms, arbitrary
+path editing, undo/redo, and raster engraving remain future work. Ruida, proprietary DSP
 protocols, and OctoPrint plugin compatibility are also unsupported. Plugins
 can add adapters in later work.
 
@@ -57,8 +58,10 @@ their implementation status and evidence:
   schema-v2 multi-path editor with rectangle/ellipse/line primitives, ordered
   vector engrave/cut layers, profile preview, immutable generated jobs, and
   explicit dispatch. [Source review and remaining architecture](research/designer-architecture.md)
-  track the remaining rotation/alignment, multi-selection/transforms, SVG/text
-  import, arbitrary path editing, and raster evaluation. The full issue stays open.
+  track the remaining rotation/alignment, multi-selection/transforms, curved or
+  grouped SVG paths, text import, arbitrary path editing, and raster evaluation.
+  A bounded static SVG importer now converts basic shapes and line paths into
+  editable, unassigned geometry. The full issue stays open.
 - [ ] [#7: Live completed/remaining toolpath progress](https://github.com/constructorfleet/emberdeck/issues/7).
   Implement camera-independent execution monitoring for supported uploaded G-code
   as well as designer-generated jobs. Share the coordinate/toolpath renderer

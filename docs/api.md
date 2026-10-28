@@ -8,7 +8,7 @@ do not give it to untrusted users or plugins. There is no multi-user RBAC yet.
 Use HTTPS through a TLS reverse proxy for remote access. The native listener is
 loopback-only by default and does not terminate TLS itself.
 
-Requests and responses are JSON, except successful deletion (204). Errors return
+Requests are JSON except raw `image/svg+xml` on `POST /svg-import`; responses are JSON except successful deletion (204). Errors return
 `{"error":"description"}`. Unknown JSON fields and trailing objects are rejected.
 
 ## Job library
@@ -179,6 +179,24 @@ Example profile creation body (updates also include the expected `revision`):
 {"schema_version":1,"name":"Declared GRBL","controller":"grbl-1.1","units":"mm","origin":"lower-left","width_mm":300,"height_mm":200,"min_s":0,"max_s":1000,"min_feed_mm_min":1,"max_feed_mm_min":6000,"max_power_percent":100,"laser_mode_enabled":true}
 ```
 
+## Static SVG import
+
+`POST /svg-import` accepts raw `image/svg+xml` bytes up to 1 MiB and returns
+normalized editable geometry; it does not save a project or assign machine
+operations. Import the returned paths into a version 2 project with the regular
+project endpoints. The root SVG must declare physical `width`, `height`, and
+`viewBox`; supported units are mm, cm, inches, points, picas, and CSS pixels.
+The viewport is mapped to lower-left-origin millimetres. A mismatched aspect ratio
+requires explicit `preserveAspectRatio="none"`.
+
+The static subset supports direct-child paths made from M/L/H/V/Z line commands,
+lines, polylines, polygons, rectangles, circles, ellipses, and element-level
+affine transforms. Circles and ellipses are represented by 32-point editable
+polylines. Group nesting, CSS/style, text, curves, animation, DTD/entities,
+external references, and active content are rejected. Fill, stroke, colors, and
+SVG metadata never become laser operations. Imported geometry starts unassigned;
+assign each object to an explicit operation layer before generating a job.
+
 ## Editable design projects
 
 Projects are saved independently in the durable `designs.json` library. Schema
@@ -213,8 +231,8 @@ types are not supported by version 1.
 Version 2 geometry is an ordered list of objects, each with an ID, a `kind`
 (`rectangle`, `ellipse`, `line`, or generic `path`), and one or more subpaths.
 A subpath is a list of `{x_mm,y_mm}` points plus a `closed` boolean. Paths are
-already in absolute work coordinates; no transform, SVG style, or machine
-setting is inferred. Operations are ordered independently
+already in absolute work coordinates; SVG element transforms are applied at
+import time, while styling and machine operation settings are not inferred. Operations are ordered independently
 from the objects. Each object names its operation with `operation_id`; saving
 an unassigned path is allowed so future importers can preserve editable source,
 but generation requires every path to be assigned. An engraving path can be
