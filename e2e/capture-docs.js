@@ -231,7 +231,14 @@ async function main() {
     await page.getByRole('button', { name: 'Save project' }).click();
     await expect(page.locator('#notice .notice-message')).toContainText('Project saved');
     await page.getByRole('button', { name: 'Close editor' }).click();
-    await expect(page.getByRole('button', { name: 'Reopen project Panel outline' })).toBeVisible();
+    const reopenProject = page.getByRole('button', { name: 'Reopen project Panel outline' });
+    await expect(reopenProject).toBeVisible();
+    await reopenProject.focus();
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Shift+Tab');
+    await page.waitForTimeout(4300);
+    await expect(reopenProject).toBeFocused();
+    await page.locator('#project-list').screenshot({ path: path.join(screenshotDir, 'designer-project-keyboard-focus.png'), animations: 'disabled' });
     await capture(page, 'designer-console-overview.png');
     await captureElement(page, 'section[aria-labelledby="profiles-title"]', 'designer-console-overview-profile-detail.png');
     await captureElement(page, 'section[aria-labelledby="projects-title"]', 'designer-console-overview-project-detail.png');

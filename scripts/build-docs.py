@@ -335,7 +335,13 @@ document.addEventListener('click', async (event) => {
 def add_code_copy_buttons(body):
     """Add a labeled copy action to every server-rendered code block."""
     button = '<button class="copy-code-button" type="button" aria-label="Copy code" aria-live="polite">Copy code</button>'
-    return body.replace('<div class="codehilite">', '<div class="codehilite">' + button)
+    body = body.replace('<div class="codehilite">', '<div class="codehilite">' + button)
+    return re.sub(
+        r'<pre class="codehilite">(.*?)</pre>',
+        lambda match: '<div class="codehilite">' + button + '<pre>' + match.group(1) + '</pre></div>',
+        body,
+        flags=re.DOTALL,
+    )
 def render_page(name, body, page_name):
     title = page_title(name) + ' · EmberDeck docs'
     description = page_descriptions[name]
