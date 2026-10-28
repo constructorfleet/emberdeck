@@ -1,6 +1,6 @@
 # Browser laser designer: architecture review
 
-**Status:** version 1 rectangle engraving and version 2 multi-path vector projects are implemented; this document also retains the source review and remaining architecture for [issue #4](https://github.com/constructorfleet/emberdeck/issues/4). The full issue remains open. Issue #4 asks for creation/import, editing, operations, profile-aware preview, editable projects, generated jobs, explicit dispatch, public-seam geometry tests, browser workflow tests, and illustrated operator instructions. It specifically requires separate milestones for vector cutting, vector engraving, and raster engraving.
+**Status:** version 1 rectangle engraving and version 2 multi-path vector projects with saved per-object translation, X/Y scale, and rotation are implemented; this document also retains the source review and remaining architecture for [issue #4](https://github.com/constructorfleet/emberdeck/issues/4). The full issue remains open. Issue #4 asks for creation/import, editing, operations, profile-aware preview, editable projects, generated jobs, explicit dispatch, public-seam geometry tests, browser workflow tests, and illustrated operator instructions. It specifically requires separate milestones for vector cutting, vector engraving, and raster engraving.
 
 ## Implemented rectangle milestone
 
@@ -14,8 +14,8 @@ See the [API contract](../api.md) and [illustrated guide](../operator-guide.md).
 
 This version 1 milestone has one rectangle outline and one vector-engraving
 operation. The separate version 2 milestone below adds multiple objects and a
-bounded SVG importer. Text, rotation/alignment, and raster engraving remain
-unavailable. The static preview is not execution monitoring for
+bounded SVG importer. Text, alignment, multi-selection, and raster engraving
+remain unavailable. The static preview is not execution monitoring for
 [issue #7](https://github.com/constructorfleet/emberdeck/issues/7).
 
 ## Implemented multi-path vector milestone
@@ -38,8 +38,10 @@ SVG `C/c` cubic and `Q/q` quadratic curves are flattened to editable
 millimetre polylines with a 0.05 mm chord tolerance after element transforms and
 viewport scaling, capped at 4,000 points and 16 subdivision levels. The importer
 rejects nested groups, `S/s` and `T/t` smooth commands, `A/a` arcs, styles, text,
-and active or external content. The v2 model does not provide arbitrary path-node
-editing, rotation, alignment, multi-selection, text, undo/redo, kerf
+and active or external content. V2 stores per-object translation, nonuniform
+scale, and rotation around the source bounds center; profile validation,
+preview, and generation apply the same rounded transform. The v2 model does not
+provide arbitrary path-node editing, alignment, multi-selection, text, undo/redo, kerf
 compensation, tabs, passes, or raster engraving. Ellipses are polygonal and the
 editor does not claim live execution progress. Version 1 projects and
 `rectangle-v1` jobs remain supported with their original data and G-code.
