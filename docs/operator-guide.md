@@ -129,6 +129,15 @@ The profile and project lists remain separate from generated jobs: deleting a
 source project does not delete a generated program, and editing a source does
 not change an existing program.
 
+While the library tab is visible, jobs and driver status refresh every two
+seconds. Profile and project changes sync separately every 10 seconds. In a
+hidden tab, job refresh backs off to at most once every 30 seconds and profile
+and project sync to once every five minutes. Returning to the tab triggers a
+fresh sync. Refreshes keep keyboard focus on the same row action when that row
+still exists.
+
+![Saved project list with keyboard focus on Reopen after background refreshes](assets/screenshots/designer-project-keyboard-focus.png)
+
 ## Add and inspect a program
 
 Choose a G-code file, enter a display name, select the declared machine profile,

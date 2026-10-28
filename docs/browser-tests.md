@@ -13,6 +13,11 @@ Resume, it verifies acknowledged progress advances and accepts either a sampled
 job can finish between UI polls. It does not connect to or qualify physical
 hardware.
 
+The library refresh checks verify that unchanged jobs retain their row and
+controls, saved-project row actions keep focus through at least two job refresh
+cycles, visible job polling continues every two seconds, designer data refreshes
+less often, and hiding a tab backs polling off until the tab becomes visible.
+
 The rectangle designer workflow creates a declared GRBL profile and a saved
 vector-engrave rectangle project through the browser. It verifies invalid bounds
 block save and generation, profile revision changes require project review, and

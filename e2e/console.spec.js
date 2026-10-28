@@ -12,6 +12,86 @@ test('API controls stay unavailable and the job count stays unknown before the f
   await expect(page.locator('#refresh')).toBeDisabled();
 });
 
+test('unchanged job polls keep the existing row and View control', async ({ page }) => {
+  let jobPolls = 0;
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (request.method() === 'GET' && url.pathname === '/api/v1/jobs' && url.search) jobPolls++;
+  });
+  await connect(page);
+  const name = `unchanged-row-${test.info().retry}.gcode`;
+  const row = await uploadJob(page, name, 20);
+  const view = row.getByRole('button', { name: `View ${name}` });
+  await view.focus();
+  const priorPollCount = jobPolls;
+  await page.evaluate((jobName) => {
+    const rowNode = Array.from(document.querySelectorAll('#job-list li')).find((candidate) => candidate.textContent.includes(jobName));
+    window.__unchangedJobNodes = { name: jobName, row: rowNode, view: rowNode.querySelector('[data-job-action="view"]') };
+  }, name);
+
+  await expect.poll(() => jobPolls, { timeout: 9000 }).toBeGreaterThanOrEqual(priorPollCount + 2);
+  expect(await page.evaluate(() => {
+    const prior = window.__unchangedJobNodes;
+    const rowNode = Array.from(document.querySelectorAll('#job-list li')).find((candidate) => candidate.textContent.includes(prior.name));
+    return rowNode === prior.row && rowNode.querySelector('[data-job-action="view"]') === prior.view;
+  })).toBe(true);
+  await expect(view).toBeFocused();
+  await cleanupJob(page, name);
+});
+
+test('job polling stays fast while designer polling slows and hidden polling backs off', async ({ page }) => {
+  await page.addInitScript(() => {
+    let testHidden = false;
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => testHidden });
+    window.setTestHidden = (value) => { testHidden = value; document.dispatchEvent(new Event('visibilitychange')); };
+  });
+  const requests = { jobs: 0, profiles: 0, projects: 0 };
+  const jobPollTimes = [];
+  page.on('request', (request) => {
+    if (request.method() !== 'GET') return;
+    const url = new URL(request.url());
+    if (url.pathname === '/api/v1/jobs' && url.search) {
+      requests.jobs++;
+      jobPollTimes.push(Date.now());
+    }
+    if (url.pathname === '/api/v1/profiles') requests.profiles++;
+    if (url.pathname === '/api/v1/projects') requests.projects++;
+  });
+  await connect(page);
+  await expect.poll(() => requests.jobs, { timeout: 9000 }).toBeGreaterThanOrEqual(3);
+  const visibleJobIntervals = jobPollTimes.slice(1, 3).map((time, index) => time - jobPollTimes[index]);
+  expect(visibleJobIntervals).toHaveLength(2);
+  expect(visibleJobIntervals.every((interval) => interval >= 1500 && interval <= 3500)).toBe(true);
+  expect(requests.profiles).toBe(1);
+  expect(requests.projects).toBe(1);
+
+  const beforeHidden = { ...requests };
+  await page.evaluate(() => window.setTestHidden(true));
+  await page.waitForTimeout(2500);
+  expect(requests).toEqual(beforeHidden);
+
+  await page.evaluate(() => window.setTestHidden(false));
+  await expect.poll(() => requests.jobs).toBeGreaterThan(beforeHidden.jobs);
+  await expect.poll(() => requests.profiles).toBe(2);
+  await expect.poll(() => requests.projects).toBe(2);
+});
+
+test('failed designer refreshes are rate limited independently of fast job polls', async ({ page }) => {
+  let profileAttempts = 0;
+  let jobPolls = 0;
+  await page.route('**/api/v1/profiles', async (route) => {
+    profileAttempts++;
+    await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'temporary storage failure' }) });
+  });
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (request.method() === 'GET' && url.pathname === '/api/v1/jobs' && url.search) jobPolls++;
+  });
+  await connect(page);
+  await expect.poll(() => jobPolls, { timeout: 9000 }).toBeGreaterThanOrEqual(3);
+  expect(profileAttempts).toBe(1);
+});
+
 test('success notices use success styling and remain visible through a poll cycle', async ({ page }) => {
   await connect(page);
   await page.evaluate(() => {

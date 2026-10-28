@@ -41,6 +41,13 @@
   let jobTotal = 0;
   let jobOffset = 0;
   let refreshQueued = false;
+  let refreshQueuedForce = false;
+  let refreshQueuedDesigner = false;
+  let lastJobPollStartedAt = 0;
+  let lastDesignerPollAt = 0;
+  let lastJobRenderKey = null;
+  let lastProjectRenderKey = null;
+  let lastVectorProjectRenderKey = null;
   const jobFilterName = $("#job-filter-name");
   const jobFilterState = $("#job-filter-state");
   let drivers = [];
@@ -208,6 +215,8 @@
     if (pollTimer !== null) window.clearInterval(pollTimer);
     pollTimer = null;
     polling = false;
+    lastJobPollStartedAt = 0;
+    lastDesignerPollAt = 0;
   }
 
   function forgetSession({ focus = false, clearInput = true } = {}) {
@@ -224,6 +233,8 @@
     jobOffset = 0;
     lastUpdatedAt = null;
     refreshQueued = false;
+    refreshQueuedForce = false;
+    refreshQueuedDesigner = false;
     drivers = [];
     selectedDriver = "";
     manualRecords.clear();
@@ -403,8 +414,19 @@
 
   function renderProjects() {
     const list = $("#project-list");
-    list.replaceChildren();
     const savedProjects = projects.filter((candidate) => candidate.schema_version === 1);
+    const renderKey = JSON.stringify({
+      projects: savedProjects,
+      profiles: profiles.map((profile) => [profile.id, profile.name, profile.revision]),
+      available: serverAvailable,
+    });
+    if (renderKey === lastProjectRenderKey) return;
+    lastProjectRenderKey = renderKey;
+    const focused = document.activeElement;
+    const keepFocus = focused && list.contains(focused) && focused.dataset.projectId
+      ? { id: focused.dataset.projectId, action: focused.dataset.projectAction }
+      : null;
+    list.replaceChildren();
     $("#project-empty").hidden = savedProjects.length > 0;
     for (const project of savedProjects) {
       const row = document.createElement("li");
@@ -421,18 +443,28 @@
       const actions = document.createElement("div");
       actions.className = "designer-actions";
       const reopen = button("Reopen", "button button-small", () => openSavedProject(project.id), `Reopen project ${project.name}`);
+      reopen.dataset.projectId = project.id;
+      reopen.dataset.projectAction = "reopen";
       reopen.disabled = !serverAvailable;
       const remove = button("Delete", "button button-small button-danger", () => deleteProject(project.id, project.name), `Delete project ${project.name}`);
+      remove.dataset.projectId = project.id;
+      remove.dataset.projectAction = "delete";
       remove.disabled = !serverAvailable;
       actions.append(reopen, remove);
       row.append(label, actions);
       list.append(row);
+    }
+    if (keepFocus) {
+      list.querySelector(`[data-project-id="${CSS.escape(keepFocus.id)}"][data-project-action="${keepFocus.action}"]`)?.focus();
     }
   }
 
   async function refreshDesigner() {
     if (!connected) return;
     const version = sessionVersion;
+    // Count failed attempts too, so a persistent storage error cannot turn each
+    // fast job poll into another pair of designer requests.
+    lastDesignerPollAt = Date.now();
     try {
       const [nextProfiles, nextProjects] = await Promise.all([api("/api/v1/profiles"), api("/api/v1/projects")]);
       if (!connected || version !== sessionVersion) return;
@@ -1360,8 +1392,19 @@
 
   function renderVectorProjects() {
     const list = $("#vector-project-list");
-    list.replaceChildren();
     const savedProjects = projects.filter((project) => project.schema_version === 2);
+    const renderKey = JSON.stringify({
+      projects: savedProjects,
+      profiles: profiles.map((profile) => [profile.id, profile.name, profile.revision]),
+      available: serverAvailable,
+    });
+    if (renderKey === lastVectorProjectRenderKey) return;
+    lastVectorProjectRenderKey = renderKey;
+    const focused = document.activeElement;
+    const keepFocus = focused && list.contains(focused) && focused.dataset.projectId
+      ? { id: focused.dataset.projectId, action: focused.dataset.projectAction }
+      : null;
+    list.replaceChildren();
     $("#vector-project-empty").hidden = savedProjects.length > 0;
     savedProjects.forEach((project) => {
       const row = document.createElement("li");
@@ -1387,12 +1430,19 @@
         fillVectorProject(project, true);
         scrollIntoView($("#vector-form"), "nearest");
       }, `Reopen vector project ${project.name}`);
+      reopen.dataset.projectId = project.id;
+      reopen.dataset.projectAction = "reopen";
       reopen.disabled = !serverAvailable;
       const remove = button("Delete", "button button-small button-danger", () => deleteVectorProject(project.id, project.name), `Delete vector project ${project.name}`);
+      remove.dataset.projectId = project.id;
+      remove.dataset.projectAction = "delete";
       remove.disabled = !serverAvailable;
       actions.append(reopen, remove);
       row.append(label, actions); list.append(row);
     });
+    if (keepFocus) {
+      list.querySelector(`[data-project-id="${CSS.escape(keepFocus.id)}"][data-project-action="${keepFocus.action}"]`)?.focus();
+    }
   }
 
   async function saveVectorProject(event) {
@@ -1849,6 +1899,19 @@
   }
 
   function renderJobs() {
+    const renderKey = JSON.stringify({
+      jobs,
+      jobTotal,
+      jobOffset,
+      filters: [jobFilterName.value, jobFilterState.value],
+      confirmed: confirmation.checked,
+      boundsOverrides: [...boundsOverrides].sort(),
+      driver: selectedDriver,
+      driverContext: drivers.map((driver) => [driver.id, driver.connected, driver.capabilities, driver.controller_settings, driver.camera_available]),
+      available: serverAvailable,
+    });
+    if (renderKey === lastJobRenderKey) return;
+    lastJobRenderKey = renderKey;
     const checked = confirmation.checked;
     const focused = document.activeElement;
     const keepFocus = focused && list.contains(focused) && focused.dataset.jobAction ? { jobID: focused.dataset.jobId, action: focused.dataset.jobAction, fallback: true } : null;
@@ -2215,9 +2278,15 @@
 
   // Filter and page changes queue a follow-up refresh when a poll is already in
   // flight; other callers keep the existing skip-while-polling behavior.
-  async function refresh({ queue = false } = {}) {
+  async function refresh({ queue = false, force = false, forceDesigner = false, scheduled = false } = {}) {
     if (!connected) return;
     if (polling) { if (queue === true) refreshQueued = true; return; }
+    const now = Date.now();
+    const hidden = document.hidden;
+    if (scheduled && hidden && !force && now - lastJobPollStartedAt < 30000) return;
+    lastJobPollStartedAt = now;
+    const designerPollInterval = hidden ? 300000 : 10000;
+    const refreshDesignerNow = forceDesigner || !lastDesignerPollAt || now - lastDesignerPollAt >= designerPollInterval;
     polling = true;
     const version = sessionVersion;
     try {
@@ -2241,9 +2310,9 @@
       await refreshManualControl();
       renderDrivers();
       renderJobs();
+      if (refreshDesignerNow) await refreshDesigner();
       await refreshToolpathViews();
       if (shownJobID && !programPanel.hidden) window.EmberDeckJobHistory?.load($("#program-history"), shownJobID, api);
-      await refreshDesigner();
     } catch (error) {
       if (!connected || version !== sessionVersion) return;
       setServerAvailable(false);
@@ -2255,14 +2324,33 @@
     } finally {
       if (version === sessionVersion) {
         polling = false;
-        if (refreshQueued) { refreshQueued = false; refresh(); }
+        if (refreshQueued) {
+          const force = refreshQueuedForce;
+          const forceDesigner = refreshQueuedDesigner;
+          refreshQueued = false;
+          refreshQueuedForce = false;
+          refreshQueuedDesigner = false;
+          refresh({ force, forceDesigner });
+        }
       }
     }
   }
 
   function startPolling() {
-    if (connected && pollTimer === null) pollTimer = window.setInterval(refresh, 2000);
+    if (connected && pollTimer === null) pollTimer = window.setInterval(() => refresh({ scheduled: true }), 2000);
   }
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && connected) {
+      lastJobPollStartedAt = 0;
+      lastDesignerPollAt = 0;
+      if (polling) {
+        refreshQueued = true;
+        refreshQueuedForce = true;
+        refreshQueuedDesigner = true;
+      } else refresh({ force: true, forceDesigner: true });
+    }
+  });
 
   notice.querySelector(".notice-dismiss").addEventListener("click", () => {
     if (currentNotice?.connection) dismissedConnectionError = currentNotice.text;
@@ -2422,7 +2510,7 @@
   jobFilterState.addEventListener("change", () => { jobOffset = 0; refresh({ queue: true }); });
   $("#jobs-newer").addEventListener("click", () => { jobOffset = Math.max(0, jobOffset - jobPageSize); refresh({ queue: true }); });
   $("#jobs-older").addEventListener("click", () => { jobOffset += jobPageSize; refresh({ queue: true }); });
-  $("#refresh").addEventListener("click", refresh);
+  $("#refresh").addEventListener("click", () => refresh({ force: true, forceDesigner: true }));
   $("#close-program").addEventListener("click", closeProgramPanel);
   setSessionConnected(false);
   renderDrivers();

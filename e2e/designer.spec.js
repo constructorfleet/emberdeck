@@ -2,6 +2,65 @@ const { test, expect } = require('@playwright/test');
 
 const apiKey = 'emberdeck-e2e-test-key';
 
+test('saved project actions keep keyboard focus through two job poll cycles', async ({ page }) => {
+  const attempt = `${test.info().repeatEachIndex}-${test.info().retry}-${Date.now()}`;
+  const profileName = `E2E focus profile ${attempt}`;
+  const projectName = `E2E focus project ${attempt}`;
+  let jobPolls = 0;
+  let designerRefreshes = 0;
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (request.method() === 'GET' && url.pathname === '/api/v1/jobs' && url.search) jobPolls++;
+    if (request.method() === 'GET' && url.pathname === '/api/v1/profiles') designerRefreshes++;
+  });
+  await page.goto('/designer');
+  await page.locator('#api-key').fill(apiKey);
+  await page.getByRole('button', { name: /Connect/ }).click();
+  await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
+
+  await page.getByRole('button', { name: 'New profile' }).click();
+  await page.getByLabel('Profile name').fill(profileName);
+  await page.getByLabel('Work area width (mm)').fill('300');
+  await page.getByLabel('Work area height (mm)').fill('200');
+  await page.getByLabel('Maximum spindle value ($30)').fill('1000');
+  await page.getByLabel('Minimum feed (mm/min)').fill('1');
+  await page.getByLabel('Maximum feed (mm/min)').fill('6000');
+  await page.getByLabel('Maximum commanded power (%)').fill('100');
+  await page.getByRole('button', { name: 'Save profile' }).click();
+  await expect(page.locator('#notice .notice-message')).toContainText('Profile saved');
+
+  await page.getByRole('button', { name: 'New rectangle project' }).click();
+  await page.locator('#project-name').fill(projectName);
+  await page.locator('#rect-x').fill('10');
+  await page.locator('#rect-y').fill('20');
+  await page.locator('#rect-width').fill('30');
+  await page.locator('#rect-height').fill('20');
+  await page.locator('#operation-feed').fill('600');
+  await page.locator('#operation-power').fill('25');
+  await page.getByRole('button', { name: 'Save project' }).click();
+  await expect(page.locator('#notice .notice-message')).toContainText('Project saved');
+
+  const reopen = page.getByRole('button', { name: `Reopen project ${projectName}` });
+  await page.evaluate((name) => {
+    const row = Array.from(document.querySelectorAll('#project-list li')).find((candidate) => candidate.textContent.includes(name));
+    window.__savedProjectRow = row;
+    window.__savedProjectAction = row.querySelector('[data-project-action="reopen"]');
+  }, projectName);
+  await reopen.focus();
+  await expect(reopen).toBeFocused();
+  const priorRefreshCount = designerRefreshes;
+  await page.evaluate(() => document.querySelector('#refresh').click());
+  await expect.poll(() => designerRefreshes).toBeGreaterThan(priorRefreshCount);
+  expect(await page.evaluate((name) => {
+    const row = Array.from(document.querySelectorAll('#project-list li')).find((candidate) => candidate.textContent.includes(name));
+    return row === window.__savedProjectRow && row.querySelector('[data-project-action="reopen"]') === window.__savedProjectAction;
+  }, projectName)).toBe(true);
+  await expect(reopen).toBeFocused();
+  await page.waitForTimeout(4300);
+  expect(jobPolls).toBeGreaterThanOrEqual(3);
+  await expect(reopen).toBeFocused();
+});
+
 test('operator saves a declared profile, edits a bounded rectangle, and reviews a queued generated job', async ({ page }) => {
   test.setTimeout(90000);
   const attempt = `${test.info().repeatEachIndex}-${test.info().retry}-${Date.now()}`;
@@ -151,6 +210,7 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
     if (!response.ok) throw new Error(`Could not revise test profile: ${response.status} ${(await response.text())}`);
     return uploadedName;
   }, { jobID, apiKey, projectName });
+  await page.locator('#refresh').click();
   await expect.poll(reviewCount).toBeGreaterThan(stableReviewCount);
   await expect(row.locator('.toolpath-profile-bounds')).toHaveCount(0);
   await expect(row.locator('.toolpath-legend')).toContainText(/declared profile work area is stale/i);
