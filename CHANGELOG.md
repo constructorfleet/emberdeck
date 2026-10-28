@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.13.0](https://github.com/constructorfleet/emberdeck/compare/v0.12.0...v0.13.0) (2026-10-28)
+
+
+### Features
+
+* add authenticated camera monitoring ([#125](https://github.com/constructorfleet/emberdeck/issues/125)) ([48b7139](https://github.com/constructorfleet/emberdeck/commit/48b7139d6b09af881d78bf6da528eaa9fae3fefb))
+* define versioned driver adapter API prototype ([#99](https://github.com/constructorfleet/emberdeck/issues/99)) ([0972123](https://github.com/constructorfleet/emberdeck/commit/0972123a63dc8ac3ae63efc693c0421d9dd17946))
+* route assigned jobs through registered adapters ([#134](https://github.com/constructorfleet/emberdeck/issues/134)) ([44d5b7c](https://github.com/constructorfleet/emberdeck/commit/44d5b7cf3b280e47119fb722c57b7f30a450630e))
+
+
+### Bug Fixes
+
+* keep rectangle preview labels readable ([#130](https://github.com/constructorfleet/emberdeck/issues/130)) ([39da5cd](https://github.com/constructorfleet/emberdeck/commit/39da5cdae6e004f569383d306b0d9675222a5f99)), closes [#28](https://github.com/constructorfleet/emberdeck/issues/28)
+* persist pre-stream worker failures ([#132](https://github.com/constructorfleet/emberdeck/issues/132)) ([13a8748](https://github.com/constructorfleet/emberdeck/commit/13a8748c33d4dfb9a043e83639bc2b541f781659))
+
 ## [0.12.0](https://github.com/constructorfleet/emberdeck/compare/v0.11.0...v0.12.0) (2026-10-28)
 
 
