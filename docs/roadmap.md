@@ -16,7 +16,7 @@ Simulator and software checks do not qualify a physical machine. See
   editor supports vector cutting and engraving and a bounded static SVG importer
   for line/Bezier paths, basic shapes, element transforms, multi-shape
   alignment, and editable monoline text engraving. SVG text import, nested
-  groups, smooth/arc commands, undo/redo, and raster engraving remain future
+  groups, arc commands, undo/redo, and raster engraving remain future
   work.
 - Uploaded-job review against a selected machine profile, including upload-time
   line validation, known or unknown path bounds, unsupported/incomplete-motion
@@ -90,7 +90,7 @@ designer's remaining capabilities are delivered.
   toolpaths. Keyboard-accessible multi-selection aligns left/center/right and
   top/middle/bottom using transformed bounds, saves the resulting translations,
   and preserves profile warnings. [Source review and remaining architecture](research/designer-architecture.md)
-  track nested SVG groups, smooth/arc commands, SVG text import, arbitrary path
+  track nested SVG groups, arc commands, SVG text import, arbitrary path
   editing, and raster evaluation. A bounded
   static SVG importer now converts basic shapes and
   line/Bezier paths into editable, unassigned geometry. Native text objects also

@@ -44,10 +44,12 @@ geometry, and the server permits these open paths only on vector-engrave layers.
 No external runtime font dependency is used. Raster engraving remains
 unsupported.
 
-SVG `C/c` cubic and `Q/q` quadratic curves are flattened to editable
-millimetre polylines with a 0.05 mm chord tolerance after element transforms and
-viewport scaling, capped at 4,000 points and 16 subdivision levels. The importer
-rejects nested groups, `S/s` and `T/t` smooth commands, `A/a` arcs, styles, text,
+SVG `C/c` and `S/s` cubic curves and `Q/q` and `T/t` quadratic curves are flattened
+to editable millimetre polylines with a 0.05 mm chord tolerance after element
+transforms and viewport scaling, capped at 4,000 points and 16 subdivision
+levels. Smooth commands reflect the previous compatible control point, or use
+the current point when a different command intervenes. The importer
+rejects nested groups, `A/a` arcs, styles, text,
 and active or external content. V2 stores per-object translation, nonuniform
 scale, and rotation around the source bounds center; profile validation,
 preview, and generation apply the same rounded transform. Group alignment uses

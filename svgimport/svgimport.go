@@ -425,6 +425,8 @@ func parsePath(source string, toMM func(Point) Point, maxPoints int) ([]Subpath,
 	subpaths := []Subpath{}
 	current := Point{}
 	start := Point{}
+	lastCubicControl, lastQuadraticControl := Point{}, Point{}
+	hasCubicControl, hasQuadraticControl := false, false
 	command := byte(0)
 	active := -1
 	closedSinceMove := false
@@ -457,9 +459,6 @@ func parsePath(source string, toMM func(Point) Point, maxPoints int) ([]Subpath,
 		if len(tokens[index]) == 1 && isLetter(tokens[index][0]) {
 			command = tokens[index][0]
 			index++
-			if strings.ContainsRune("SsTtAa", rune(command)) {
-				return nil, fmt.Errorf("path command %c is not supported; use M/L/H/V/C/Q/Z commands", command)
-			}
 		}
 		if command == 0 {
 			return nil, errors.New("path must start with a move command")
@@ -476,11 +475,12 @@ func parsePath(source string, toMM func(Point) Point, maxPoints int) ([]Subpath,
 			subpaths[active].Closed = true
 			current = start
 			closedSinceMove = true
+			hasCubicControl, hasQuadraticControl = false, false
 			command = 0
 			continue
 		}
-		if cmd != 'M' && cmd != 'L' && cmd != 'H' && cmd != 'V' && cmd != 'C' && cmd != 'Q' {
-			return nil, fmt.Errorf("path command %c is not supported; use M/L/H/V/C/Q/Z commands", command)
+		if cmd != 'M' && cmd != 'L' && cmd != 'H' && cmd != 'V' && cmd != 'C' && cmd != 'S' && cmd != 'Q' && cmd != 'T' {
+			return nil, fmt.Errorf("path command %c is not supported; use M/L/H/V/C/S/Q/T/Z commands", command)
 		}
 		if cmd != 'M' && closedSinceMove {
 			return nil, errors.New("a path needs a new M command after Z before drawing again")
@@ -490,6 +490,7 @@ func parsePath(source string, toMM func(Point) Point, maxPoints int) ([]Subpath,
 			previous := current
 			switch cmd {
 			case 'M', 'L':
+				hasCubicControl, hasQuadraticControl = false, false
 				x, err := readNumber()
 				if err != nil {
 					return nil, err
@@ -504,6 +505,7 @@ func parsePath(source string, toMM func(Point) Point, maxPoints int) ([]Subpath,
 				}
 				current = Point{XMM: x, YMM: y}
 			case 'H':
+				hasCubicControl, hasQuadraticControl = false, false
 				x, err := readNumber()
 				if err != nil {
 					return nil, err
@@ -513,6 +515,7 @@ func parsePath(source string, toMM func(Point) Point, maxPoints int) ([]Subpath,
 				}
 				current.XMM = x
 			case 'V':
+				hasCubicControl, hasQuadraticControl = false, false
 				y, err := readNumber()
 				if err != nil {
 					return nil, err
@@ -552,6 +555,37 @@ func parsePath(source string, toMM func(Point) Point, maxPoints int) ([]Subpath,
 				if err := flattenQuadratic(previous, control, endpoint, toMM, 0, func(point Point) error { return appendPoint(point) }); err != nil {
 					return nil, err
 				}
+				lastQuadraticControl, hasQuadraticControl = control, true
+				hasCubicControl = false
+				current = endpoint
+			case 'T':
+				if active < 0 {
+					return nil, errors.New("path curve command must follow a move")
+				}
+				x, err := readNumber()
+				if err != nil {
+					return nil, err
+				}
+				y, err := readNumber()
+				if err != nil {
+					return nil, err
+				}
+				if !upper {
+					x, y = x+previous.XMM, y+previous.YMM
+				}
+				control := previous
+				if hasQuadraticControl {
+					control = Point{XMM: 2*previous.XMM - lastQuadraticControl.XMM, YMM: 2*previous.YMM - lastQuadraticControl.YMM}
+				}
+				endpoint := Point{XMM: x, YMM: y}
+				if !finitePoint(control) || !finitePoint(endpoint) {
+					return nil, errors.New("path curve coordinate overflow")
+				}
+				if err := flattenQuadratic(previous, control, endpoint, toMM, 0, func(point Point) error { return appendPoint(point) }); err != nil {
+					return nil, err
+				}
+				lastQuadraticControl, hasQuadraticControl = control, true
+				hasCubicControl = false
 				current = endpoint
 			case 'C':
 				if active < 0 {
@@ -583,6 +617,44 @@ func parsePath(source string, toMM func(Point) Point, maxPoints int) ([]Subpath,
 				if err := flattenCubic(previous, control1, control2, endpoint, toMM, 0, func(point Point) error { return appendPoint(point) }); err != nil {
 					return nil, err
 				}
+				lastCubicControl, hasCubicControl = control2, true
+				hasQuadraticControl = false
+				current = endpoint
+			case 'S':
+				if active < 0 {
+					return nil, errors.New("path curve command must follow a move")
+				}
+				values := [4]float64{}
+				for i := range values {
+					value, err := readNumber()
+					if err != nil {
+						return nil, err
+					}
+					values[i] = value
+				}
+				if !upper {
+					for i := range values {
+						if i%2 == 0 {
+							values[i] += previous.XMM
+						} else {
+							values[i] += previous.YMM
+						}
+					}
+				}
+				control1 := previous
+				if hasCubicControl {
+					control1 = Point{XMM: 2*previous.XMM - lastCubicControl.XMM, YMM: 2*previous.YMM - lastCubicControl.YMM}
+				}
+				control2 := Point{XMM: values[0], YMM: values[1]}
+				endpoint := Point{XMM: values[2], YMM: values[3]}
+				if !finitePoint(control1) || !finitePoint(control2) || !finitePoint(endpoint) {
+					return nil, errors.New("path curve coordinate overflow")
+				}
+				if err := flattenCubic(previous, control1, control2, endpoint, toMM, 0, func(point Point) error { return appendPoint(point) }); err != nil {
+					return nil, err
+				}
+				lastCubicControl, hasCubicControl = control2, true
+				hasQuadraticControl = false
 				current = endpoint
 			}
 			if !finite(current.XMM) || !finite(current.YMM) {
@@ -595,7 +667,7 @@ func parsePath(source string, toMM func(Point) Point, maxPoints int) ([]Subpath,
 					return nil, err
 				}
 				closedSinceMove = false
-			} else if cmd != 'C' && cmd != 'Q' {
+			} else if cmd != 'C' && cmd != 'S' && cmd != 'Q' && cmd != 'T' {
 				if active < 0 {
 					return nil, errors.New("path line command must follow a move")
 				}

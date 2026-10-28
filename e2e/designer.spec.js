@@ -328,7 +328,7 @@ test('operator imports static SVG paths into an editable project and assigns the
 
   await page.getByRole('button', { name: 'New vector project' }).click();
   await page.locator('#vector-name').fill(projectName);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300mm" height="200mm" viewBox="0 0 300 200"><path d="M10 190 L40 190 L40 160 L10 160 Z"/><path d="M60 190 Q80 150 100 190"/></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300mm" height="200mm" viewBox="0 0 300 200"><path d="M10 190 L40 190 L40 160 L10 160 Z"/><path d="M60 190 C70 180 80 180 90 190 S110 180 120 190 Q130 180 140 190 T160 190"/></svg>`;
   await page.locator('#vector-svg-file').setInputFiles({ name: 'panel.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(svg) });
   await expect(page.locator('#notice .notice-message')).toContainText('Imported 2 editable SVG paths');
   await expect(page.locator('#vector-object-list li')).toHaveCount(2);

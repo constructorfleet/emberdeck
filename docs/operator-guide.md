@@ -265,12 +265,14 @@ transform while keeping the group selection.
 ![Two transformed shapes selected for alignment with updated preview and alignment status](assets/screenshots/designer-vector-alignment.png)
 
 Choose **Import SVG** inside an open vector project to add static geometry. The
-importer supports straight path commands (M/L/H/V/Z), cubic and quadratic
-Bezier commands (C/c/Q/q), lines, polylines, polygons, rectangles, circles, and
-ellipses. Curves become line segments with at most 0.05 mm chord deviation after
-SVG and element transforms; imports that exceed the 16-level subdivision or
-4,000-point import limits are rejected. Circle and ellipse outlines become
-editable 32-point paths. Nested groups, smooth or arc commands, styles, text,
+importer supports straight path commands (M/L/H/V/Z), cubic Bezier commands
+(C/c/S/s), quadratic Bezier commands (Q/q/T/t), lines, polylines, polygons,
+rectangles, circles, and ellipses. Smooth commands reflect the prior compatible
+curve control point; otherwise they start from the current point. Curves become
+line segments with at most 0.05 mm chord deviation after SVG and element
+transforms; imports that exceed the 16-level subdivision or 4,000-point import
+limits are rejected. Circle and ellipse outlines become
+editable 32-point paths. Nested groups, arc commands, styles, text,
 external resources, and active content are rejected with an error. Imported
 shapes appear unassigned: inspect the preview and workspace bounds, select each
 shape, and assign its engraving or cutting layer before generating. Save and reopen the
@@ -394,7 +396,7 @@ Regenerate the screenshots from the current console and simulator with
 The current designer does not have SVG text import, undo/redo, or raster
 engraving. Native editable monoline text is supported as described above.
 SVG import supports straight paths and
-C/c/Q/q Bezier curves; nested groups, S/s/T/t smooth commands, and A/a arcs are
+C/c/S/s cubic and Q/q/T/t quadratic Bezier curves; nested groups and A/a arcs are
 not available. Live path correlation currently covers supported linear XY
 moves; arcs and unsupported coordinate modes are reported as warnings, and the
 view does not show declared machine bounds. The console also has no driver-adapter

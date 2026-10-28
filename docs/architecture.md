@@ -171,9 +171,9 @@ motion is surfaced as warnings. Position matching assumes `$13=0` and is not
 machine-bound or safety-qualified. The bounded SVG importer supports static line
 geometry, cubic/quadratic Bezier curves flattened at a 0.05 mm chord tolerance,
 and element-level affine transforms. It rejects styles, text, nested groups,
-smooth/arc commands, and active or external content. Rotation/alignment editing,
-multi-selection, undo/redo, nested SVG groups, and raster engraving remain future
-work; see the [designer plan](research/designer-architecture.md) and
+arc commands, and active or external content. Arbitrary path editing, undo/redo,
+nested SVG groups, and raster engraving remain future work; see the [designer
+plan](research/designer-architecture.md) and
 [operator guide](operator-guide.md).
 
 ## Confirmed controller control
