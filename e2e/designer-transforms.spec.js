@@ -13,7 +13,7 @@ test('selected vector object transform is previewed, saved, reopened, and applie
     }
   });
 
-  await page.goto('/');
+  await page.goto('/designer');
   await page.locator('#api-key').fill(apiKey);
   await page.getByRole('button', { name: /Connect/ }).click();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');

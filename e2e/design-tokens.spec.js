@@ -27,7 +27,7 @@ test('served console CSS keeps color literals in the documented token block', as
 });
 
 test('console text meets measured contrast and minimum type sizes', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/designer');
   await page.locator('#api-key').fill(apiKey);
   await page.getByRole('button', { name: /Connect/ }).click();
   await expect(page.locator('#connection-controls')).toContainText('Connected');
@@ -46,14 +46,6 @@ test('console text meets measured contrast and minimum type sizes', async ({ pag
   await expect(page.locator('#preview-legend')).toBeVisible();
   await page.getByRole('button', { name: 'Edit profile' }).click();
 
-  await page.locator('#job-file').setInputFiles({
-    name: 'contrast-check.gcode',
-    mimeType: 'text/plain',
-    buffer: Buffer.from('G1 X1 F100\n'),
-  });
-  await page.locator('#job-name').fill('contrast-check.gcode');
-  await page.getByRole('button', { name: /Add to library/ }).click();
-  await expect(page.locator('.job-info > span').first()).toBeVisible();
   await page.evaluate(() => {
     const add = (parent, tag, className, text) => {
       const node = document.createElement(tag);
@@ -64,6 +56,18 @@ test('console text meets measured contrast and minimum type sizes', async ({ pag
     // Use stable sample nodes rather than live status regions that the 2 s
     // library poll can replace between injection and measurement.
     const designer = document.querySelector('#designer-panel');
+    document.querySelector('.intro').style.display = 'flex';
+    document.querySelector('.workspace').style.display = 'grid';
+    const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow';
+    const eyebrowPart = document.createElement('span'); eyebrowPart.textContent = ' / '; eyebrow.append(eyebrowPart); designer.append(eyebrow);
+    const uploadLabel = document.createElement('label'); uploadLabel.className = 'contrast-upload-label'; uploadLabel.textContent = 'G-code file'; designer.append(uploadLabel);
+    const safetyCheck = document.createElement('label'); safetyCheck.className = 'safety-check'; safetyCheck.textContent = 'I will supervise the cut.'; designer.append(safetyCheck);
+    const dropzone = document.createElement('div'); dropzone.className = 'dropzone';
+    const caption = document.createElement('span'); caption.className = 'dropzone-caption'; caption.textContent = 'Plain text · up to 4 MiB'; dropzone.append(caption); designer.append(dropzone);
+    const jobInfo = document.createElement('div'); jobInfo.className = 'job-info';
+    const jobMeta = document.createElement('span'); jobMeta.textContent = 'Queued · updated today'; jobInfo.append(jobMeta); designer.append(jobInfo);
+    const driverStatus = document.createElement('span'); driverStatus.className = 'driver-status'; driverStatus.textContent = 'Connected simulator'; designer.append(driverStatus);
+    const freshness = document.createElement('p'); freshness.className = 'library-freshness stale'; freshness.textContent = 'Stale library data · Last updated today.'; designer.append(freshness);
     add(designer, 'p', 'notice notice-info', 'Example info notice');
     add(designer, 'p', 'notice notice-success', 'Example success notice');
     add(designer, 'p', 'notice notice-warning', 'Example warning notice');
@@ -91,7 +95,7 @@ test('console text meets measured contrast and minimum type sizes', async ({ pag
       ['functional', '#preview-legend'],
       ['functional', '.button-small'],
       ['functional', '.button-small.button-danger'],
-      ['functional', '#upload-form > label:not(.dropzone)'],
+      ['functional', '.contrast-upload-label'],
       ['functional', '.safety-check'],
       ['functional', '.designer-section > label'],
       ['functional', '#profile-name'],

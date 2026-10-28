@@ -15,11 +15,12 @@
 <body>
   <header class="topbar">
     <a class="brand" href="/" aria-label="EmberDeck home"><span class="brand-mark" aria-hidden="true">E</span><span>EMBER<span class="brand-light">DECK</span></span></a>
+    <nav class="app-nav" aria-label="Main pages"><a href="/" data-page-link="library">Job library</a><a href="/designer" data-page-link="designer">Designer</a></nav>
     <div class="top-meta"><span id="status-dot" class="status-dot" data-state="disconnected" role="img" aria-label="Disconnected"></span><span>LOCAL JOB LIBRARY</span><span class="version">OPERATOR CONSOLE</span></div>
   </header>
   <main>
     <section class="intro">
-      <div><p class="eyebrow">LASER WORKSPACE <span> / </span> JOBS</p><h1>Job library</h1><p class="lede">Prepare and inspect programs before they reach the machine.</p></div>
+      <div><p class="eyebrow">LASER WORKSPACE <span> / </span> JOBS</p><h1 id="page-title">Job library</h1><p class="lede">Prepare and inspect programs before they reach the machine.</p></div>
       <div class="library-count"><span class="count-number" id="job-count">—</span><span>JOBS STORED</span></div>
     </section>
     <section class="auth panel" aria-labelledby="access-title">
@@ -33,7 +34,7 @@
       <button class="button button-small notice-dismiss" type="button" aria-label="Dismiss notification">Dismiss</button>
     </div>
     <section id="designer-panel" class="panel designer-panel" aria-labelledby="designer-title">
-      <div class="section-title"><div><p class="eyebrow">DESIGN SOURCE</p><h2 id="designer-title">Profiles and vector projects</h2></div><span class="step-number">MM · GRBL</span></div>
+      <div class="section-title"><div><p class="eyebrow">DESIGN SOURCE</p><h1 id="designer-title">Designer</h1><p class="lede">Create and edit vector designs for a declared machine workspace.</p></div><span class="step-number">MM · GRBL</span></div>
       <p class="designer-intro">Declare the prepared work area, edit a rectangle or multi-path vector design, and review its generated job before dispatch. Coordinates use the lower-left work origin; controller settings are read for verification but never changed.</p>
       <div id="designer-status" class="designer-status" role="status">Connect to load saved profiles and projects.</div>
       <div class="designer-columns">
@@ -100,7 +101,7 @@
                 <label class="button button-small svg-import-button" for="vector-svg-file">Import SVG<input id="vector-svg-file" type="file" accept=".svg,image/svg+xml" disabled></label>
               </div>
               <p class="hint">Imports static paths and basic shapes. SVG C/c and Q/q curves become lines within 0.05 mm chord deviation; circles and ellipses become 32-point paths. M/L/H/V/Z and C/c/Q/q paths and element transforms are supported. Curves exceeding the 4,000-point or subdivision limits, nested groups, styling, text, and machine settings are not imported.</p>
-              <h4 class="vector-subhead">Shapes</h4><p class="hint">Use the checkboxes to select shapes for alignment. Select a shape name to edit its geometry and transform.</p><ul id="vector-object-list" class="vector-list" aria-label="Project shapes"></ul>
+              <h4 class="vector-subhead">Shapes</h4><p class="hint">Click a path to select it, drag it to move it, or drag its corner handle to scale it. Use the shape checkboxes for alignment or select a shape name to edit exact geometry and transforms.</p><ul id="vector-object-list" class="vector-list" aria-label="Project shapes"></ul>
               <div id="vector-align-controls" class="vector-align-controls" role="group" aria-label="Align selected shapes">
                 <span class="vector-subhead">Align selected shapes</span>
                 <div class="vector-toolbar">

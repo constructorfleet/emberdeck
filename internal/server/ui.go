@@ -16,7 +16,7 @@ func (s *Server) serveUI(w http.ResponseWriter, r *http.Request) bool {
 	}
 	var name, contentType string
 	switch r.URL.Path {
-	case "/":
+	case "/", "/designer":
 		name, contentType = "assets/index.html", "text/html; charset=utf-8"
 	case "/app.js":
 		name, contentType = "assets/app.js", "text/javascript; charset=utf-8"

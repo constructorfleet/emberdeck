@@ -101,6 +101,7 @@ async function main() {
     await page.getByRole('button', { name: /Connect/ }).click();
     await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
     await expect(page.locator('#driver-select')).toHaveValue('simulator');
+    await page.goto(`${baseURL}/designer`);
 
     await page.getByRole('button', { name: 'New profile' }).click();
     await page.getByLabel('Profile name').fill('Documented GRBL');
@@ -112,6 +113,7 @@ async function main() {
     await page.getByLabel('Maximum commanded power (%)').fill('100');
     await page.getByRole('button', { name: 'Save profile' }).click();
     await expect(page.locator('#notice .notice-message')).toContainText('Profile saved');
+    await capture(page, 'designer-dedicated-page.png');
     await page.getByRole('button', { name: 'Edit profile' }).click();
     await page.locator('#profile-name').evaluate((input) => input.blur());
     await captureElement(page, '#designer-panel', 'designer-profile.png');
@@ -149,10 +151,13 @@ async function main() {
     await page.getByRole('button', { name: 'Save project' }).click();
     await expect(page.locator('#stale-profile-warning')).toBeHidden();
     await page.getByRole('button', { name: 'Generate queued job' }).click();
+    await page.getByRole('link', { name: 'Job library' }).click();
     const designerRow = page.locator('#job-list li').filter({ hasText: 'Panel outline.gcode' });
     await expect(designerRow).toContainText(/queued/i);
+    await designerRow.getByRole('button', { name: /^View / }).click();
     await expect(page.locator('#program-provenance')).toContainText('Panel outline');
     await captureElement(page, '#program-panel', 'designer-generated-review.png');
+    await page.getByRole('link', { name: 'Designer' }).click();
     await page.setViewportSize({ width: 390, height: 844 });
     await captureElement(page, '#designer-panel', 'designer-mobile.png');
     await page.setViewportSize({ width: 1440, height: 1000 });
@@ -188,15 +193,17 @@ async function main() {
     await expect(page.locator('#notice .notice-message')).toContainText('Vector project saved');
     await captureElement(page, '#vector-form', 'designer-vector-project.png');
     await page.locator('#generate-vector-project').click();
+    await page.getByRole('link', { name: 'Job library' }).click();
     const vectorRow = page.locator('#job-list li').filter({ hasText: 'Three shapes, two operations.gcode' });
     await expect(vectorRow).toContainText(/queued/i);
+    await vectorRow.getByRole('button', { name: /^View / }).click();
     await expect(page.locator('#program-provenance')).toContainText('2. Cut');
     await captureElement(page, '#program-panel', 'designer-vector-review.png');
+    await page.getByRole('link', { name: 'Designer' }).click();
+    await page.getByRole('button', { name: 'Reopen vector Three shapes, two operations' }).click();
     await page.setViewportSize({ width: 390, height: 844 });
     await captureElement(page, '#vector-form', 'designer-vector-mobile.png');
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.locator('#close-program').click();
-    await page.locator('#close-vector-project').click();
     await page.getByRole('button', { name: 'New vector project' }).click();
     await page.locator('#vector-name').fill('Monoline text engraving');
     await page.getByRole('button', { name: 'Add text' }).click();
@@ -207,7 +214,6 @@ async function main() {
     await page.setViewportSize({ width: 390, height: 844 });
     await captureElement(page, '#vector-form', 'designer-monoline-text-mobile.png');
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.locator('#close-vector-project').click();
     await page.getByRole('button', { name: 'New vector project' }).click();
     await page.locator('#vector-name').fill('Three shapes, two operations');
     await page.getByRole('button', { name: 'Add rectangle' }).click();
@@ -223,7 +229,6 @@ async function main() {
     await page.setViewportSize({ width: 390, height: 844 });
     await captureElement(page, '#vector-form', 'designer-vector-alignment-mobile.png');
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.locator('#close-vector-project').click();
     await page.getByRole('button', { name: 'New vector project' }).click();
     await page.locator('#vector-name').fill('Imported SVG paths');
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="90mm" height="55mm" viewBox="0 0 90 55"><path d="M10 45 L35 45 L35 25 L10 25 Z"/><path d="M50 45 C58 25 72 25 80 45"/></svg>`;
@@ -235,9 +240,6 @@ async function main() {
     await captureElement(page, '#vector-form', 'designer-svg-import-mobile.png');
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.locator('#close-vector-project').click();
-    page.once('dialog', (dialog) => dialog.accept());
-    await vectorRow.getByRole('button', { name: 'Delete' }).click();
-    await expect(vectorRow).toHaveCount(0);
     const vectorProject = page.locator('#vector-project-list li').filter({ hasText: 'Three shapes, two operations' });
     page.once('dialog', (dialog) => dialog.accept());
     await vectorProject.getByRole('button', { name: 'Delete' }).click();
@@ -247,6 +249,10 @@ async function main() {
     page.once('dialog', (dialog) => dialog.accept());
     await projectRow.getByRole('button', { name: 'Delete project Panel outline' }).click();
     await expect(projectRow).toHaveCount(0);
+    await page.getByRole('link', { name: 'Job library' }).click();
+    page.once('dialog', (dialog) => dialog.accept());
+    await vectorRow.getByRole('button', { name: /Delete Three shapes, two operations\.gcode/ }).click();
+    await expect(vectorRow).toHaveCount(0);
     page.once('dialog', (dialog) => dialog.accept());
     await designerRow.getByRole('button', { name: /Delete Panel outline\.gcode/ }).click();
     await expect(designerRow).toHaveCount(0);

@@ -2,6 +2,11 @@
 
 (() => {
   const $ = (selector) => document.querySelector(selector);
+  const designerPage = location.pathname === "/designer";
+  document.body.classList.toggle("designer-page", designerPage);
+  document.title = designerPage ? "EmberDeck — Designer" : "EmberDeck — Job library";
+  $("#page-title").textContent = designerPage ? "Designer" : "Job library";
+  document.querySelector(`[data-page-link="${designerPage ? "designer" : "library"}"]`)?.setAttribute("aria-current", "page");
   const keyInput = $("#api-key");
   const authForm = $("#auth-form");
   const connectButton = $("#connect-button");
@@ -53,6 +58,8 @@
   let vectorOperations = [];
   let selectedVectorObject = "";
   let selectedVectorObjects = new Set();
+  let vectorPreviewMap = null;
+  let vectorPointerDrag = null;
   let vectorIDSequence = 0;
   const toolpathCache = new Map();
   const toolpathViewports = new Map();
@@ -862,8 +869,10 @@
     const content = $("#vector-preview-content");
     content.replaceChildren();
     const W = Number(profile?.width_mm), H = Number(profile?.height_mm);
+    vectorPreviewMap = null;
     if (!(W > 0 && H > 0)) return;
     const scale = Math.min(550 / W, 290 / H), left = 35, bottom = 325;
+    vectorPreviewMap = { scale, left, bottom };
     content.append(svgElement("rect", { class: "workspace-shape", x: left, y: bottom - H * scale, width: W * scale, height: H * scale }));
     content.append(svgElement("text", { x: left + 4, y: bottom - H * scale + 14 }, `Declared workspace · ${W} × ${H} mm`));
     vectorObjects.forEach((object) => {
@@ -873,16 +882,74 @@
         path.points.forEach((point, index) => commands.push(`${index ? "L" : "M"} ${left + point.x_mm * scale} ${bottom - point.y_mm * scale}`));
         if (path.closed) commands.push("Z");
       });
-      const path = svgElement("path", { class: `vector-path ${operation ? (operation.type === "vector-cut" ? "cut-path" : "engrave-path") : "unassigned-path"}`, d: commands.join(" ") });
+      const path = svgElement("path", { class: `vector-path ${operation ? (operation.type === "vector-cut" ? "cut-path" : "engrave-path") : "unassigned-path"}`, d: commands.join(" "), "data-vector-object-id": object.id, tabindex: "0", role: "button", "aria-label": `Select ${objectKind(object)} shape` });
       if (selectedVectorObjects.has(object.id)) path.classList.add("selected-vector-path");
       if (!operation) {
         path.style.stroke = "var(--text-muted)";
         path.style.strokeDasharray = "2 3";
       }
       content.append(path);
+      if (selectedVectorObjects.has(object.id) && selectedVectorObjects.size === 1) {
+        const bounds = transformedBounds(object);
+        content.append(svgElement("circle", {
+          class: "vector-resize-handle", cx: left + bounds.right * scale, cy: bottom - bounds.top * scale,
+          r: 7, "data-vector-object-id": object.id, "aria-label": "Scale selected shape", role: "button", tabindex: "0",
+        }));
+      }
     });
     content.append(svgElement("text", { x: left, y: 349 }, "Engrave · green   Cut · red dashed   Unassigned · gray dotted"));
   }
+
+  function vectorPointerPoint(event) {
+    const svg = $("#vector-preview");
+    const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(svg.getScreenCTM().inverse());
+    return { x_mm: (point.x - vectorPreviewMap.left) / vectorPreviewMap.scale, y_mm: (vectorPreviewMap.bottom - point.y) / vectorPreviewMap.scale };
+  }
+
+  $("#vector-preview").addEventListener("pointerdown", (event) => {
+    if (!vectorPreviewMap) return;
+    const target = event.target.closest(".vector-path, .vector-resize-handle");
+    if (!target) return;
+    const id = target.dataset.vectorObjectId;
+    const object = vectorObjects.find((candidate) => candidate.id === id);
+    if (!object) return;
+    selectedVectorObject = id;
+    selectedVectorObjects = new Set([id]);
+    const start = vectorPointerPoint(event);
+    vectorPointerDrag = {
+      id, resize: target.classList.contains("vector-resize-handle"), start,
+      transform: normalizedTransform(object.transform), bounds: transformedBounds(object), moved: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    renderVectorEditor();
+    event.preventDefault();
+  });
+  $("#vector-preview").addEventListener("pointermove", (event) => {
+    const drag = vectorPointerDrag;
+    if (!drag || !vectorPreviewMap) return;
+    const object = vectorObjects.find((candidate) => candidate.id === drag.id);
+    if (!object) return;
+    const current = vectorPointerPoint(event);
+    const dx = current.x_mm - drag.start.x_mm, dy = current.y_mm - drag.start.y_mm;
+    if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return;
+    const round = (value) => Math.round(value * 1000) / 1000;
+    const transform = { ...drag.transform };
+    if (drag.resize) {
+      const centerX = (drag.bounds.left + drag.bounds.right) / 2, centerY = (drag.bounds.bottom + drag.bounds.top) / 2;
+      transform.scale_x = round(Math.max(0.01, Math.min(100, drag.transform.scale_x * (current.x_mm - centerX) / Math.max(drag.start.x_mm - centerX, 0.001))));
+      transform.scale_y = round(Math.max(0.01, Math.min(100, drag.transform.scale_y * (current.y_mm - centerY) / Math.max(drag.start.y_mm - centerY, 0.001))));
+    } else {
+      transform.translate_x_mm = round(drag.transform.translate_x_mm + dx);
+      transform.translate_y_mm = round(drag.transform.translate_y_mm + dy);
+    }
+    object.transform = transform;
+    drag.moved = true;
+    renderVectorEditor();
+    event.preventDefault();
+  });
+  const finishVectorPointer = () => { vectorPointerDrag = null; };
+  $("#vector-preview").addEventListener("pointerup", finishVectorPointer);
+  $("#vector-preview").addEventListener("pointercancel", finishVectorPointer);
 
   function vectorValidation() {
     const profile = selectedProfile();
