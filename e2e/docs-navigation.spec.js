@@ -79,7 +79,10 @@ test('rendered documentation has grouped, current, keyboard accessible navigatio
         expect(fs.existsSync(decodeURIComponent(url.pathname)), `${pageName} links to ${url.pathname}`).toBe(true);
       }
     }
-    await expect.poll(() => page.locator('img').evaluateAll((nodes) => nodes.every((image) => image.complete && image.naturalWidth > 0))).toBe(true);
+    for (const image of await page.locator('img').all()) {
+      await image.scrollIntoViewIfNeeded();
+      await expect.poll(() => image.evaluate((node) => node.complete && node.naturalWidth > 0)).toBe(true);
+    }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${pageName} fits desktop`).toBe(true);
     for (const width of [1920, 1600, 1440, 1280, 1024, 900, 800, 768, 721, 720, 681, 390, 375, 320]) {
       await page.setViewportSize({ width, height: 900 });

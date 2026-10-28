@@ -43,7 +43,9 @@ Errors stay until dismissed or replaced, and successes remain for at least five
 seconds. Profile/project counts are separate from action feedback, so refreshes
 do not replace it.
 
-![Connected operator console with a queued program, driver selector, and safety check](assets/screenshots/operator-console-library.png)
+Select a screenshot to open the full-size image.
+
+![Stored program library filters for narrowing jobs by name and state](assets/screenshots/operator-console-library.png)
 
 ## Open the designer
 
@@ -57,7 +59,7 @@ On phones, page links move to a second row below the brand and driver selection
 stacks below its label. The library uses a two-column layout on wide screens and
 expands to 1600 px at viewport widths of 1600 px and above.
 
-![The dedicated designer page with profile and project editing separated from the job library](assets/screenshots/designer-dedicated-page.png)
+![The designer page with profile and project editing separated from the job library](assets/screenshots/designer-dedicated-page.png)
 
 ## Find the job library controls
 
@@ -65,6 +67,10 @@ The job library contains G-code intake and stored programs. The overview below
 shows these controls independently from design sources.
 
 ![Console overview with a saved machine profile, saved project, G-code intake, and job library](assets/screenshots/designer-console-overview.png)
+
+![Profile controls shown in a close crop from the designer overview](assets/screenshots/designer-console-overview-profile-detail.png)
+
+![Saved project controls shown in a close crop from the designer overview](assets/screenshots/designer-console-overview-project-detail.png)
 
 | Area | Controls | What they do |
 | --- | --- | --- |
@@ -229,7 +235,7 @@ confirmation and **Start** control when ready.
 
 ![Generated rectangle program with immutable source provenance](assets/screenshots/designer-generated-review.png)
 
-![Rectangle designer controls and preview on a narrow screen](assets/screenshots/designer-mobile.png)
+![Saved rectangle project in the designer on a narrow screen](assets/screenshots/designer-mobile.png)
 
 ## Create a multi-path vector project
 
@@ -299,9 +305,13 @@ settings are imported. Inspect the preview and workspace bounds,
 select each shape, and assign its engraving or cutting layer before generating.
 Save and reopen the project through the same project controls.
 
-![Nested SVG group geometry and monoline SVG text imported as editable, unassigned vector objects](assets/screenshots/designer-svg-import.png)
+![Paths accepted from nested SVG groups as editable, unassigned objects](assets/screenshots/designer-svg-import.png)
 
-![Nested SVG group geometry and monoline SVG text imported in the mobile vector editor](assets/screenshots/designer-svg-import-mobile.png)
+![Preview of composed nested SVG group transforms and imported monoline text](assets/screenshots/designer-svg-import-preview.png)
+
+![Paths accepted from nested SVG groups as editable, unassigned objects on a narrow screen](assets/screenshots/designer-svg-import-mobile.png)
+
+![Preview of composed nested SVG group transforms and imported monoline text on a narrow screen](assets/screenshots/designer-svg-import-preview-mobile.png)
 
 Generation creates an immutable queued G-code program with the project, profile,
 and operation layer values in its provenance. Both cutting and engraving use
