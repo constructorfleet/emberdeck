@@ -1787,9 +1787,16 @@ func TestStreamFailsClosedWhenSilentControllerWithholdsAck(t *testing.T) {
 	if bound := timeouts.Response + 400*time.Millisecond; failedAt.Sub(lineSentAt) > bound {
 		t.Fatalf("silent controller failed after %v; documented bound is the %v response timeout", failedAt.Sub(lineSentAt), timeouts.Response)
 	}
+	deadline := time.Now().Add(time.Second)
 	wireMu.Lock()
 	got := wire.String()
 	wireMu.Unlock()
+	for !strings.HasSuffix(got, "!\x18") && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+		wireMu.Lock()
+		got = wire.String()
+		wireMu.Unlock()
+	}
 	if !strings.HasSuffix(got, "!\x18") {
 		t.Fatalf("silent-controller wire = %q; want feed hold and soft reset", got)
 	}
