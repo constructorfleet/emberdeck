@@ -124,6 +124,13 @@ before the transport failed. The wrapper permits at most one start per session.
 The server and worker must still enforce lease ownership and must not create a
 replacement session to replay work after disconnect or reboot.
 
+The current worker adapter path handles job assignments, pause/resume, and
+cancel, with position feedback where declared. It does not execute manual
+preparation actions. The separate #52 capability names `manual_home`,
+`manual_unlock`, `manual_jog`, `manual_set_zero`, and `manual_frame` require a
+distinct manual lease/session and `laser_off=true`; that execution path is not
+implemented here.
+
 `Status` separates accepted lines from optional executed lines and may provide
 controller state and position with `confirmed`, `estimated`, `unknown`, or
 `unavailable` confidence. Acceptance is not execution evidence. Accepted and
