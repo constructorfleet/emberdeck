@@ -168,10 +168,16 @@ uploaded jobs, an optional `program_review` summary. The review's
 power mode, which keeps output on while motion stops. No operator endpoint
 returns a lease. `GET /jobs/{id}/review` returns the selected profile's
 revision, program bounds, profile envelope, bounds status (`in_bounds`,
-`out_of_bounds`, or `unknown`), warnings, and derived path. A partial path can
-show known bounds while its status remains `unknown`. A changed/deleted profile
-also makes the status unknown. `GET /jobs/{id}/toolpath` returns a derived 2D
-path for visualization; it does not change or validate the uploaded source. `DELETE /jobs/{id}` removes a queued or terminal job;
+`out_of_bounds`, or `unknown`), warnings, and derived path. `profile_stale` is
+true when the declared profile is missing or its revision changed since the job
+was uploaded or generated. In that case bounds status is `unknown`;
+`profile_bounds`, when present, is the saved profile snapshot for context and
+must not be shown as the current work area. The profile envelope is
+operator-declared information, not sensed or verified machine travel. A partial
+path can show known bounds while its status remains `unknown`. `GET
+/jobs/{id}/toolpath` returns a derived 2D path for visualization; it does not
+change or validate the uploaded source. `DELETE /jobs/{id}` removes a queued or
+terminal job;
 a running or canceling job must first stop. These operations persist to the
 private data directory. Run one server per directory; file locking enforces it.
 

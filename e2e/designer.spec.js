@@ -8,8 +8,11 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
   const profileName = `E2E declared GRBL ${attempt}`;
   const projectName = `E2E panel outline ${attempt}`;
   const startRequests = [];
+  const generatedReviewRequests = new Map();
   page.on('request', (request) => {
     if (request.method() === 'POST' && /\/api\/v1\/jobs\/[^/]+\/start$/.test(new URL(request.url()).pathname)) startRequests.push(request);
+    const reviewPath = new URL(request.url()).pathname.match(/\/api\/v1\/jobs\/([^/]+)\/review$/);
+    if (request.method() === 'GET' && reviewPath) generatedReviewRequests.set(reviewPath[1], (generatedReviewRequests.get(reviewPath[1]) || 0) + 1);
   });
   await page.goto('/designer');
   await page.locator('#api-key').fill(apiKey);
@@ -93,6 +96,18 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
   await page.getByRole('link', { name: 'Job library' }).click();
   const row = page.locator('#job-list li').filter({ hasText: `${projectName}.gcode` });
   await expect(row).toContainText(/queued/i);
+  await expect(row.locator('.toolpath-live')).toBeVisible();
+  await expect(row.locator('.toolpath-profile-bounds')).toHaveCount(1);
+  await expect(row.locator('.toolpath-legend')).toContainText(/declared profile work area/i);
+  await expect(row.getByRole('img', { name: /declared profile work area shown, not verified machine travel/i })).toBeVisible();
+  await expect(row.getByRole('button', { name: 'Fit toolpath to view' })).toBeVisible();
+  const jobID = await row.getByRole('button', { name: /^View / }).getAttribute('data-job-id');
+  const reviewCount = () => generatedReviewRequests.get(jobID) || 0;
+  await expect.poll(reviewCount).toBeGreaterThan(0);
+  await page.waitForTimeout(2200);
+  const stableReviewCount = reviewCount();
+  await page.waitForTimeout(2200);
+  expect(reviewCount()).toBe(stableReviewCount);
   await row.getByRole('button', { name: /^View / }).click();
   await expect(page.locator('#program-panel')).toBeVisible();
   await expect(page.locator('#program-code')).toContainText('G0 X11 Y20');
@@ -106,7 +121,34 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
   await row.getByRole('button', { name: /^Start / }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Start on simulator' }).click();
   await expect.poll(() => startRequests.length).toBe(1);
+  await expect(row.locator('.toolpath-live')).toHaveAttribute('aria-label', /Live toolpath for/);
   await expect(row).toContainText(/completed/i, { timeout: 30000 });
+
+  const uploadedStaleName = await page.evaluate(async ({ jobID, apiKey, projectName }) => {
+    const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
+    const job = await (await fetch(`/api/v1/jobs/${jobID}`, { headers })).json();
+    const profileID = job.provenance.profile.id;
+    const profile = await (await fetch(`/api/v1/profiles/${profileID}`, { headers })).json();
+    const uploadedName = `${projectName} uploaded.gcode`;
+    const uploadResponse = await fetch('/api/v1/jobs', { method: 'POST', headers, body: JSON.stringify({ name: uploadedName, profile_id: profileID, gcode: 'G21 G90\nG0 X10 Y10\nG1 X40 Y10 F600\nM5\n' }) });
+    if (!uploadResponse.ok) throw new Error(`Could not create stale uploaded test job: ${uploadResponse.status}`);
+    const update = {
+      schema_version: profile.schema_version, name: profile.name, controller: profile.controller,
+      units: profile.units, origin: profile.origin, width_mm: 280, height_mm: profile.height_mm,
+      min_s: profile.min_s, max_s: profile.max_s, min_feed_mm_min: profile.min_feed_mm_min,
+      max_feed_mm_min: profile.max_feed_mm_min, max_power_percent: profile.max_power_percent,
+      laser_mode_enabled: profile.laser_mode_enabled, revision: profile.revision,
+    };
+    const response = await fetch(`/api/v1/profiles/${profileID}`, { method: 'PUT', headers, body: JSON.stringify(update) });
+    if (!response.ok) throw new Error(`Could not revise test profile: ${response.status} ${(await response.text())}`);
+    return uploadedName;
+  }, { jobID, apiKey, projectName });
+  await expect.poll(reviewCount).toBeGreaterThan(stableReviewCount);
+  await expect(row.locator('.toolpath-profile-bounds')).toHaveCount(0);
+  await expect(row.locator('.toolpath-legend')).toContainText(/declared profile work area is stale/i);
+  const staleUploadedRow = page.locator('#job-list li').filter({ hasText: uploadedStaleName });
+  await expect(staleUploadedRow.locator('.toolpath-profile-bounds')).toHaveCount(0);
+  await expect(staleUploadedRow.locator('.toolpath-legend')).toContainText(/declared profile work area is stale/i);
 
   const generatedCode = await page.locator('#program-code').textContent();
   await page.getByRole('link', { name: 'Designer' }).click();

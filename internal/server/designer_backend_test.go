@@ -600,6 +600,10 @@ func TestGenerateCreatesValidatedQueuedJobWithImmutableSourceSnapshots(t *testin
 	if w := request(t, s, "DELETE", "/api/v1/profiles/"+profileID, `{"revision":1}`, "test-key"); w.Code != http.StatusNoContent {
 		t.Fatalf("delete source profile: %d %s", w.Code, w.Body.String())
 	}
+	jobReview := request(t, s, "GET", "/api/v1/jobs/"+job.ID+"/review", "", "test-key")
+	if jobReview.Code != http.StatusOK || !strings.Contains(jobReview.Body.String(), `"profile_stale":true`) || !strings.Contains(jobReview.Body.String(), `"bounds_status":"unknown"`) {
+		t.Fatalf("generated job review did not report its stale profile: %d %s", jobReview.Code, jobReview.Body.String())
+	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
