@@ -1,13 +1,17 @@
 package worker
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -58,7 +62,7 @@ func TestRunRetriesTerminalAndNeverResendsCompletedLease(t *testing.T) {
 		mu.Unlock()
 		return driver.NewSimulator(), nil
 	})
-	if err != nil && err != context.DeadlineExceeded {
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal(err)
 	}
 	mu.Lock()
@@ -112,7 +116,7 @@ func TestRunStopsStreamWhenServerRequestsCancel(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 1800*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	err := Run(ctx, server.URL, "key", "laser", func(context.Context) (io.ReadWriteCloser, error) {
 		client, peer := net.Pipe()
@@ -135,7 +139,19 @@ func TestRunStopsStreamWhenServerRequestsCancel(t *testing.T) {
 			if _, e = peer.Read(reader); e != nil {
 				return
 			} // accept second command but hold its ack
-			_, _ = peer.Read(reader) // cancellation realtime bytes
+			for {
+				n, e = peer.Read(reader)
+				if e != nil {
+					return
+				}
+				if string(reader[:n]) == "?" {
+					io.WriteString(peer, "<Run|MPos:0,0,0>\n")
+					continue
+				}
+				if string(reader[:n]) == "!\x18" {
+					return
+				}
+			}
 		}()
 		return client, nil
 	})
@@ -183,5 +199,295 @@ func TestRunPreflightsProgramBeforeOpeningController(t *testing.T) {
 	}
 	if called || !failed {
 		t.Fatalf("connector called=%v failed report=%v", called, failed)
+	}
+}
+
+func TestRunInitialPauseSendsNoProgramUntilResumeAndReportsController(t *testing.T) {
+	var mu sync.Mutex
+	requests := 0
+	pausedReports := 0
+	paused, completed := false, false
+	sawPausing := false
+	var terminal map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		caps, _ := body["capabilities"].([]any)
+		if len(caps) != 1 || caps[0] != "pause_resume" {
+			t.Errorf("capabilities = %#v", body["capabilities"])
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		requests++
+		if body["state"] == "completed" || body["state"] == "failed" || body["state"] == "canceled" {
+			terminal = body
+			completed = body["state"] == "completed"
+			if body["state"] == "completed" && body["controller_state"] != "Idle" {
+				t.Errorf("completed controller state = %#v", body["controller_state"])
+			}
+			io.WriteString(w, `{"command":"idle"}`)
+			return
+		}
+		if body["state"] == "paused" {
+			if body["controller_state"] != "Hold:0" {
+				t.Errorf("paused controller state = %#v", body["controller_state"])
+			}
+			paused = true
+			pausedReports++
+			if pausedReports == 1 {
+				io.WriteString(w, `{"command":"pause","lease":"lease-p","job":{"id":"job-p"}}`)
+			} else {
+				io.WriteString(w, `{"command":"resume","lease":"lease-p","job":{"id":"job-p"}}`)
+			}
+			return
+		}
+		if body["state"] == "pausing" {
+			if body["controller_state"] != "Hold:1" {
+				t.Errorf("pausing controller state = %#v", body["controller_state"])
+			}
+			sawPausing = true
+			io.WriteString(w, `{"command":"pause","lease":"lease-p","job":{"id":"job-p"}}`)
+			return
+		}
+		if body["state"] == "resuming" {
+			io.WriteString(w, `{"command":"resume","lease":"lease-p","job":{"id":"job-p"}}`)
+			return
+		}
+		if requests == 1 {
+			io.WriteString(w, `{"command":"pause","lease":"lease-p","job":{"id":"job-p","gcode":"G1 X1"}}`)
+			return
+		}
+		io.WriteString(w, `{"command":"run","lease":"lease-p","job":{"id":"job-p"}}`)
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 4500*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	err := Run(ctx, server.URL, "key", "laser", func(context.Context) (io.ReadWriteCloser, error) {
+		client, peer := net.Pipe()
+		go func() {
+			defer peer.Close()
+			r := bufio.NewReader(peer)
+			b := make([]byte, 1)
+			_, e := peer.Read(b)
+			if e != nil || string(b) != "?" {
+				done <- fmt.Errorf("initial query %q: %v", b, e)
+				return
+			}
+			io.WriteString(peer, "<Idle|MPos:0,0,0>\r\n")
+			if _, e = peer.Read(b); e != nil || string(b) != "!" {
+				done <- fmt.Errorf("feed hold %q: %v", b, e)
+				return
+			}
+			if _, e = peer.Read(b); e != nil || string(b) != "?" {
+				done <- fmt.Errorf("hold query %q: %v", b, e)
+				return
+			}
+			io.WriteString(peer, "<Hold:1|MPos:0,0,0>\r\n")
+			pauseStarted := time.Now()
+			for {
+				if _, e = peer.Read(b); e != nil {
+					done <- fmt.Errorf("resume: %v", e)
+					return
+				}
+				if string(b) == "~" {
+					break
+				}
+				if string(b) == "?" {
+					if time.Since(pauseStarted) < 1300*time.Millisecond {
+						io.WriteString(peer, "<Hold:1|MPos:0,0,0>\r\n")
+					} else {
+						io.WriteString(peer, "<Hold:0|MPos:0,0,0>\r\n")
+					}
+					continue
+				}
+				done <- fmt.Errorf("unexpected byte while paused: %q", b)
+				return
+			}
+			var first byte
+			for {
+				first, e = r.ReadByte()
+				if e != nil {
+					done <- fmt.Errorf("resume status: %v", e)
+					return
+				}
+				if first != '?' {
+					break
+				}
+				io.WriteString(peer, "<Run|MPos:0,0,0>\r\n")
+			}
+			line, e := r.ReadString('\n')
+			line = string(first) + line
+			if e != nil || line != "G1 X1\n" {
+				done <- fmt.Errorf("source line %q: %v", line, e)
+				return
+			}
+			io.WriteString(peer, "ok\r\n")
+			line, e = r.ReadString('\n')
+			if e != nil || line != "M5\n" {
+				done <- fmt.Errorf("cleanup %q: %v", line, e)
+				return
+			}
+			io.WriteString(peer, "ok\r\n")
+			for {
+				if _, e = peer.Read(b); e != nil {
+					done <- fmt.Errorf("final query: %v", e)
+					return
+				}
+				if string(b) == "?" {
+					break
+				}
+			}
+			io.WriteString(peer, "<Idle|MPos:1,0,0>\r\n")
+			_, _ = io.Copy(io.Discard, peer)
+			done <- nil
+		}()
+		return client, nil
+	})
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("controller exchange did not finish")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !sawPausing || !paused || pausedReports < 2 || !completed {
+		t.Fatalf("pausing=%v paused=%v pausedReports=%d completed=%v terminal=%#v requests=%d", sawPausing, paused, pausedReports, completed, terminal, requests)
+	}
+}
+
+func TestRunReportsExternalHoldAndWaitsForExplicitResume(t *testing.T) {
+	var mu sync.Mutex
+	issued, sawPausing, sawPaused, completed := false, false, false, false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		switch body["state"] {
+		case "pausing":
+			if body["controller_state"] != "Hold:1" {
+				t.Errorf("external hold pending state = %#v", body)
+			}
+			sawPausing = true
+			io.WriteString(w, `{"command":"pause","lease":"lease-e","job":{"id":"job-e"}}`)
+		case "paused":
+			if body["controller_state"] != "Hold:0" {
+				t.Errorf("external hold paused state = %#v", body)
+			}
+			sawPaused = true
+			io.WriteString(w, `{"command":"resume","lease":"lease-e","job":{"id":"job-e"}}`)
+		case "resuming":
+			io.WriteString(w, `{"command":"resume","lease":"lease-e","job":{"id":"job-e"}}`)
+		case "completed":
+			completed = true
+			io.WriteString(w, `{"command":"idle"}`)
+		default:
+			if !issued {
+				issued = true
+				io.WriteString(w, `{"command":"run","lease":"lease-e","job":{"id":"job-e","gcode":"G1 X1\nG1 X2"}}`)
+			} else {
+				io.WriteString(w, `{"command":"run","lease":"lease-e","job":{"id":"job-e"}}`)
+			}
+		}
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 4500*time.Millisecond)
+	defer cancel()
+	peerDone := make(chan error, 1)
+	resumeSent := atomic.Bool{}
+	err := Run(ctx, server.URL, "key", "laser", func(context.Context) (io.ReadWriteCloser, error) {
+		client, peer := net.Pipe()
+		go func() {
+			defer peer.Close()
+			reader := bufio.NewReader(peer)
+			var externalHoldAt time.Time
+			controller := "Idle"
+			lineCount := 0
+			for {
+				first, e := reader.ReadByte()
+				if e != nil {
+					if lineCount == 2 && controller == "Idle" {
+						peerDone <- nil
+					} else {
+						peerDone <- e
+					}
+					return
+				}
+				switch first {
+				case '?':
+					if !externalHoldAt.IsZero() && !resumeSent.Load() {
+						if time.Since(externalHoldAt) >= 1300*time.Millisecond {
+							controller = "Hold:0"
+						} else {
+							controller = "Hold:1"
+						}
+					}
+					if _, e = io.WriteString(peer, "<"+controller+"|MPos:0,0,0>\r\n"); e != nil {
+						peerDone <- e
+						return
+					}
+				case '!':
+					// The server may reaffirm a hold after the worker reports it.
+				case '~':
+					resumeSent.Store(true)
+					controller = "Run"
+				default:
+					line, e := reader.ReadString('\n')
+					line = string(first) + line
+					if e != nil {
+						peerDone <- e
+						return
+					}
+					switch line {
+					case "G1 X1\n":
+						lineCount++
+						externalHoldAt = time.Now()
+						controller = "Hold:1"
+						io.WriteString(peer, "<Hold:1|MPos:0,0,0>\r\nok\r\n")
+					case "G1 X2\n":
+						if !resumeSent.Load() {
+							peerDone <- fmt.Errorf("second source line before explicit resume")
+							return
+						}
+						lineCount++
+						io.WriteString(peer, "ok\r\n")
+					case "M5\n":
+						controller = "Idle"
+						io.WriteString(peer, "ok\r\n")
+					default:
+						peerDone <- fmt.Errorf("unexpected controller command %q", line)
+						return
+					}
+				}
+			}
+		}()
+		return client, nil
+	})
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-peerDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("controller exchange did not finish")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !sawPausing || !sawPaused || !completed {
+		t.Fatalf("pausing=%v paused=%v completed=%v", sawPausing, sawPaused, completed)
 	}
 }

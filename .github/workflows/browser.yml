@@ -31,6 +31,8 @@ jobs:
         run: mkdir -p bin && go build -o bin/emberdeck ./cmd/emberdeck
       - name: Run browser tests
         run: npm test
+      - name: Verify operator guide screenshot capture
+        run: npm run docs:screenshots
       - name: Upload Playwright failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4
@@ -39,5 +41,6 @@ jobs:
           path: |
             .verification/playwright-results/
             .verification/playwright-report/
+            docs/assets/screenshots/
           if-no-files-found: ignore
           retention-days: 14

@@ -65,3 +65,19 @@ GRBL simulator for completion and cancellation. Driver tests use wire peers;
 plugin tests execute real child processes; serial tests inject the OS connector.
 Browser verification covers operator flows. CI exercises three native operating
 systems and a Docker smoke test. Physical qualification remains separate.
+
+## Confirmed controller control
+
+Pause/resume is an explicit state machine across API, worker, and controller.
+The server stores operator intent (`pausing` / `resuming`) separately from the
+last observed controller state. Only the worker can confirm `paused` after
+`Hold:0` or `Idle`, or resumed execution after a fresh `Run` / `Idle`. The driver
+gates source dispatch while controlling or held, including an in-flight line's
+acknowledgment and the final M5 cleanup. One connection and lease span the entire
+hold; neither reconnection nor replay is a resume operation.
+
+Workers advertise the capability before the server accepts control requests.
+GRBL feed hold is a software motion control, not an enclosure interlock or a
+physical emergency stop. Cancellation and communication failure still take the
+bounded stop/reset path. Any active control state is interrupted on restart or
+heartbeat expiration, and never automatically resumed.

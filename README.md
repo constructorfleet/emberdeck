@@ -46,10 +46,18 @@ bin/emberdeck driver -server http://127.0.0.1:8080 -id bench -serial /dev/ttyUSB
 `driver -list-ports` lists OS-reported serial ports. Opening a port can reset some
 controllers; always inspect controller state and manufacturer instructions.
 
+See the [illustrated operator guide](docs/operator-guide.md) for each console
+control and job state.
+
+![EmberDeck operator console showing a controller-confirmed paused job](docs/assets/screenshots/operator-console-paused.png)
+
 ## Available now
 
-- Durable upload, list, program view, deletion, explicit start, cancellation,
+- Durable upload, list, program view, deletion, explicit start, confirmed
+  pause/resume, cancellation,
   line progress, controller completion, and failure reporting.
+- Live controller status distinguishes pause requests, deceleration, confirmed
+  holds, and resumed execution. The same connection and lease span a pause.
 - One active job per online driver; assignment leases and unique worker sessions.
 - Fail-closed worker behavior on server communication failures. Restarted or
   disconnected work becomes interrupted, with no automatic replay.

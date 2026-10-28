@@ -80,7 +80,7 @@
     driverSelect.value = selectedDriver;
     driverSelect.disabled = false;
     const selected = drivers.find((driver) => driver.id === selectedDriver);
-    $("#driver-status").textContent = selected ? (selected.busy ? "Driver is running a program." : `Last seen ${new Date(selected.last_seen).toLocaleTimeString()}`) : "Selected driver is disconnected.";
+    $("#driver-status").textContent = selected ? (selected.busy ? "Driver has an active job." : `Last seen ${new Date(selected.last_seen).toLocaleTimeString()}`) : "Selected driver is disconnected.";
   }
 
   async function startJob(id) {
@@ -101,6 +101,24 @@
     try {
       await api(`/api/v1/jobs/${encodeURIComponent(id)}/cancel`, { method: "POST", body: "{}" });
       message("Cancellation requested.");
+      await refresh();
+    } catch (error) { message(error.message); }
+  }
+
+  async function pauseJob(id) {
+    try {
+      await api(`/api/v1/jobs/${encodeURIComponent(id)}/pause`, { method: "POST", body: "{}" });
+      message("Pause requested. Wait for the controller to confirm it is held.");
+      await refresh();
+    } catch (error) { message(error.message); }
+  }
+
+  async function resumeJob(id) {
+    if (!confirmation.checked) { message("Confirm the safety check before resuming the program."); confirmation.focus(); return; }
+    try {
+      await api(`/api/v1/jobs/${encodeURIComponent(id)}/resume`, { method: "POST", body: JSON.stringify({ confirmed: true }) });
+      confirmation.checked = false;
+      message("Resume requested. Keep the machine supervised.");
       await refresh();
     } catch (error) { message(error.message); }
   }
@@ -127,7 +145,14 @@
       if (job.state === "running" || job.state === "canceling" || job.total > 0) details.push(`${job.acked || 0} / ${job.total || 0} lines`);
       state.textContent = details.join(" · ");
       info.append(title, state);
-      if (job.state === "running" || job.state === "canceling" || job.total > 0) {
+      if (job.controller_state) {
+        const controller = document.createElement("span");
+        controller.className = "controller-state";
+        controller.textContent = `Last controller report: ${job.controller_state}`;
+        info.append(controller);
+      }
+      const active = ["running", "pausing", "paused", "resuming", "canceling"].includes(job.state);
+      if (active || job.total > 0) {
         const progress = document.createElement("progress");
         progress.max = Math.max(job.total || 0, 1);
         progress.value = Math.min(job.acked || 0, progress.max);
@@ -148,12 +173,28 @@
         start.disabled = !checked || !selectedDriver || !drivers.some((driver) => driver.id === selectedDriver && !driver.busy);
         actions.append(start);
       }
-      if (job.state === "running" || job.state === "canceling") {
+      if (job.state === "running") {
+        const assignedDriver = drivers.find((driver) => driver.id === job.driver_id);
+        if (assignedDriver && Array.isArray(assignedDriver.capabilities) && assignedDriver.capabilities.includes("pause_resume")) {
+          actions.append(button("Pause", "button button-small", () => pauseJob(job.id)));
+        }
+      }
+      if (job.state === "pausing") {
+        const pause = button("Pausing…", "button button-small", () => {});
+        pause.disabled = true;
+        actions.append(pause);
+      }
+      if (job.state === "paused") {
+        const resume = button("Resume", "button button-small button-start", () => resumeJob(job.id));
+        resume.disabled = !checked;
+        actions.append(resume);
+      }
+      if (active) {
         const cancel = button(job.state === "canceling" ? "Canceling…" : "Cancel", "button button-small button-danger", () => cancelJob(job.id));
         cancel.disabled = job.state === "canceling";
         actions.append(cancel);
       }
-      if (job.state === "queued" || job.state === "failed" || job.state === "completed" || job.state === "canceled") {
+      if (["queued", "failed", "completed", "canceled", "interrupted"].includes(job.state)) {
         actions.append(button("Delete", "button button-small button-danger", () => deleteJob(job.id, job.name), `Delete ${job.name}`));
       }
       item.append(info, actions);

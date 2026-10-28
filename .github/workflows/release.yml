@@ -50,6 +50,14 @@ jobs:
         with:
           python-version: '3.x'
       - run: python -m pip install -r docs/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Regenerate operator screenshots from released UI
+        run: npm run docs:screenshots
       - run: sh scripts/check.sh
       - name: Build portable binaries
         env:

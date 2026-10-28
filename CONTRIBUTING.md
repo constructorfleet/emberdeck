@@ -19,3 +19,13 @@ version to GitHub Pages. Never document planned behavior as available.
 When updating linked Go dependencies, review their licenses and regenerate
 `THIRD_PARTY_NOTICES.txt` with `python3 scripts/check-notices.py --write`. CI
 compares notices with the modules actually linked into the shipped command.
+
+Before planning a feature, inspect open GitHub issues and read relevant request
+bodies/comments. Issues #3 and #4 are required product deliverables; their current
+acceptance criteria and the delivery plan govern the scope.
+
+Operator-facing controls belong in the illustrated operator guide. Regenerate
+its screenshots with `npm run docs:screenshots` after UI changes. Browser CI
+exercises the capture; release publishing regenerates screenshots from the
+released UI before rendering and deploying documentation. The docs build checks
+referenced image files and their alt text.

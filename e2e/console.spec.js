@@ -83,3 +83,63 @@ test('operator can cancel a running job', async ({ page }) => {
   await expect(row).toContainText(/canceled/i, { timeout: 10000 });
   await expect(row.getByRole('button', { name: /Delete/ })).toBeVisible();
 });
+
+test('operator pauses on controller acknowledgement, confirms resume, and completes', async ({ page }) => {
+  const controllerStates = [];
+  page.on('response', async (response) => {
+    if (response.request().method() !== 'GET' || new URL(response.url()).pathname !== '/api/v1/jobs') return;
+    try {
+      const jobs = await response.json();
+      for (const job of jobs) if (job.controller_state) controllerStates.push(job.controller_state);
+    } catch (_) { /* Non-JSON responses are reported by the page assertions. */ }
+  });
+  await connect(page);
+  const lines = 1200;
+  const row = await uploadJob(page, `operator-pause-resume-${test.info().retry}.gcode`, lines);
+  const progress = await startJob(page, row);
+  await waitForProgress(progress, lines);
+  await row.getByRole('button', { name: 'View' }).click();
+
+  await row.getByRole('button', { name: 'Pause' }).click();
+  await expect(row).toContainText(/pausing/i);
+  await expect(row.getByRole('button', { name: 'Pausing…' })).toBeDisabled();
+  await expect(row).toContainText(/paused/i, { timeout: 15000 });
+  await expect(row).toContainText('Last controller report: Hold:0');
+  await expect(row.getByRole('button', { name: 'Resume' })).toBeVisible();
+  await expect.poll(() => controllerStates.filter((state) => state === 'Hold:0').length, { timeout: 5000 }).toBeGreaterThanOrEqual(2);
+  const pausedAt = await progress.evaluate((node) => node.value);
+  await page.waitForTimeout(2500);
+  await expect(progress).toHaveJSProperty('value', pausedAt);
+  await expect(page.locator('#program-panel')).toBeVisible();
+  await expect(page.locator('#driver-select')).toHaveValue('simulator');
+
+  const resume = row.getByRole('button', { name: 'Resume' });
+  await expect(resume).toBeDisabled();
+  await page.locator('#operator-confirmation').check();
+  await expect(resume).toBeEnabled();
+  await resume.click();
+  await expect(page.locator('#operator-confirmation')).not.toBeChecked();
+  await expect(row).toContainText(/resuming/i);
+  await expect(row).toContainText(/running/i, { timeout: 15000 });
+  await expect(row).toContainText(/Run/);
+  await expect(row).toContainText(/completed/i, { timeout: 30000 });
+  await expect(progress).toHaveJSProperty('value', lines);
+});
+
+test('operator can cancel a paused job and delete the interrupted job', async ({ page }) => {
+  await connect(page);
+  const row = await uploadJob(page, `operator-cancel-paused-${test.info().retry}.gcode`, 1000);
+  const progress = await startJob(page, row);
+  await waitForProgress(progress, 1000);
+  await row.getByRole('button', { name: 'Pause' }).click();
+  await expect(row).toContainText(/paused/i, { timeout: 15000 });
+  await expect(row).toContainText('Last controller report: Hold:0');
+  await expect(row.getByRole('button', { name: 'Delete' })).toHaveCount(0);
+
+  await row.getByRole('button', { name: 'Cancel' }).click();
+  await expect(row).toContainText(/canceled/i, { timeout: 10000 });
+  await expect(row.getByRole('button', { name: 'Delete' })).toBeVisible();
+  page.once('dialog', (dialog) => dialog.accept());
+  await row.getByRole('button', { name: 'Delete' }).click();
+  await expect(row).toHaveCount(0);
+});
