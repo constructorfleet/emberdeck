@@ -156,3 +156,16 @@ needs access to the selected device (see [serial transport](serial.md)). Docker
 needs explicit `--device` or Compose `devices` plus appropriate group permissions;
 no device passthrough is configured by default. These commands expose the
 transport; they do not qualify a physical machine for use.
+
+## Upgrades and mixed versions
+
+Stop the server and all workers and inspect the machine before an upgrade or
+rollback. Paused work remains an active job and must not be treated as a safe
+restart point. A current server interrupts every active control state on restart;
+older releases do not understand the new paused/resuming records, so complete or
+cancel work before downgrading and retain a stopped-server data backup.
+
+Older workers can still execute jobs on a current server, but confirmed
+pause/resume is offered only when the worker advertises that capability. Upgrade
+the server before a new worker: an older server rejects the new worker metadata,
+and the worker fails closed rather than ignoring an incompatible control contract.
