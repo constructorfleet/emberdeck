@@ -17,7 +17,11 @@ typedef enum {
     ED_ERR_DIGEST,
     ED_ERR_GCODE,
     ED_ERR_MEMORY,
-    ED_ERR_UART
+    ED_ERR_UART,
+    ED_ERR_SESSION,
+    ED_ERR_PROTOCOL,
+    ED_ERR_CONTROLLER,
+    ED_ERR_REPORT
 } ed_result;
 
 typedef struct {
