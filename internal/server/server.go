@@ -46,6 +46,7 @@ type Server struct {
 	dir        string
 	key        string
 	jobs       map[string]Job
+	profiles   map[string]MachineProfile
 	mux        *http.ServeMux
 }
 
@@ -71,7 +72,7 @@ func Open(dir, key string) (*Server, error) {
 			_ = lock.Close()
 		}
 	}()
-	s := &Server{lock: lock, drivers: make(map[string]Driver), dir: dir, key: key, jobs: make(map[string]Job), mux: http.NewServeMux()}
+	s := &Server{lock: lock, drivers: make(map[string]Driver), dir: dir, key: key, jobs: make(map[string]Job), profiles: make(map[string]MachineProfile), mux: http.NewServeMux()}
 	data, err := os.ReadFile(filepath.Join(dir, "jobs.json"))
 	if err == nil {
 		if err = json.Unmarshal(data, &s.jobs); err != nil {
@@ -82,6 +83,12 @@ func Open(dir, key string) (*Server, error) {
 	}
 	if s.jobs == nil {
 		return nil, errors.New("invalid null job library")
+	}
+	if err := loadOptionalJSON(filepath.Join(dir, "profiles.json"), &s.profiles); err != nil {
+		return nil, err
+	}
+	if s.profiles == nil {
+		return nil, errors.New("invalid null profile library")
 	}
 	if err := s.recoverInterrupted(); err != nil {
 		return nil, err
@@ -96,6 +103,11 @@ func Open(dir, key string) (*Server, error) {
 	s.mux.HandleFunc("GET /api/v1/jobs", s.list)
 	s.mux.HandleFunc("GET /api/v1/jobs/{id}", s.get)
 	s.mux.HandleFunc("DELETE /api/v1/jobs/{id}", s.delete)
+	s.mux.HandleFunc("GET /api/v1/profiles", s.listProfiles)
+	s.mux.HandleFunc("POST /api/v1/profiles", s.createProfile)
+	s.mux.HandleFunc("GET /api/v1/profiles/{id}", s.getProfile)
+	s.mux.HandleFunc("PUT /api/v1/profiles/{id}", s.updateProfile)
+	s.mux.HandleFunc("DELETE /api/v1/profiles/{id}", s.deleteProfile)
 	opened = true
 	return s, nil
 }

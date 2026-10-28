@@ -95,3 +95,35 @@ stops the worker; restart it only after inspecting the machine.
 
 `GET /plugins` lists configured preflight manifests. Plugins are explicit trusted
 executables loaded at startup. See the plugin protocol for installation and limits.
+
+## Declared machine profiles
+
+Profiles are operator declarations stored separately from `jobs.json` in the
+durable `profiles.json` library. EmberDeck does not measure or configure a
+controller from these values. The initial designer profile supports only
+`controller:"grbl-1.1"`, `units:"mm"`, `origin:"lower-left"`, and
+`laser_mode_enabled:true`. The declared work origin is the currently prepared
+GRBL work origin; EmberDeck does not home, zero, change coordinate systems, or
+write controller settings. Operators must match `max_s` with GRBL `$30`,
+`min_s:0` with `$31`, and laser mode with `$32=1` themselves. A profile must
+explicitly declare `min_s:0`; other values are unsupported because linear power
+percentage conversion would not match a nonzero GRBL minimum PWM. See GRBL's
+[settings reference](https://github.com/gnea/grbl/blob/master/doc/markdown/settings.md)
+and [laser mode reference](https://github.com/gnea/grbl/blob/master/doc/markdown/laser_mode.md).
+
+`GET /profiles` lists profiles in ID order. `POST /profiles` creates one and
+returns 201 with a Location header; omit `id` and `revision`. `GET /profiles/{id}`
+reads a profile. `PUT /profiles/{id}` replaces its declaration and requires the
+current positive `revision`; successful updates increment the revision, while
+stale updates return 409. `DELETE /profiles/{id}` requires `{"revision":N}` and
+returns 204. Missing profiles return 404. A profile referenced by a saved
+project cannot be deleted.
+
+All profile requests are authenticated, strict single JSON objects limited to
+64 KiB, and reject unknown fields. Names are trimmed and must contain 1–120
+bytes. Width and height must be positive and at most 10,000 mm. Feed limits
+must satisfy `0 < min_feed_mm_min <= max_feed_mm_min <= 100000`. Dimension and
+feed values support at most three decimal places. `max_s` is an integer from 1
+through 1,000,000,000; `max_power_percent` is greater than zero and at most
+100. `min_s` must be explicitly present and equal zero. These are declared
+limits, not hardware qualification or safety claims.
