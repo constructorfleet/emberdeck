@@ -328,12 +328,18 @@ test('operator imports static SVG paths into an editable project and assigns the
 
   await page.getByRole('button', { name: 'New vector project' }).click();
   await page.locator('#vector-name').fill(projectName);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300mm" height="200mm" viewBox="0 0 300 200"><path d="M10 190 L40 190 L40 160 L10 160 Z"/><path d="M60 190 C70 180 80 180 90 190 S110 180 120 190 Q130 180 140 190 T160 190"/></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300mm" height="200mm" viewBox="0 0 300 200"><g transform="translate(5 0)"><g transform="scale(1.2)"><path transform="translate(2 0)" d="M10 150 L40 150 L40 120 L10 120 Z"/></g></g><g transform="translate(0 5)"><path d="M60 190 C70 180 80 180 90 190 S110 180 120 190 Q130 180 140 190 T160 190"/></g></svg>`;
   await page.locator('#vector-svg-file').setInputFiles({ name: 'panel.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(svg) });
   await expect(page.locator('#notice .notice-message')).toContainText('Imported 2 editable SVG paths');
   await expect(page.locator('#vector-object-list li')).toHaveCount(2);
   await expect(page.locator('#vector-object-list')).toContainText('Unassigned');
   await expect(page.locator('#vector-preview-content .vector-path')).toHaveCount(2);
+  const previewStart = await page.locator('#vector-preview-content .vector-path').first().evaluate((path) => {
+    const [, x, y] = path.getAttribute('d').match(/^M ([0-9.]+) ([0-9.]+)/);
+    return { x: Number(x), y: Number(y) };
+  });
+  expect(previewStart.x).toBeCloseTo(63.13, 2);
+  expect(previewStart.y).toBe(296);
   await expect(page.locator('#generate-vector-project')).toBeDisabled();
   const outsideSVG = `<svg width="350mm" height="200mm" viewBox="0 0 350 200"><polyline points="330,190 350,190"/></svg>`;
   await page.locator('#vector-svg-file').setInputFiles({ name: 'outside.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(outsideSVG) });
@@ -365,7 +371,7 @@ test('operator imports static SVG paths into an editable project and assigns the
   const row = page.locator('#job-list li').filter({ hasText: `${projectName}.gcode` });
   await expect(row).toContainText(/queued/i);
   await row.getByRole('button', { name: /^View / }).click();
-  await expect(page.locator('#program-code')).toContainText('G1 X40 Y40');
+  await expect(page.locator('#program-code')).toContainText('G1 X55.4 Y56');
   expect(startRequests).toHaveLength(0);
   await expect(page.locator('#operator-confirmation')).not.toBeChecked();
   await expect(page.locator('#driver-select')).toHaveValue('simulator');

@@ -193,8 +193,9 @@ The version 1 rectangle editor supports one rectangle and vector engraving.
 Version 2 supports multiple rectangle, ellipse, line, and monoline text objects,
 described below.
 The multi-path editor can import a bounded static SVG subset. It converts
-physical dimensions and the viewBox to editable millimetre paths, but does not
-import colors, styling, text, raster images, or machine settings.
+physical dimensions and the viewBox to editable millimetre paths. It rejects
+color, style, and other unsupported SVG attributes rather than silently
+dropping them. SVG text, raster images, and machine settings are not imported.
 
 ![Editable rectangle project with declared workspace and laser-off approach endpoint](assets/screenshots/designer-project.png)
 
@@ -276,17 +277,21 @@ importer supports straight path commands (M/L/H/V/Z), cubic Bezier commands
 rectangles, circles, and ellipses. Smooth commands reflect the prior compatible
 curve control point; otherwise they start from the current point. Curves become
 line segments with at most 0.05 mm chord deviation after SVG and element
-transforms; imports that exceed the 16-level subdivision or 4,000-point import
-limits are rejected. Circle and ellipse outlines become
-editable 32-point paths. Nested groups, arc commands, styles, text,
+transforms. Nested `<g>` transforms compose with their parent and child element
+transforms. Groups may contain only `id` and `transform` attributes and are
+limited to 16 nested levels. Imports that exceed the 16-level curve-subdivision
+or 4,000-point import limits are also rejected. Circle and ellipse outlines
+become editable 32-point paths. Arc commands, group styling or other group
+attributes, shape-level styling or other unsupported shape attributes, text,
 external resources, and active content are rejected with an error. Imported
-shapes appear unassigned: inspect the preview and workspace bounds, select each
-shape, and assign its engraving or cutting layer before generating. Save and reopen the
-project through the same project controls.
+geometry appears as editable, unassigned objects: no operation or machine
+settings are imported. Inspect the preview and workspace bounds,
+select each shape, and assign its engraving or cutting layer before generating.
+Save and reopen the project through the same project controls.
 
-![Imported static SVG paths as editable, unassigned vector geometry](assets/screenshots/designer-svg-import.png)
+![Nested SVG group geometry imported as editable, unassigned vector objects](assets/screenshots/designer-svg-import.png)
 
-![Imported SVG geometry in the mobile vector editor](assets/screenshots/designer-svg-import-mobile.png)
+![Nested SVG group geometry imported in the mobile vector editor](assets/screenshots/designer-svg-import-mobile.png)
 
 Generation creates an immutable queued G-code program with the project, profile,
 and operation layer values in its provenance. Both cutting and engraving use
@@ -401,11 +406,12 @@ Regenerate the screenshots from the current console and simulator with
 
 The current designer does not have SVG text import, undo/redo, or raster
 engraving. Native editable monoline text is supported as described above.
-SVG import supports straight paths and
-C/c/S/s cubic and Q/q/T/t quadratic Bezier curves; nested groups and A/a arcs are
-not available. Live path correlation currently covers supported linear XY
-moves; arcs and unsupported coordinate modes are reported as warnings, and the
-view does not show declared machine bounds. The console also has no driver-adapter
+SVG import supports straight paths, C/c/S/s cubic and Q/q/T/t quadratic Bezier
+curves, and nested `<g>` groups up to 16 levels deep. Group transforms compose
+with descendant group and element transforms. A/a arcs are not available. Live
+path correlation currently covers supported linear XY moves; arcs and
+unsupported coordinate modes are reported as warnings, and the view does not
+show declared machine bounds. The console also has no driver-adapter
 or importer-plugin configuration screens.
 Existing plugins are trusted preflight
 processes; they are not machine drivers or file converters. See the [designer

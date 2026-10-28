@@ -37,7 +37,6 @@ func TestParseRejectsActiveExternalAndUnmodeledSVGContent(t *testing.T) {
 		{"script", `<svg width="40mm" height="20mm" viewBox="0 0 40 20"><script>alert(1)</script></svg>`},
 		{"event attribute", `<svg width="40mm" height="20mm" viewBox="0 0 40 20"><polyline points="0,0 1,1" onload="x"/></svg>`},
 		{"external reference", `<svg width="40mm" height="20mm" viewBox="0 0 40 20"><polyline points="0,0 1,1" href="https://example.invalid/x"/></svg>`},
-		{"nested group", `<svg width="40mm" height="20mm" viewBox="0 0 40 20"><g><polyline points="0,0 1,1"/></g></svg>`},
 		{"nested child", `<svg width="40mm" height="20mm" viewBox="0 0 40 20"><polyline points="0,0 1,1"><polyline points="1,1 2,2"/></polyline></svg>`},
 		{"doctype", `<!DOCTYPE svg [<!ENTITY x "x">]><svg width="40mm" height="20mm" viewBox="0 0 40 20"><polyline points="0,0 1,1"/></svg>`},
 	}
@@ -45,6 +44,47 @@ func TestParseRejectsActiveExternalAndUnmodeledSVGContent(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			if _, err := svgimport.Parse([]byte(test.source)); err == nil {
 				t.Fatal("unsafe or unsupported SVG content was accepted")
+			}
+		})
+	}
+}
+
+func TestParseComposesNestedGroupAndElementTransforms(t *testing.T) {
+	source := []byte(`<svg width="100mm" height="100mm" viewBox="0 0 100 100"><g transform="translate(10 20)"><g transform="scale(2)"><g transform="rotate(90)"><g transform="matrix(1 0 0 1 3 4)"><polyline points="1,2 3,4" transform="translate(5 0)"/></g></g></g></g></svg>`)
+	got, err := svgimport.Parse(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Objects) != 1 || len(got.Objects[0].Subpaths) != 1 {
+		t.Fatalf("nested SVG objects = %#v", got.Objects)
+	}
+	want := []svgimport.Point{{XMM: -2, YMM: 62}, {XMM: -6, YMM: 58}}
+	points := got.Objects[0].Subpaths[0].Points
+	if len(points) != len(want) {
+		t.Fatalf("nested SVG points = %#v, want %#v", points, want)
+	}
+	for i := range want {
+		if points[i] != want[i] {
+			t.Fatalf("point %d = %#v, want %#v", i, points[i], want[i])
+		}
+	}
+}
+
+func TestParseRejectsMalformedOrUnsupportedGroups(t *testing.T) {
+	deepGroups := strings.Repeat(`<g>`, 17) + `<line x1="0" y1="0" x2="1" y2="1"/>` + strings.Repeat(`</g>`, 17)
+	for name, content := range map[string]string{
+		"malformed transform": `<g transform="translate(1,)"><line x1="0" y1="0" x2="1" y2="1"/></g>`,
+		"unsupported style":   `<g style="fill:red"><line x1="0" y1="0" x2="1" y2="1"/></g>`,
+		"event attribute":     `<g onload="run()"><line x1="0" y1="0" x2="1" y2="1"/></g>`,
+		"unsupported child":   `<g><switch><line x1="0" y1="0" x2="1" y2="1"/></switch></g>`,
+		"foreign namespace":   `<x:g xmlns:x="urn:foreign"><line x1="0" y1="0" x2="1" y2="1"/></x:g>`,
+		"group depth limit":   deepGroups,
+		"malformed nesting":   `<g><line x1="0" y1="0" x2="1" y2="1"></g>`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			source := []byte(`<svg width="40mm" height="20mm" viewBox="0 0 40 20">` + content + `</svg>`)
+			if _, err := svgimport.Parse(source); err == nil {
+				t.Fatal("malformed or unsupported group was accepted")
 			}
 		})
 	}
@@ -197,8 +237,8 @@ func cubicCoordinate(start, control1, control2, end, t float64) float64 {
 	return oneMinusT*oneMinusT*oneMinusT*start + 3*oneMinusT*oneMinusT*t*control1 + 3*oneMinusT*t*t*control2 + t*t*t*end
 }
 
-func TestParseMeasuresCurveToleranceAfterElementTransform(t *testing.T) {
-	source := []byte(`<svg width="200mm" height="200mm" viewBox="0 0 200 200"><path transform="scale(2)" d="M0 0 Q50 100 100 0"/></svg>`)
+func TestParseMeasuresCurveToleranceAfterGroupTransform(t *testing.T) {
+	source := []byte(`<svg width="200mm" height="200mm" viewBox="0 0 200 200"><g transform="scale(2)"><path d="M0 0 Q50 100 100 0"/></g></svg>`)
 	got, err := svgimport.Parse(source)
 	if err != nil {
 		t.Fatal(err)
