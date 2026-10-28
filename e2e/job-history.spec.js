@@ -88,6 +88,13 @@ test('event history fits a narrow screen', async ({ page }) => {
   const history = page.getByRole('list', { name: 'Job event history' });
   await expect(history.getByRole('listitem')).toHaveCount(1);
   await expect(history.getByRole('listitem').first()).toContainText('Uploaded');
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  expect(overflow).toBeLessThanOrEqual(0);
+  // Only the history view is checked: rows created by other specs (for
+  // example long unbroken job names) can widen the page independently.
+  const overflow = await page.evaluate(() => {
+    const viewport = document.documentElement.clientWidth;
+    return [...document.querySelectorAll('#program-history, #program-history *')]
+      .filter((node) => node.getBoundingClientRect().right > viewport + 0.5 || node.scrollWidth > node.clientWidth + 1 && getComputedStyle(node).overflowX === 'visible' && node.clientWidth > 0)
+      .map((node) => node.className || node.tagName);
+  });
+  expect(overflow).toEqual([]);
 });
