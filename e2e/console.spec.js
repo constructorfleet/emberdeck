@@ -344,6 +344,23 @@ test('running uploaded G-code shows a fitted camera-free toolpath with estimated
   await expect(row.locator('.toolpath-legend')).toContainText('laser-off travel dashed');
   await expect(row.getByRole('button', { name: 'Zoom in toolpath' })).toBeVisible();
   await expect(row.getByRole('button', { name: 'Fit toolpath to view' })).toBeVisible();
+
+  await page.route('**/api/v1/jobs?*', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    const job = body.jobs.find((candidate) => candidate.name === name);
+    if (job) {
+      job.state = 'interrupted';
+      job.execution.path_progress.confidence = 'unknown';
+      delete job.execution.path_progress.active;
+    }
+    await route.fulfill({ response, body: JSON.stringify(body) });
+  });
+  await page.locator('#refresh').click();
+  await expect(row.locator('.toolpath-summary')).toContainText('unknown');
+  await expect(row.locator('.toolpath-svg .toolpath-head')).toHaveCount(0);
+  await page.unroute('**/api/v1/jobs?*');
+
   await progress.evaluate((node) => node.value);
   await expect(row).toContainText(/completed/i, { timeout: 30000 });
   await expect(row.locator('.toolpath-summary')).toContainText('controller_idle', { timeout: 10000 });

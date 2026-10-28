@@ -379,7 +379,10 @@ program geometry; it does not know the physical machine bounds. An estimated
 head position assumes GRBL reports millimetres (`$13=0`), and the UI labels that
 assumption. A repeated or overlapping path can make correlation ambiguous;
 missing coordinates, disconnects, pauses, and restarts can leave progress
-unknown. Acknowledged lines are never treated as proof of completed motion.
+unknown. If the server marks a job interrupted, its last reported work position
+remains in the job record for context, but the plot hides the head marker because
+it may be stale. Acknowledged lines are never treated as proof of completed
+motion.
 
 If an administrator configured a camera for the assigned driver, the job row
 also shows a refreshed camera frame beside its progress and controls. A failed

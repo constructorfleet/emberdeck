@@ -1921,7 +1921,13 @@
 
     const points = path.segments.flatMap((segment) => [segment.start, segment.end]);
     if (review?.profile_bounds) points.push(review.profile_bounds.min, review.profile_bounds.max);
-    const workPosition = execution.position_units === "assumed-mm" ? execution.work_position : null;
+    const workPosition = job.state !== "interrupted" && execution.position_units === "assumed-mm" ? execution.work_position : null;
+    if (job.state === "interrupted" && execution.work_position) {
+      const stalePosition = document.createElement("p");
+      stalePosition.className = "toolpath-caveat";
+      stalePosition.textContent = "The controller's last reported work position is retained, but no current head position is available after interruption.";
+      host.append(stalePosition);
+    }
     if (workPosition) points.push(workPosition);
     const xs = points.map((point) => point.x), ys = points.map((point) => point.y);
     const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
@@ -1992,8 +1998,9 @@
     svg.addEventListener("pointercancel", () => { drag = null; });
     const legend = document.createElement("p");
     legend.className = "toolpath-legend";
+    const headLegend = job.state === "interrupted" ? "head marker hidden after interruption because the last report may be stale" : "head marker where work coordinates are available";
     legend.textContent = job.execution
-      ? (review?.profile_bounds ? "Completed estimate · active segment · remaining path · laser-on solid · laser-off travel dashed · head marker where work coordinates are available · dashed rectangle is the selected profile work area." : "Completed estimate · active segment · remaining path · laser-on solid · laser-off travel dashed · head marker where work coordinates are available. Machine bounds are unknown without a selected profile.")
+      ? (review?.profile_bounds ? `Completed estimate · active segment · remaining path · laser-on solid · laser-off travel dashed · ${headLegend} · dashed rectangle is the selected profile work area.` : `Completed estimate · active segment · remaining path · laser-on solid · laser-off travel dashed · ${headLegend}. Machine bounds are unknown without a selected profile.`)
       : (review?.profile_bounds ? "Program motion · laser-on solid · laser-off travel dashed · dashed rectangle is the selected profile work area." : "Program motion · laser-on solid · laser-off travel dashed · machine bounds are unknown without a selected profile.");
     host.append(controls, svg, legend);
   }
