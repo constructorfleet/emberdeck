@@ -4,7 +4,8 @@ EmberDeck is job-management software, not a safety controller. Physical
 controllers, cutters, enclosures, interlocks, emergency stops, and complete
 machine setups have not been qualified. Simulator tests and software checks are
 not evidence of physical safety. Follow the machine and controller manufacturer's
-instructions and supervise every operation.
+instructions and supervise every operation. The exact setup and evidence status
+are tracked in the [hardware qualification matrix](hardware-qualification.md).
 
 ## Supervision and independent safeguards
 
