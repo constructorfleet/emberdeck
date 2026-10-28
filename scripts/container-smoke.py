@@ -72,7 +72,7 @@ def upload_and_start(base, name, gcode):
         base,
         "POST",
         f"/api/v1/jobs/{job['id']}/start",
-        {"driver_id": "simulator", "confirmed": True},
+        {"driver_id": "simulator", "confirmed": True, "bounds_override": True},
     )
     if status != 200:
         raise RuntimeError(f"start failed: HTTP {status}: {assigned}")

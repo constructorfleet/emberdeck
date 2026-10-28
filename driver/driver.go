@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -580,6 +581,7 @@ func requireIdle(ctx context.Context, conn io.ReadWriteCloser, r *bufio.Reader) 
 func parseProgram(program string) ([]string, error) {
 	var cleaned strings.Builder
 	inParen, inSemicolon := false, false
+	parenStart := 0
 	for i := 0; i < len(program); i++ {
 		b := program[i]
 		if b > 0x7e || (b < 0x20 && b != '\n' && b != '\r' && b != '\t') || b == 0x7f {
@@ -606,6 +608,7 @@ func parseProgram(program string) ([]string, error) {
 		switch b {
 		case '(':
 			inParen = true
+			parenStart = i
 			continue
 		case ')':
 			return nil, fmt.Errorf("driver: unmatched closing parenthesis at offset %d", i)
@@ -618,7 +621,7 @@ func parseProgram(program string) ([]string, error) {
 		cleaned.WriteByte(b)
 	}
 	if inParen {
-		return nil, fmt.Errorf("driver: unclosed parenthetical comment")
+		return nil, fmt.Errorf("driver: unclosed parenthetical comment at offset %d", parenStart)
 	}
 	raw := strings.Split(strings.ReplaceAll(cleaned.String(), "\r\n", "\n"), "\n")
 	lines := make([]string, 0, len(raw))
@@ -642,6 +645,19 @@ func parseProgram(program string) ([]string, error) {
 func Validate(program string) (int, error) {
 	lines, err := parseProgram(program)
 	if err != nil {
+		fields := strings.Fields(err.Error())
+		for i, field := range fields {
+			if field == "offset" && i+1 < len(fields) {
+				offset, parseErr := strconv.Atoi(strings.TrimRight(fields[i+1], ":"))
+				if parseErr == nil && offset >= 0 && offset <= len(program) {
+					line := strings.Count(program[:offset], "\n") + 1
+					return 0, fmt.Errorf("driver: line %d: %w", line, err)
+				}
+			}
+		}
+		if !strings.Contains(err.Error(), "driver: line ") {
+			return 0, fmt.Errorf("driver: line 1: %w", err)
+		}
 		return 0, err
 	}
 	return len(lines), nil

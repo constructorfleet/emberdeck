@@ -79,6 +79,18 @@ func TestParseMarksWorkCoordinateChangesAndUnmodeledMCodesUnsupported(t *testing
 	}
 }
 
+func TestProgramBoundsUseEveryKnownSegmentEndpoint(t *testing.T) {
+	program := Parse("G21 G90\nG0 X0 Y0\nG1 X12 Y4 F300\nG0 X-2 Y9\n")
+	bounds, ok := ProgramBounds(program)
+	if !ok || bounds.Min != (Point{X: -2, Y: 0}) || bounds.Max != (Point{X: 12, Y: 9}) {
+		t.Fatalf("bounds = %#v, known = %v", bounds, ok)
+	}
+	partial := Parse("G1 X10 Y10\nG1 X20 Y20")
+	if _, ok := ProgramBounds(partial); !ok || partial.Complete {
+		t.Fatal("known subset bounds should remain distinct from complete program bounds")
+	}
+}
+
 func TestTrackerUsesReportedPositionAndLabelsRepeatedPathsAmbiguous(t *testing.T) {
 	program := Parse("G21 G90\nG0 X0 Y0\nM4 S200\nG1 X10 Y0 F300\nG1 X10 Y10\n")
 	tracker := NewTracker(program)

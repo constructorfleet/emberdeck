@@ -21,6 +21,34 @@ type Point struct {
 	Y float64 `json:"y"`
 }
 
+// Bounds encloses every known segment endpoint in the parsed work frame.
+type Bounds struct {
+	Min Point `json:"min"`
+	Max Point `json:"max"`
+}
+
+// ProgramBounds returns the bounds of the known segment subset. Callers must
+// still inspect Program.Supported and Program.Complete before claiming that
+// the result encloses the whole submitted program.
+func ProgramBounds(program Program) (Bounds, bool) {
+	if len(program.Segments) == 0 {
+		return Bounds{}, false
+	}
+	first := program.Segments[0]
+	bounds := Bounds{Min: first.Start, Max: first.Start}
+	include := func(point Point) {
+		bounds.Min.X = math.Min(bounds.Min.X, point.X)
+		bounds.Min.Y = math.Min(bounds.Min.Y, point.Y)
+		bounds.Max.X = math.Max(bounds.Max.X, point.X)
+		bounds.Max.Y = math.Max(bounds.Max.Y, point.Y)
+	}
+	for _, segment := range program.Segments {
+		include(segment.Start)
+		include(segment.End)
+	}
+	return bounds, true
+}
+
 // Segment describes one known, linear XY move. SourceLine is one-based.
 type Segment struct {
 	SourceLine    int     `json:"source_line"`
@@ -116,6 +144,7 @@ func Parse(source string) Program {
 					absolute = true
 				case code(word.value, 91):
 					absolute = false
+					warn(fmt.Sprintf("line %d uses incremental positioning (G91); full path bounds depend on the controller's starting position", lineIndex+1), true)
 				case code(word.value, 17), code(word.value, 40), code(word.value, 49), code(word.value, 80), code(word.value, 94):
 					// These modes do not change the supported XY linear path model.
 				case code(word.value, 54), code(word.value, 55), code(word.value, 56), code(word.value, 57), code(word.value, 58), code(word.value, 59):

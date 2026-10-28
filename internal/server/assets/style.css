@@ -21,3 +21,5 @@
 .connection-controls[hidden]{display:none}
 .lock-icon{align-self:flex-start}
 @media(max-width:760px){.auth>.section-title{grid-column:1}.auth #connection-state,.auth #connection-controls{grid-column:1;grid-row:auto}}
+.bounds-override{display:flex;align-items:flex-start;gap:7px;margin-top:6px;color:#e0c996;font:10px/1.45 var(--mono)}.bounds-override input{flex:none;accent-color:var(--green);margin:1px 0 0}.toolpath-profile-bounds{fill:rgba(152,201,95,.025);stroke:#98c95f;stroke-width:1.5;stroke-dasharray:5 4;vector-effect:non-scaling-stroke}
+.bounds-status-out_of_bounds{color:#ff9f8d}.bounds-status-unknown{color:#e0c996}.bounds-status-in_bounds{color:#a9d778}

@@ -20,7 +20,7 @@ func TestOperatorDispatchesToRegisteredDriverAndMonitorsCompletion(t *testing.T)
 	if w.Code != 200 {
 		t.Fatalf("register: %d %s", w.Code, w.Body.String())
 	}
-	w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true}`, "test-key")
+	w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true,"bounds_override":true}`, "test-key")
 	if w.Code != 200 {
 		t.Fatalf("start: %d %s", w.Code, w.Body.String())
 	}
@@ -89,7 +89,7 @@ func TestWorkerPersistsControllerPositionSeparatelyFromAcknowledgedLines(t *test
 		t.Fatal(err)
 	}
 	request(t, s, "POST", "/api/v1/drivers/bench/poll", `{"session":"session-a"}`, "test-key")
-	w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true}`, "test-key")
+	w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true,"bounds_override":true}`, "test-key")
 	if w.Code != http.StatusOK {
 		t.Fatalf("start: %d %s", w.Code, w.Body.String())
 	}
@@ -144,7 +144,7 @@ func TestRestartInterruptsWorkWithoutReassigningIt(t *testing.T) {
 	if w.Code != 400 {
 		t.Fatalf("missing confirmation accepted: %d", w.Code)
 	}
-	w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true}`, "test-key")
+	w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true,"bounds_override":true}`, "test-key")
 	if w.Code != 200 {
 		t.Fatalf("start: %s", w.Body.String())
 	}
@@ -170,17 +170,11 @@ func TestRestartInterruptsWorkWithoutReassigningIt(t *testing.T) {
 	}
 }
 
-func TestInvalidMachineProgramIsRejectedBeforeAssignment(t *testing.T) {
+func TestInvalidMachineProgramIsRejectedAtUploadWithLineNumber(t *testing.T) {
 	s := openServer(t)
 	w := request(t, s, "POST", "/api/v1/jobs", `{"name":"test","gcode":"G1 X1!"}`, "test-key")
-	var job struct{ ID string }
-	if err := json.Unmarshal(w.Body.Bytes(), &job); err != nil {
-		t.Fatal(err)
-	}
-	request(t, s, "POST", "/api/v1/drivers/bench/poll", `{"session":"owner"}`, "test-key")
-	w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true}`, "test-key")
-	if w.Code != 422 {
-		t.Fatalf("unsafe program assigned: %d %s", w.Code, w.Body.String())
+	if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "line 1") {
+		t.Fatalf("unsafe program upload = %d %s", w.Code, w.Body.String())
 	}
 }
 
@@ -192,7 +186,7 @@ func TestPhysicalCompletionWinsRaceWithCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	request(t, s, "POST", "/api/v1/drivers/bench/poll", `{"session":"owner"}`, "test-key")
-	w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true}`, "test-key")
+	w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true,"bounds_override":true}`, "test-key")
 	var assignment struct{ Lease string }
 	if err := json.Unmarshal(w.Body.Bytes(), &assignment); err != nil {
 		t.Fatal(err)
@@ -230,7 +224,7 @@ func TestRestartInterruptsPendingCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	request(t, s, "POST", "/api/v1/drivers/bench/poll", `{"session":"owner"}`, "test-key")
-	request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true}`, "test-key")
+	request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true,"bounds_override":true}`, "test-key")
 	request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/cancel", `{}`, "test-key")
 	if err := s.Close(); err != nil {
 		t.Fatal(err)

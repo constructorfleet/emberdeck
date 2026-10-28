@@ -44,7 +44,7 @@ func TestDistributedWorkerExecutesAndCancelsJobs(t *testing.T) {
 		if err := json.Unmarshal(w.Body.Bytes(), &job); err != nil || w.Code != 201 {
 			t.Fatalf("upload: %d %s", w.Code, w.Body.String())
 		}
-		w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"simulator","confirmed":true}`, "test-key")
+		w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"simulator","confirmed":true,"bounds_override":true}`, "test-key")
 		if w.Code != 200 {
 			t.Fatalf("dispatch: %d %s", w.Code, w.Body.String())
 		}

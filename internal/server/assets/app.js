@@ -10,6 +10,7 @@
   const uploadForm = $("#upload-form");
   const fileInput = $("#job-file");
   const jobName = $("#job-name");
+  const uploadProfileSelect = $("#upload-profile-select");
   const list = $("#job-list");
   const notice = $("#notice");
   const empty = $("#empty-state");
@@ -37,6 +38,7 @@
   let vectorIDSequence = 0;
   const toolpathCache = new Map();
   const toolpathViewports = new Map();
+  const boundsOverrides = new Set();
 
   function message(text) {
     notice.textContent = text;
@@ -172,6 +174,7 @@
     else if (profiles.length) select.value = profiles[0].id;
     const hasProfile = Boolean(selectedProfile());
     $("#new-profile").disabled = !connected;
+    renderUploadProfiles();
     $("#edit-profile").disabled = !connected || !hasProfile;
     $("#delete-profile").disabled = !connected || !hasProfile;
     $("#new-project").disabled = !connected || !hasProfile;
@@ -180,6 +183,24 @@
     renderVectorProjects();
     updateProjectValidation();
     updateVectorValidation();
+  }
+
+  function renderUploadProfiles() {
+    const prior = uploadProfileSelect.value;
+    uploadProfileSelect.replaceChildren();
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "No profile selected · bounds unknown";
+    uploadProfileSelect.append(none);
+    for (const profile of profiles) {
+      const option = document.createElement("option");
+      option.value = profile.id;
+      option.textContent = `${profile.name} · r${profile.revision}`;
+      uploadProfileSelect.append(option);
+    }
+    if (profiles.some((profile) => profile.id === prior)) uploadProfileSelect.value = prior;
+    else if (profiles.some((profile) => profile.id === $("#profile-select").value)) uploadProfileSelect.value = $("#profile-select").value;
+    else uploadProfileSelect.value = "";
   }
 
   function renderProjects() {
@@ -837,14 +858,15 @@
     $("#driver-status").textContent = selected ? (selected.busy ? "Driver has an active job." : `Last seen ${new Date(selected.last_seen).toLocaleTimeString()}`) : "Selected driver is disconnected.";
   }
 
-  async function startJob(id) {
+  async function startJob(id, boundsOverride) {
     if (!confirmation.checked) { message("Confirm the safety check before starting a program."); confirmation.focus(); return; }
     if (!selectedDriver) { message("Select a connected driver first."); driverSelect.focus(); return; }
     try {
       await api(`/api/v1/jobs/${encodeURIComponent(id)}/start`, {
         method: "POST",
-        body: JSON.stringify({ driver_id: selectedDriver, confirmed: true }),
+        body: JSON.stringify({ driver_id: selectedDriver, confirmed: true, bounds_override: Boolean(boundsOverride) }),
       });
+      boundsOverrides.delete(id);
       confirmation.checked = false;
       message("Program dispatched. Keep the machine supervised.");
       await refresh();
@@ -905,6 +927,25 @@
         controller.textContent = `Last controller report: ${job.controller_state}`;
         info.append(controller);
       }
+      const review = job.program_review;
+      const needsBoundsOverride = job.state === "queued" && !job.provenance && (!review || review.bounds_status !== "in_bounds");
+      if (needsBoundsOverride) {
+        const label = document.createElement("label");
+        label.className = "bounds-override";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = boundsOverrides.has(job.id);
+        checkbox.setAttribute("aria-label", `Override ${review?.bounds_status || "unknown"} bounds review for ${job.name}`);
+        checkbox.addEventListener("change", () => {
+          if (checkbox.checked) boundsOverrides.add(job.id);
+          else boundsOverrides.delete(job.id);
+          renderJobs();
+        });
+        const text = document.createElement("span");
+        text.textContent = `Bounds review is ${review?.bounds_status || "unknown"}; inspect the path and profile before overriding.`;
+        label.append(checkbox, text);
+        info.append(label);
+      }
       const active = ["running", "pausing", "paused", "resuming", "canceling"].includes(job.state);
       if (active || job.total > 0) {
         const progress = document.createElement("progress");
@@ -913,11 +954,11 @@
         progress.setAttribute("aria-label", `${job.acked || 0} of ${job.total || 0} lines acknowledged`);
         info.append(progress);
       }
-      if (active || job.execution) {
+      if (active || job.execution || review) {
         const toolpathView = document.createElement("section");
         toolpathView.className = "toolpath-live";
         toolpathView.dataset.toolpathJob = job.id;
-        toolpathView.setAttribute("aria-label", `Live toolpath for ${job.name}`);
+        toolpathView.setAttribute("aria-label", active || job.execution ? `Live toolpath for ${job.name}` : `Static G-code bounds review for ${job.name}`);
         toolpathView.textContent = "Loading controller path feedback…";
         info.append(toolpathView);
       }
@@ -931,8 +972,8 @@
       actions.className = "job-actions";
       actions.append(button("View", "button button-small", () => showProgram(job.id)));
       if (job.state === "queued") {
-        const start = button("Start", "button button-small button-start", () => startJob(job.id));
-        start.disabled = !checked || !selectedDriver || !drivers.some((driver) => driver.id === selectedDriver && !driver.busy);
+        const start = button("Start", "button button-small button-start", () => startJob(job.id, needsBoundsOverride));
+        start.disabled = !checked || (needsBoundsOverride && !boundsOverrides.has(job.id)) || !selectedDriver || !drivers.some((driver) => driver.id === selectedDriver && !driver.busy);
         actions.append(start);
       }
       if (job.state === "running") {
@@ -970,14 +1011,26 @@
     return Number(value.toFixed(3)).toString();
   }
 
-  function renderToolpathView(host, job, path) {
+  function renderToolpathView(host, job, path, review) {
     host.replaceChildren();
     const execution = job.execution || {};
     const progress = execution.path_progress || { completed: 0, total: path.segments.length, confidence: "unknown" };
     const summary = document.createElement("p");
     summary.className = "toolpath-summary";
-    summary.textContent = `Path progress: ${progress.completed || 0} of ${progress.total || 0} segments · ${progress.confidence || "unknown"}`;
+    summary.textContent = job.execution ? `Path progress: ${progress.completed || 0} of ${progress.total || 0} segments · ${progress.confidence || "unknown"}` : `Static program review · bounds ${review?.bounds_status || "unknown"} · execution not reported`;
     host.append(summary);
+    if (review?.bounds) {
+      const boundsText = document.createElement("p");
+      boundsText.className = `toolpath-caveat bounds-status-${review.bounds_status}`;
+      boundsText.textContent = `Program bounds: X ${coordinate(review.bounds.min.x)}–${coordinate(review.bounds.max.x)} mm · Y ${coordinate(review.bounds.min.y)}–${coordinate(review.bounds.max.y)} mm · ${review.bounds_status.replaceAll("_", " ")}.`;
+      host.append(boundsText);
+    }
+    if (review?.warnings?.length) {
+      const reviewWarning = document.createElement("p");
+      reviewWarning.className = "toolpath-caveat";
+      reviewWarning.textContent = `Review: ${review.warnings.join("; ")}`;
+      host.append(reviewWarning);
+    }
     if (execution.position_units === "assumed-mm") {
       const assumption = document.createElement("p");
       assumption.className = "toolpath-caveat";
@@ -1005,6 +1058,7 @@
     }
 
     const points = path.segments.flatMap((segment) => [segment.start, segment.end]);
+    if (review?.profile_bounds) points.push(review.profile_bounds.min, review.profile_bounds.max);
     const workPosition = execution.position_units === "assumed-mm" ? execution.work_position : null;
     if (workPosition) points.push(workPosition);
     const xs = points.map((point) => point.x), ys = points.map((point) => point.y);
@@ -1019,11 +1073,20 @@
     const svg = document.createElementNS(svgNS, "svg");
     svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.width} ${view.height}`);
     svg.setAttribute("role", "img");
-    svg.setAttribute("aria-label", `Fitted XY toolpath preview for ${job.name}; completed estimate, active path and remaining paths are shown`);
+    svg.setAttribute("aria-label", job.execution ? `Fitted XY execution preview for ${job.name}; completed estimate, active path and remaining paths are shown` : `Fitted static XY program preview for ${job.name}`);
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
     svg.classList.add("toolpath-svg");
     const group = document.createElementNS(svgNS, "g");
     group.setAttribute("transform", "scale(1 -1)");
+    if (review?.profile_bounds) {
+      const profileBounds = review.profile_bounds;
+      const box = document.createElementNS(svgNS, "rect");
+      box.setAttribute("class", "toolpath-profile-bounds");
+      box.setAttribute("x", profileBounds.min.x); box.setAttribute("y", profileBounds.min.y);
+      box.setAttribute("width", profileBounds.max.x - profileBounds.min.x);
+      box.setAttribute("height", profileBounds.max.y - profileBounds.min.y);
+      group.append(box);
+    }
     const activeIndex = Number.isInteger(progress.active) ? progress.active : -1;
     for (let index = 0; index < path.segments.length; index++) {
       const segment = path.segments[index];
@@ -1067,18 +1130,20 @@
     svg.addEventListener("pointercancel", () => { drag = null; });
     const legend = document.createElement("p");
     legend.className = "toolpath-legend";
-    legend.textContent = "Completed estimate · active segment · remaining path · laser-on solid · laser-off travel dashed · head marker where work coordinates are available. Fit uses path bounds; the declared machine envelope is not known for uploaded jobs.";
+    legend.textContent = job.execution
+      ? (review?.profile_bounds ? "Completed estimate · active segment · remaining path · laser-on solid · laser-off travel dashed · head marker where work coordinates are available · dashed rectangle is the selected profile work area." : "Completed estimate · active segment · remaining path · laser-on solid · laser-off travel dashed · head marker where work coordinates are available. Machine bounds are unknown without a selected profile.")
+      : (review?.profile_bounds ? "Program motion · laser-on solid · laser-off travel dashed · dashed rectangle is the selected profile work area." : "Program motion · laser-on solid · laser-off travel dashed · machine bounds are unknown without a selected profile.");
     host.append(controls, svg, legend);
   }
 
   async function refreshToolpathViews() {
     for (const job of jobs) {
-      if (!(job.execution || ["running", "pausing", "paused", "resuming", "canceling"].includes(job.state))) continue;
+      if (!(job.program_review || job.execution || ["running", "pausing", "paused", "resuming", "canceling"].includes(job.state))) continue;
       const host = Array.from(list.querySelectorAll(".toolpath-live")).find((node) => node.dataset.toolpathJob === job.id);
       if (!host) continue;
       try {
         if (!toolpathCache.has(job.id)) toolpathCache.set(job.id, await api(`/api/v1/jobs/${encodeURIComponent(job.id)}/toolpath`));
-        renderToolpathView(host, job, toolpathCache.get(job.id));
+        renderToolpathView(host, job, toolpathCache.get(job.id), job.program_review);
       } catch (error) {
         host.textContent = `Toolpath preview unavailable: ${error.message}`;
       }
@@ -1223,7 +1288,7 @@
     if (!file) return;
     try {
       const gcode = await file.text();
-      await api("/api/v1/jobs", { method: "POST", body: JSON.stringify({ name: jobName.value, gcode }) });
+      await api("/api/v1/jobs", { method: "POST", body: JSON.stringify({ name: jobName.value, gcode, profile_id: uploadProfileSelect.value }) });
       uploadForm.reset();
       $("#file-label").textContent = "Choose a G-code file";
       await refresh();

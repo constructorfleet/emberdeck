@@ -60,6 +60,9 @@ control and job state.
 - Durable upload, list, program view, deletion, explicit start, confirmed
   pause/resume, cancellation, separate line and spatial path progress,
   controller completion, and failure reporting.
+- Upload-time driver line validation and profile-aware static path/bounds review.
+  Unknown or out-of-bounds uploaded programs require a separate per-job override
+  before dispatch; the review never certifies hardware safety.
 - Live controller status distinguishes pause requests, deceleration, confirmed
   holds, and resumed execution. The same connection and lease span a pause.
 - Declared GRBL profiles, saved rectangle projects, and schema-v2 multi-path

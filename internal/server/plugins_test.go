@@ -56,7 +56,7 @@ func TestConfiguredPreflightPluginCanVetoDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	request(t, s, "POST", "/api/v1/drivers/bench/poll", `{"session":"owner"}`, "test-key")
-	w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true}`, "test-key")
+	w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true,"bounds_override":true}`, "test-key")
 	if w.Code != 422 {
 		t.Fatalf("plugin veto ignored: %d %s", w.Code, w.Body.String())
 	}

@@ -142,7 +142,7 @@ func TestIdleWorkerSurvivesServerRestart(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &job); err != nil || w.Code != 201 {
 		t.Fatalf("upload: %d %s", w.Code, w.Body.String())
 	}
-	if w = request(t, second.handler, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true}`, "test-key"); w.Code != 200 {
+	if w = request(t, second.handler, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true,"bounds_override":true}`, "test-key"); w.Code != 200 {
 		t.Fatalf("dispatch: %d %s", w.Code, w.Body.String())
 	}
 	eventually(t, 10*time.Second, "job completion after restart", func() bool {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ConstructorFleet/emberdeck/driver"
 	"github.com/ConstructorFleet/emberdeck/internal/server"
 )
 
@@ -21,6 +22,122 @@ func request(t *testing.T, h http.Handler, method, path, body, key string) *http
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	return w
+}
+
+func TestUploadRejectsDriverInvalidProgramWithLineNumber(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	longLine := strings.Repeat("G", driver.MaxLineLength+1)
+	w := request(t, s, "POST", "/api/v1/jobs", `{"name":"too-long.gcode","gcode":"`+longLine+`"}`, "test-key")
+	if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "line 1") {
+		t.Fatalf("invalid program upload = %d %s; want 422 with line number", w.Code, w.Body.String())
+	}
+	w = request(t, s, "POST", "/api/v1/jobs", `{"name":"unclosed-comment.gcode","gcode":"G21\nG0 X0 (unterminated"}`, "test-key")
+	if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "line 2") {
+		t.Fatalf("unclosed comment upload = %d %s; want 422 with line 2", w.Code, w.Body.String())
+	}
+	w = request(t, s, "POST", "/api/v1/jobs", `{"name":"comments-only.gcode","gcode":"(notes only)"}`, "test-key")
+	if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "line 1") {
+		t.Fatalf("comments-only upload = %d %s; want 422 with a line number", w.Code, w.Body.String())
+	}
+}
+
+func TestUploadedProgramReviewReportsProfileBoundsAndUnknownMotion(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	w := request(t, s, "POST", "/api/v1/profiles", profileBody, "test-key")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create profile: %d %s", w.Code, w.Body.String())
+	}
+	var profile struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &profile); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"name":"bounds.gcode","profile_id":"` + profile.ID + `","gcode":"G21 G90\nG0 X0 Y0\nG1 X350 Y100 F300"}`
+	w = request(t, s, "POST", "/api/v1/jobs", body, "test-key")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("upload: %d %s", w.Code, w.Body.String())
+	}
+	var job struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	w = request(t, s, "GET", "/api/v1/jobs/"+job.ID+"/review", "", "test-key")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"bounds_status":"out_of_bounds"`) || !strings.Contains(w.Body.String(), `"max":{"x":350,"y":100}`) {
+		t.Fatalf("out-of-bounds review = %d %s", w.Code, w.Body.String())
+	}
+	unknownBody := `{"name":"incremental.gcode","profile_id":"` + profile.ID + `","gcode":"G21 G90\nG0 X0 Y0\nG91\nG1 X20 Y20 F300"}`
+	w = request(t, s, "POST", "/api/v1/jobs", unknownBody, "test-key")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("upload incremental program: %d %s", w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	w = request(t, s, "GET", "/api/v1/jobs/"+job.ID+"/review", "", "test-key")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"bounds_status":"unknown"`) || !strings.Contains(w.Body.String(), "G91") {
+		t.Fatalf("incremental motion review = %d %s", w.Code, w.Body.String())
+	}
+	unsupportedBody := `{"name":"arc.gcode","profile_id":"` + profile.ID + `","gcode":"G21 G90\nG0 X0 Y0\nG2 X350 Y100 I10 J10\n"}`
+	w = request(t, s, "POST", "/api/v1/jobs", unsupportedBody, "test-key")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("upload unsupported program: %d %s", w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	w = request(t, s, "GET", "/api/v1/jobs/"+job.ID+"/review", "", "test-key")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"bounds_status":"unknown"`) {
+		t.Fatalf("unsupported out-of-bounds motion must stay unknown: %d %s", w.Code, w.Body.String())
+	}
+	updatedProfile := strings.Replace(profileBody, `"name":"Declared GRBL"`, `"revision":1,"name":"Declared GRBL"`, 1)
+	updatedProfile = strings.Replace(updatedProfile, `"width_mm":300`, `"width_mm":400`, 1)
+	w = request(t, s, "PUT", "/api/v1/profiles/"+profile.ID, updatedProfile, "test-key")
+	if w.Code != http.StatusOK {
+		t.Fatalf("update profile: %d %s", w.Code, w.Body.String())
+	}
+	w = request(t, s, "GET", "/api/v1/jobs/"+job.ID+"/review", "", "test-key")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"bounds_status":"unknown"`) || !strings.Contains(w.Body.String(), "changed or was deleted") {
+		t.Fatalf("stale profile review = %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUploadedJobWithUnknownBoundsRequiresExplicitStartOverride(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	w := request(t, s, "POST", "/api/v1/jobs", `{"name":"unknown.gcode","gcode":"G21 G90\nG0 X10 Y10\nG1 X20 Y20 F300"}`, "test-key")
+	var job struct {
+		ID string `json:"id"`
+	}
+	if w.Code != http.StatusCreated {
+		t.Fatalf("upload: %d %s", w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	request(t, s, "POST", "/api/v1/drivers/bench/poll", `{"session":"session-a"}`, "test-key")
+	startURL := "/api/v1/jobs/" + job.ID + "/start"
+	w = request(t, s, "POST", startURL, `{"driver_id":"bench","confirmed":true}`, "test-key")
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "bounds_override") {
+		t.Fatalf("start without explicit override = %d %s", w.Code, w.Body.String())
+	}
+	w = request(t, s, "POST", startURL, `{"driver_id":"bench","confirmed":true,"bounds_override":true}`, "test-key")
+	if w.Code != http.StatusOK {
+		t.Fatalf("start with explicit override: %d %s", w.Code, w.Body.String())
+	}
 }
 
 func TestUploadedJobSurvivesServerRestart(t *testing.T) {

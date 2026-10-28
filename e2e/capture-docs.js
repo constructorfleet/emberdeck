@@ -196,7 +196,6 @@ async function main() {
     page.once('dialog', (dialog) => dialog.accept());
     await projectRow.getByRole('button', { name: 'Delete project Panel outline' }).click();
     await expect(projectRow).toHaveCount(0);
-    await page.getByRole('button', { name: 'Delete profile' }).click();
     page.once('dialog', (dialog) => dialog.accept());
     await designerRow.getByRole('button', { name: /Delete Panel outline\.gcode/ }).click();
     await expect(designerRow).toHaveCount(0);
@@ -211,9 +210,15 @@ async function main() {
     await expect(row).toContainText(/queued/i);
     await row.getByRole('button', { name: 'View', exact: true }).click();
     await page.locator('#close-program').click();
+    await expect(row.locator('.toolpath-summary')).toContainText(/bounds out_of_bounds/i);
+    await expect(row.locator('.toolpath-profile-bounds')).toHaveCount(1);
+    await expect(row.getByRole('checkbox', { name: /Override out_of_bounds bounds review/ })).toBeVisible();
+    await capture(page, 'operator-console-uploaded-bounds-review.png');
     await capture(page, 'operator-console-library.png');
 
     await page.locator('#operator-confirmation').check();
+    const boundsOverride = row.getByRole('checkbox', { name: /Override .* bounds review/ });
+    if (await boundsOverride.count()) await boundsOverride.check();
     await row.getByRole('button', { name: 'Start' }).click();
     const progress = row.locator('progress');
     await expect.poll(() => progress.evaluate((node) => node.value), { timeout: 15000 }).toBeGreaterThan(0);
@@ -261,6 +266,8 @@ async function main() {
     const canceledRow = page.locator('#job-list li').filter({ hasText: canceledName });
     await expect(canceledRow).toContainText(/queued/i);
     await page.locator('#operator-confirmation').check();
+    const canceledBoundsOverride = canceledRow.getByRole('checkbox', { name: /Override .* bounds review/ });
+    if (await canceledBoundsOverride.count()) await canceledBoundsOverride.check();
     await canceledRow.getByRole('button', { name: 'Start' }).click();
     const canceledProgress = canceledRow.locator('progress');
     await expect.poll(() => canceledProgress.evaluate((node) => node.value), { timeout: 15000 }).toBeGreaterThan(0);
