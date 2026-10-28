@@ -127,8 +127,10 @@ JSON except successful deletion (204). Errors return
 ## Job library
 
 `POST /jobs` accepts `{"name":"square.gcode","gcode":"G21\nG90\nM5","profile_id":"optional-profile-id"}` and
-returns 201, the job metadata, and its Location. The full JSON upload is limited to 4 MiB;
-names are 1–200 bytes. Control bytes other than tabs and line endings are rejected.
+returns 201, the job metadata, and its Location. G-code content is limited to 4 MiB;
+the complete JSON upload is capped at 24 MiB plus 64 KiB to bound escaping and
+framing overhead. Names are 1–200 bytes. Control bytes other than tabs and line
+endings are rejected.
 Driver line validation runs at upload; an invalid line returns 422 with its line
 number. An optional `profile_id` binds a declared profile revision for the
 program bounds review. Uploading stores a program; it does not execute it or
@@ -282,15 +284,17 @@ Interrupted/failed/completed/canceled jobs are terminal; inspect the machine and
 upload a new job if another run is appropriate. The system never automatically
 replays a job after a restart.
 
-## Driver polling protocol v1
+## Driver polling and content transfer
 
 `POST /drivers/{id}/poll` registers or reports one trusted worker. Driver IDs are
 1–64 letters, numbers, underscores, or hyphens. Every poll includes a process
 unique `session` string. Reusing a live ID with another session returns 409.
 
-An idle poll is `{"session":"random-session-id"}`. The response is either
-`{"command":"idle","protocol":"1"}` or an assignment with `command:"run"`,
-`lease`, and `job` (including `id` and `gcode`). An idle response includes
+An idle poll is `{"session":"random-session-id"}`. The response is idle metadata
+or an assignment with `command:"run"`, `protocol`, `lease`, and `job`. Workers
+that do not advertise `chunked_content_v1` retain protocol 1: the initial
+assignment includes `job.gcode`. This is the compatibility path for existing
+workers. An idle response includes
 `read_settings:true` while the server has no settings for the driver (at most
 every 30 seconds); the worker then reads them with `$$` and reports them on the
 next poll. Every poll may carry `controller_settings` (keys `$20`, `$30`, `$31`,
@@ -298,14 +302,43 @@ next poll. Every poll may carry `controller_settings` (keys `$20`, `$30`, `$31`,
 poll replaces the server's copy, so omitting settings clears them. Boolean
 settings must be 0 or 1; invalid values return 400. A generated job's
 assignment includes `expected_settings` with its profile's `$30`, `$31`, and
-`$32`; the worker must refuse the job before streaming when they differ. Treat a lease as single execution
-authority. Never execute a completed lease again after lost responses.
-A poll that reports progress for its assigned job receives the same assignment
-shape without `gcode`. The program is sent only when a poll does not already
-report that job, such as at pickup.
+`$32`; the worker must refuse the job before streaming when they differ. Treat
+a lease as single execution authority. Never execute a completed lease again
+after lost responses. A poll that reports progress for its assigned job
+receives assignment metadata without program bytes. The program is sent only
+when a poll does not already report that job, such as at pickup.
 
-Workers supporting confirmed control include `capabilities:["pause_resume"]`
-in polls. While assigned, poll each second with `session`, `job_id`, `lease`,
+Workers advertising `capabilities:["chunked_content_v1"]` receive protocol 2
+assignments with an immutable manifest instead of `job.gcode`:
+
+```json
+{"command":"run","protocol":2,"lease":"…","job":{"id":"…","content":{"size":11,"sha256":"…"}}}
+```
+
+Fetch the content with `GET /drivers/{id}/jobs/{job_id}/content`, an explicit
+single `Range: bytes=start-end`, and `X-EmberDeck-Session` plus
+`X-EmberDeck-Lease` headers. Each inclusive range is at most 64 KiB. A successful
+response is `206 application/octet-stream` with `Content-Range` and
+`X-EmberDeck-Content-SHA256`. Ranges are idempotent and may be retried. The
+endpoint is restricted to the current worker credential, session, driver, active
+job, and lease; canceled or terminal leases cannot fetch more bytes. The server
+accepts no program over 4 MiB.
+
+Before opening the controller connection, the worker must receive every byte,
+check each response range, verify the exact size and SHA-256 against the
+assignment manifest, then validate all G-code. A truncated, altered, oversized,
+or malformed program is failed without sending any program bytes. Workers keep
+the complete verified program in memory in this Go implementation; a constrained
+firmware implementation may stage the same bounded content in PSRAM or flash.
+Protocol 1 assignments are capped at 8 MiB to keep existing Go workers within
+their response-reader limit; starting a larger encoded assignment with a legacy
+worker returns 413 and leaves the job queued. New workers also accept a
+protocol-1 full-program assignment from an older server, preserving mixed-version
+deployments.
+
+Workers supporting confirmed control include `pause_resume` in polls. Chunked
+workers also include `chunked_content_v1`. While assigned, poll each second with
+`session`, `job_id`, `lease`,
 `state`, `acked`, `total`, optional `error`, and the last `controller_state`.
 Worker state may be running, pausing, paused, or resuming before a terminal
 receipt. Pause/resume commands use the existing assignment shape, same job ID,

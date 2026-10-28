@@ -26,14 +26,17 @@ func TestOperatorDispatchesToRegisteredDriverAndMonitorsCompletion(t *testing.T)
 	}
 	w = request(t, s, "POST", "/api/v1/drivers/bench/poll", `{"session":"session-a"}`, "test-key")
 	var assignment struct {
-		Job     struct{ ID string }
+		Job struct {
+			ID    string
+			Gcode string `json:"gcode"`
+		}
 		Lease   string
 		Command string
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &assignment); err != nil {
 		t.Fatal(err)
 	}
-	if assignment.Job.ID != job.ID || assignment.Lease == "" || assignment.Command != "run" {
+	if assignment.Job.ID != job.ID || assignment.Lease == "" || assignment.Command != "run" || assignment.Job.Gcode != "M5" {
 		t.Fatalf("assignment: %s", w.Body.String())
 	}
 	body := `{"session":"session-a","job_id":"` + job.ID + `","lease":"` + assignment.Lease + `","state":"completed","acked":1,"total":1}`

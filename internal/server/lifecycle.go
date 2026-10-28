@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ConstructorFleet/emberdeck/driver"
+	"github.com/ConstructorFleet/emberdeck/jobtransfer"
 	"github.com/ConstructorFleet/emberdeck/toolpath"
 )
 
@@ -123,6 +124,20 @@ func (s *Server) boundsBlocked(j jobRecord, override bool) bool {
 	return review == nil || review.BoundsStatus != "in_bounds"
 }
 
+func legacyAssignmentExceedsLimit(job Job, gcode, lease string) bool {
+	// Use the longest control command and state name so a later pause/resume
+	// assignment cannot grow beyond the response an old worker can read.
+	job.State = "resuming"
+	response := map[string]any{
+		"command":  "resume",
+		"job":      workerJob{Job: job, Lease: lease, Gcode: gcode},
+		"lease":    lease,
+		"protocol": 1,
+	}
+	encoded, err := json.Marshal(response)
+	return err != nil || len(encoded)+1 > jobtransfer.MaxLegacyAssignmentBytes
+}
+
 func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		DriverID       string `json:"driver_id"`
@@ -142,6 +157,10 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 	}
 	if record.State != "queued" {
 		fail(w, 409, "only queued jobs can start")
+		return
+	}
+	if record.Size > jobtransfer.MaxProgramBytes {
+		fail(w, http.StatusRequestEntityTooLarge, "job program exceeds the 4 MiB worker transfer maximum")
 		return
 	}
 	s.mu.Lock()
@@ -197,6 +216,10 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 	j.DriverID = d.ID
 	j.Lease = hex.EncodeToString(lease)
 	j.segments = segments
+	if !hasCapability(d, jobtransfer.Capability) && legacyAssignmentExceedsLimit(j.Job, gcode, j.Lease) {
+		fail(w, http.StatusRequestEntityTooLarge, "job assignment exceeds the 8 MiB legacy worker limit; upgrade the worker or reduce the job")
+		return
+	}
 	jobs := s.copyJobs()
 	jobs[j.ID] = j
 	if err := s.save(jobs); err != nil {
@@ -259,15 +282,39 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if needsProgram {
-		// A worker picking up an assignment receives the program once. Progress
-		// acknowledgements carry only metadata so polling stays cheap.
-		gcode, ok := s.program(w, assignment.record)
-		if !ok {
+		if assignment.chunked {
+			assignment.job.Content = &jobtransfer.Manifest{Size: assignment.record.Size, SHA256: assignment.record.SHA256}
+		} else {
+			// Legacy workers receive the complete program in the assignment.
+			// Capability-negotiated workers fetch it in bounded authenticated chunks.
+			gcode, ok := s.program(w, assignment.record)
+			if !ok {
+				return
+			}
+			assignment.job.Gcode = gcode
+		}
+	}
+	protocol := 1
+	if assignment.chunked {
+		protocol = 2
+	}
+	response := map[string]any{"command": assignment.command, "job": assignment.job, "lease": assignment.job.Lease, "protocol": protocol}
+	if needsProgram && !assignment.chunked {
+		encoded, err := json.Marshal(response)
+		if err != nil {
+			fail(w, http.StatusInternalServerError, "could not encode worker assignment")
 			return
 		}
-		assignment.job.Gcode = gcode
+		if len(encoded)+1 > jobtransfer.MaxLegacyAssignmentBytes {
+			fail(w, http.StatusRequestEntityTooLarge, "assignment exceeds the 8 MiB legacy worker limit; upgrade the worker or reduce the job")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(append(encoded, '\n'))
+		return
 	}
-	respond(w, 200, map[string]any{"command": assignment.command, "job": assignment.job, "lease": assignment.job.Lease})
+	respond(w, http.StatusOK, response)
 }
 
 // pollReport is one worker poll: session metadata plus optional job progress.
@@ -292,6 +339,24 @@ type pollAssignment struct {
 	command string
 	job     workerJob
 	record  jobRecord
+	chunked bool
+}
+
+func sameCapabilities(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	counts := make(map[string]int, len(left))
+	for _, capability := range left {
+		counts[capability]++
+	}
+	for _, capability := range right {
+		counts[capability]--
+		if counts[capability] < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // pollLocked applies one worker report under the mutex. Progress-only reports
@@ -337,7 +402,13 @@ func (s *Server) pollLocked(w http.ResponseWriter, id, credentialID string, in *
 	}
 	recordSettings(&d, in)
 	if in.Capabilities != nil {
-		d.Capabilities = append([]string(nil), in.Capabilities...)
+		if d.Busy && !sameCapabilities(d.Capabilities, in.Capabilities) {
+			fail(w, http.StatusConflict, "worker capabilities cannot change during an active lease")
+			return nil, false, false
+		}
+		if !d.Busy {
+			d.Capabilities = append([]string(nil), in.Capabilities...)
+		}
 	}
 	if in.ControllerState != "" {
 		d.ControllerState = in.ControllerState
@@ -447,7 +518,7 @@ func (s *Server) pollLocked(w http.ResponseWriter, id, credentialID string, in *
 			// Only an assignment pickup (not a progress report for this job)
 			// carries the program; the current worker reads it from the pickup.
 			needsProgram := in.JobID != j.ID && command != "cancel"
-			return &pollAssignment{command: command, job: workerJob{Job: j.Job, Lease: j.Lease, ExpectedSettings: expectedSettings(j.Job)}, record: j}, needsProgram, true
+			return &pollAssignment{command: command, job: workerJob{Job: j.Job, Lease: j.Lease, ExpectedSettings: expectedSettings(j.Job)}, record: j, chunked: hasCapability(d, jobtransfer.Capability)}, needsProgram, true
 		}
 	}
 	s.drivers[id] = d

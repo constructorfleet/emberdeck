@@ -24,9 +24,8 @@ func TestLargeLibraryProgressPollsStayFast(t *testing.T) {
 	const jobs = 500
 	const programBytes = 4 << 20
 	s := openServer(t)
-	// The upload body limit is 4 MiB including JSON framing, so each program
-	// is 4 MiB less 8 KiB for the envelope and escaped line endings. Long
-	// comment-padded lines keep the escaping overhead small.
+	// Leave room below the 4 MiB program cap for the JSON envelope and escaped
+	// line endings. Long comment-padded lines keep the escaping overhead small.
 	line := "G1 X10.000 Y10.000 F1000 ; " + strings.Repeat("p", 1024-28) + "\n"
 	program := strings.Repeat(line, (programBytes-8<<10)/len(line))
 	encoded, _ := json.Marshal(program)

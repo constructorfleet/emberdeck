@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ConstructorFleet/emberdeck/driver"
+	"github.com/ConstructorFleet/emberdeck/jobtransfer"
 	"github.com/ConstructorFleet/emberdeck/plugin"
 	"github.com/gofrs/flock"
 )
@@ -112,6 +113,7 @@ func Open(dir, key string) (*Server, error) {
 	// Admin includes a compatibility path for the bootstrap/local worker that
 	// historically shared EMBERDECK_API_KEY. Dedicated worker keys remain scoped.
 	s.handleAPI("POST /api/v1/drivers/{id}/poll", []string{"worker", "admin"}, true, s.pollDriver)
+	s.handleAPI("GET /api/v1/drivers/{id}/jobs/{job_id}/content", []string{"worker", "admin"}, true, s.getWorkerContent)
 	s.handleAPI("POST /api/v1/jobs/{id}/start", writeRoles, false, s.startJob)
 	s.handleAPI("POST /api/v1/jobs/{id}/cancel", writeRoles, false, s.cancelJob)
 	s.handleAPI("POST /api/v1/jobs/{id}/pause", writeRoles, false, s.pauseJob)
@@ -239,11 +241,11 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		Gcode     string `json:"gcode"`
 		ProfileID string `json:"profile_id"`
 	}
-	body := http.MaxBytesReader(w, r.Body, 4<<20)
+	body := http.MaxBytesReader(w, r.Body, jobtransfer.MaxUploadJSONBytes)
 	decoder := json.NewDecoder(body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&input); err != nil {
-		fail(w, 400, "invalid job JSON (maximum 4 MiB)")
+		fail(w, 400, "invalid job JSON (program maximum 4 MiB; upload JSON maximum 24 MiB plus 64 KiB)")
 		return
 	}
 	if err := decoder.Decode(new(any)); err != io.EOF {
@@ -253,6 +255,10 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	input.Name = strings.TrimSpace(input.Name)
 	if input.Name == "" || len(input.Name) > 200 || strings.TrimSpace(input.Gcode) == "" || strings.ContainsFunc(input.Gcode, func(r rune) bool { return (r < 32 && r != '\n' && r != '\r' && r != '\t') || r == 127 }) {
 		fail(w, 400, "name and text G-code are required")
+		return
+	}
+	if len(input.Gcode) > jobtransfer.MaxProgramBytes {
+		fail(w, http.StatusRequestEntityTooLarge, "job program exceeds the 4 MiB maximum")
 		return
 	}
 	total, err := driver.Validate(input.Gcode)
@@ -294,6 +300,10 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 // addJob stores the program file outside the mutex, then publishes metadata.
 // It writes the failure response itself and reports whether the job exists.
 func (s *Server) addJob(w http.ResponseWriter, job Job, gcode string) (Job, bool) {
+	if len(gcode) > jobtransfer.MaxProgramBytes {
+		fail(w, http.StatusRequestEntityTooLarge, "job program exceeds the 4 MiB maximum")
+		return job, false
+	}
 	job.Size = int64(len(gcode))
 	if err := s.writeProgram(job.ID, gcode); err != nil {
 		fail(w, 500, "could not persist job")

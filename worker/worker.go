@@ -12,13 +12,16 @@ import (
 	"io"
 	"log"
 	mathrand "math/rand/v2"
+	"mime"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/ConstructorFleet/emberdeck/driver"
+	"github.com/ConstructorFleet/emberdeck/jobtransfer"
 	"github.com/ConstructorFleet/emberdeck/toolpath"
 )
 
@@ -95,8 +98,10 @@ type assignment struct {
 	// ReadSettings asks an idle worker to probe the controller with `$$`.
 	ReadSettings bool `json:"read_settings"`
 	Job          struct {
-		ID    string `json:"id"`
-		GCode string `json:"gcode"`
+		ID      string                `json:"id"`
+		GCode   string                `json:"gcode"`
+		Size    int64                 `json:"size"`
+		Content *jobtransfer.Manifest `json:"content"`
 		// ExpectedSettings is the job's profile snapshot. When present, the
 		// controller's `$$` values must match before any program byte is sent.
 		ExpectedSettings *driver.Settings `json:"expected_settings"`
@@ -369,9 +374,22 @@ func RunWithOptions(ctx context.Context, serverURL, key, id string, connect Conn
 				// A settings probe saw a reset banner; refuse without reopening.
 				terminal = progress{JobID: assignment.Job.ID, Lease: assignment.Lease, State: "failed", Error: reset}
 			} else {
-				terminal, err = runJob(ctx, client, endpoint, key, session, assignment, connect, report)
-				if err != nil && terminal.State == "" {
-					return err
+				if assignment.Job.Content != nil {
+					gcode, fetchErr := fetchContent(ctx, client, endpoint, key, session, assignment)
+					if fetchErr != nil {
+						if ctx.Err() != nil {
+							return ctx.Err()
+						}
+						terminal = progress{JobID: assignment.Job.ID, Lease: assignment.Lease, State: "failed", Error: "job content transfer: " + fetchErr.Error()}
+					} else {
+						assignment.Job.GCode = gcode
+					}
+				}
+				if terminal.State == "" {
+					terminal, err = runJob(ctx, client, endpoint, key, session, assignment, connect, report)
+					if err != nil && terminal.State == "" {
+						return err
+					}
 				}
 			}
 			completed[assignment.Lease] = terminal
@@ -423,6 +441,9 @@ func validArguments(ctx context.Context, serverURL, key, id string, connect Conn
 }
 
 func runJob(ctx context.Context, client *http.Client, endpoint, key, session string, a assignment, connect Connector, report *controllerReport) (progress, error) {
+	if len(a.Job.GCode) > jobtransfer.MaxProgramBytes {
+		return progress{JobID: a.Job.ID, Lease: a.Lease, State: "failed", Error: "job program exceeds the 4 MiB worker limit"}, nil
+	}
 	total, validationErr := driver.Validate(a.Job.GCode)
 	if validationErr != nil {
 		return progress{JobID: a.Job.ID, Lease: a.Lease, State: "failed", Error: validationErr.Error()}, nil
@@ -567,6 +588,100 @@ func postTerminal(ctx context.Context, client *http.Client, endpoint, key string
 	}
 }
 
+const (
+	contentSessionHeader = "X-EmberDeck-Session"
+	contentLeaseHeader   = "X-EmberDeck-Lease"
+	contentDigestHeader  = "X-EmberDeck-Content-SHA256"
+	contentFetchAttempts = 3
+)
+
+func fetchContent(ctx context.Context, client *http.Client, pollEndpoint, key, session string, a assignment) (string, error) {
+	manifest := a.Job.Content
+	if manifest == nil || a.Job.GCode != "" || a.Job.ID == "" || a.Job.Size != manifest.Size || a.Lease == "" || session == "" {
+		return "", errors.New("incomplete or ambiguous content assignment")
+	}
+	if err := manifest.Validate(); err != nil {
+		return "", err
+	}
+	if _, err := hex.DecodeString(a.Job.ID); err != nil || len(a.Job.ID) != 32 {
+		return "", errors.New("invalid job ID in content assignment")
+	}
+	contentEndpoint := strings.TrimSuffix(pollEndpoint, "/poll") + "/jobs/" + url.PathEscape(a.Job.ID) + "/content"
+	transferClient := *client
+	transferClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	content := make([]byte, 0, int(manifest.Size))
+	for offset := int64(0); offset < manifest.Size; {
+		length := min(int64(jobtransfer.MaxChunkBytes), manifest.Size-offset)
+		chunk, err := fetchContentChunk(ctx, &transferClient, contentEndpoint, key, session, a.Lease, *manifest, offset, length)
+		if err != nil {
+			return "", err
+		}
+		content = append(content, chunk...)
+		offset += int64(len(chunk))
+	}
+	if err := jobtransfer.Verify(content, *manifest); err != nil {
+		return "", err
+	}
+	return string(content), nil
+}
+
+func fetchContentChunk(ctx context.Context, client *http.Client, endpoint, key, session, lease string, manifest jobtransfer.Manifest, start, length int64) ([]byte, error) {
+	end := start + length - 1
+	expectedRange := fmt.Sprintf("bytes %d-%d/%d", start, end, manifest.Size)
+	for attempt := 0; attempt < contentFetchAttempts; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+key)
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
+		req.Header.Set(contentSessionHeader, session)
+		req.Header.Set(contentLeaseHeader, lease)
+		response, err := client.Do(req)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if attempt+1 == contentFetchAttempts {
+				return nil, fmt.Errorf("request chunk at byte %d: %w", start, err)
+			}
+			if err := wait(ctx, time.Duration(100*(1<<attempt))*time.Millisecond); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		data, readErr := io.ReadAll(io.LimitReader(response.Body, length+1))
+		closeErr := response.Body.Close()
+		if response.StatusCode >= http.StatusInternalServerError {
+			if attempt+1 == contentFetchAttempts {
+				return nil, fmt.Errorf("chunk request returned HTTP %d", response.StatusCode)
+			}
+			if err := wait(ctx, time.Duration(100*(1<<attempt))*time.Millisecond); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if response.StatusCode != http.StatusPartialContent {
+			return nil, fmt.Errorf("chunk request returned HTTP %d", response.StatusCode)
+		}
+		if readErr != nil || closeErr != nil || int64(len(data)) != length {
+			if attempt+1 == contentFetchAttempts {
+				return nil, fmt.Errorf("chunk at byte %d was truncated", start)
+			}
+			if err := wait(ctx, time.Duration(100*(1<<attempt))*time.Millisecond); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
+		if err != nil || mediaType != "application/octet-stream" || response.Header.Get("Content-Range") != expectedRange || response.Header.Get(contentDigestHeader) != manifest.SHA256 {
+			return nil, fmt.Errorf("chunk at byte %d does not match the content manifest", start)
+		}
+		return data, nil
+	}
+	return nil, errors.New("job content transfer failed")
+}
+
 type statusError struct {
 	code int
 	body string
@@ -591,7 +706,7 @@ func post(ctx context.Context, client *http.Client, endpoint, key string, payloa
 		return err
 	}
 	defer response.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
+	data, err := io.ReadAll(io.LimitReader(response.Body, jobtransfer.MaxWorkerResponseBytes))
 	if err != nil {
 		return err
 	}
