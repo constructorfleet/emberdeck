@@ -158,3 +158,15 @@ envelope. Coordinates, dimensions, feed, and power accept at most three decimal
 places. Feed must fit the profile range; power must be above zero and at most
 the profile maximum, and must round to at least one GRBL S unit. Other operation
 types and SVG, text, raster, and cut workflows are not supported by this API.
+
+`POST /projects/{id}/generate` accepts `{"revision":N}` and returns 201 with a
+Location pointing to a normal queued job. It requires the current project
+revision and the exact current profile revision. The full G-code is checked by
+the existing GRBL driver validator before persistence. The generated program is
+an immutable job named `<project name>.gcode`; it contains deterministic
+rectangle vector engraving moves, and is never dispatched automatically.
+Generated jobs include `provenance` with `generator_version`, and complete
+`project` and `profile` value snapshots including IDs and revisions. Later
+project edits, project deletion, and profile deletion do not alter those job
+bytes or snapshots. Uploaded jobs have no provenance and retain their existing
+upload behavior.

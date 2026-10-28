@@ -22,17 +22,18 @@ import (
 
 // Job is a durable record. Gcode is the exact uploaded machine program.
 type Job struct {
-	ControllerState string    `json:"controller_state,omitempty"`
-	DriverID        string    `json:"driver_id,omitempty"`
-	Lease           string    `json:"lease,omitempty"`
-	Acked           int       `json:"acked"`
-	Total           int       `json:"total"`
-	Error           string    `json:"error,omitempty"`
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	Gcode           string    `json:"gcode"`
-	State           string    `json:"state"`
-	Created         time.Time `json:"created"`
+	ControllerState string         `json:"controller_state,omitempty"`
+	DriverID        string         `json:"driver_id,omitempty"`
+	Lease           string         `json:"lease,omitempty"`
+	Acked           int            `json:"acked"`
+	Total           int            `json:"total"`
+	Error           string         `json:"error,omitempty"`
+	ID              string         `json:"id"`
+	Name            string         `json:"name"`
+	Gcode           string         `json:"gcode"`
+	State           string         `json:"state"`
+	Created         time.Time      `json:"created"`
+	Provenance      *JobProvenance `json:"provenance,omitempty"`
 }
 
 // Server serializes durable mutations before acknowledging API requests.
@@ -91,11 +92,21 @@ func Open(dir, key string) (*Server, error) {
 	if s.profiles == nil {
 		return nil, errors.New("invalid null profile library")
 	}
+	for id, profile := range s.profiles {
+		if !validHexID(id) || profile.ID != id || profile.Revision < 1 || !validProfileValues(profile) {
+			return nil, errors.New("invalid machine profile library entry")
+		}
+	}
 	if err := loadOptionalJSON(filepath.Join(dir, "designs.json"), &s.projects); err != nil {
 		return nil, err
 	}
 	if s.projects == nil {
 		return nil, errors.New("invalid null design library")
+	}
+	for id, project := range s.projects {
+		if !validHexID(id) || project.ID != id || project.Revision < 1 || !validStoredProject(project, s.profiles) {
+			return nil, errors.New("invalid designer project library entry")
+		}
 	}
 	if err := s.recoverInterrupted(); err != nil {
 		return nil, err
@@ -120,8 +131,17 @@ func Open(dir, key string) (*Server, error) {
 	s.mux.HandleFunc("GET /api/v1/projects/{id}", s.getProject)
 	s.mux.HandleFunc("PUT /api/v1/projects/{id}", s.updateProject)
 	s.mux.HandleFunc("DELETE /api/v1/projects/{id}", s.deleteProject)
+	s.mux.HandleFunc("POST /api/v1/projects/{id}/generate", s.generateProject)
 	opened = true
 	return s, nil
+}
+
+func validHexID(id string) bool {
+	if len(id) != 32 {
+		return false
+	}
+	_, err := hex.DecodeString(id)
+	return err == nil
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {

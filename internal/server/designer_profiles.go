@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -34,10 +35,49 @@ type MachineProfile struct {
 	LaserMode     bool    `json:"laser_mode_enabled"`
 }
 
+type machineProfileJSON MachineProfile
+
+func (profile *MachineProfile) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if !explicitZero(fields["min_s"]) {
+		return errors.New("machine profile must explicitly declare min_s as zero")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var decoded machineProfileJSON
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	*profile = MachineProfile(decoded)
+	return nil
+}
+
 type profileRequest struct {
-	MachineProfile
-	ExpectedRevision int  `json:"revision,omitempty"`
-	DeclaredMinS     *int `json:"min_s"`
+	SchemaVersion    int             `json:"schema_version"`
+	ID               json.RawMessage `json:"id"`
+	Revision         json.RawMessage `json:"revision"`
+	Name             string          `json:"name"`
+	Controller       string          `json:"controller"`
+	Units            string          `json:"units"`
+	Origin           string          `json:"origin"`
+	WidthMM          float64         `json:"width_mm"`
+	HeightMM         float64         `json:"height_mm"`
+	MaxS             int64           `json:"max_s"`
+	MinFeed          float64         `json:"min_feed_mm_min"`
+	MaxFeed          float64         `json:"max_feed_mm_min"`
+	MaxPowerPct      float64         `json:"max_power_percent"`
+	LaserMode        bool            `json:"laser_mode_enabled"`
+	DeclaredMinS     json.RawMessage `json:"min_s"`
+	ExpectedRevision int             `json:"-"`
+}
+
+func (request profileRequest) profile() MachineProfile {
+	return MachineProfile{SchemaVersion: request.SchemaVersion, Name: request.Name, Controller: request.Controller, Units: request.Units, Origin: request.Origin,
+		WidthMM: request.WidthMM, HeightMM: request.HeightMM, MinS: 0, MaxS: request.MaxS, MinFeed: request.MinFeed, MaxFeed: request.MaxFeed,
+		MaxPowerPct: request.MaxPowerPct, LaserMode: request.LaserMode}
 }
 
 // loadOptionalJSON treats an absent library as empty but rejects corrupt or null data.
@@ -49,8 +89,14 @@ func loadOptionalJSON(path string, target any) error {
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal(data, target); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
 		return err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return errors.New("invalid trailing data in designer library")
 	}
 	return nil
 }
@@ -112,24 +158,38 @@ func decodeProfile(w http.ResponseWriter, r *http.Request, request *profileReque
 		return false
 	}
 	request.Name = strings.TrimSpace(request.Name)
-	if request.SchemaVersion != 1 || request.ID != "" || request.Name == "" || len(request.Name) > 120 || request.Controller != "grbl-1.1" || request.Units != "mm" || request.Origin != "lower-left" || !request.LaserMode || request.DeclaredMinS == nil || *request.DeclaredMinS != 0 ||
-		!finite(request.WidthMM) || !finite(request.HeightMM) || !finite(request.MinFeed) || !finite(request.MaxFeed) || !finite(request.MaxPowerPct) ||
-		!validPrecision(request.WidthMM) || !validPrecision(request.HeightMM) || !validPrecision(request.MinFeed) || !validPrecision(request.MaxFeed) || !validPrecision(request.MaxPowerPct) ||
-		request.WidthMM <= 0 || request.WidthMM > 10000 || request.HeightMM <= 0 || request.HeightMM > 10000 || request.MaxS < 1 || request.MaxS > 1_000_000_000 ||
-		request.MinFeed <= 0 || request.MaxFeed < request.MinFeed || request.MaxFeed > 100000 || request.MaxPowerPct <= 0 || request.MaxPowerPct > 100 {
+	if len(request.ID) != 0 || !parseRevisionField(request.Revision, updating, &request.ExpectedRevision) || !explicitZero(request.DeclaredMinS) || !validProfileValues(request.profile()) {
 		fail(w, 400, "invalid GRBL machine profile")
 		return false
 	}
-	if updating {
-		if request.ExpectedRevision < 1 {
-			fail(w, 400, "positive revision is required")
-			return false
-		}
-	} else if request.ExpectedRevision != 0 {
-		fail(w, 400, "revision is not allowed on creation")
+	return true
+}
+
+func parseRevisionField(raw json.RawMessage, updating bool, out *int) bool {
+	if !updating {
+		return len(raw) == 0
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, out) != nil || *out < 1 {
 		return false
 	}
 	return true
+}
+
+func explicitZero(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var value int
+	return json.Unmarshal(raw, &value) == nil && value == 0
+}
+
+func validProfileValues(profile MachineProfile) bool {
+	return profile.SchemaVersion == 1 && profile.Name == strings.TrimSpace(profile.Name) && profile.Name != "" && len(profile.Name) <= 120 &&
+		profile.Controller == "grbl-1.1" && profile.Units == "mm" && profile.Origin == "lower-left" && profile.LaserMode && profile.MinS == 0 &&
+		finite(profile.WidthMM) && finite(profile.HeightMM) && finite(profile.MinFeed) && finite(profile.MaxFeed) && finite(profile.MaxPowerPct) &&
+		validPrecision(profile.WidthMM) && validPrecision(profile.HeightMM) && validPrecision(profile.MinFeed) && validPrecision(profile.MaxFeed) && validPrecision(profile.MaxPowerPct) &&
+		profile.WidthMM > 0 && profile.WidthMM <= 10000 && profile.HeightMM > 0 && profile.HeightMM <= 10000 && profile.MaxS >= 1 && profile.MaxS <= 1_000_000_000 &&
+		profile.MinFeed > 0 && profile.MaxFeed >= profile.MinFeed && profile.MaxFeed <= 100000 && profile.MaxPowerPct > 0 && profile.MaxPowerPct <= 100
 }
 
 func decodeBounded(w http.ResponseWriter, r *http.Request, value any, max int64) bool {
@@ -188,7 +248,7 @@ func (s *Server) createProfile(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "could not allocate profile ID")
 		return
 	}
-	profile := input.MachineProfile
+	profile := input.profile()
 	profile.ID, profile.Revision = id, 1
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -230,7 +290,7 @@ func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "profile revision conflict")
 		return
 	}
-	updated := input.MachineProfile
+	updated := input.profile()
 	updated.ID, updated.Revision = id, current.Revision+1
 	profiles := copyProfiles(s.profiles)
 	profiles[id] = updated
