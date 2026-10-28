@@ -297,6 +297,10 @@ async function main() {
     await expect(row).toContainText(/completed/i, { timeout: 120000 });
     await row.getByRole('button', { name: /^View / }).click();
     await capture(page, 'operator-console-completed.png');
+    const history = page.getByRole('list', { name: 'Job event history' });
+    await expect(history.getByRole('listitem').last()).toContainText('running → completed');
+    await expect(row.locator('.job-times')).toContainText('Duration');
+    await captureElement(page, '#program-history', 'operator-console-job-history.png');
 
     page.once('dialog', (dialog) => dialog.accept());
     await row.getByRole('button', { name: /^Delete / }).click();

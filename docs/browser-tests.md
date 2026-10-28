@@ -44,6 +44,12 @@ warning on an uploaded program, shown on the row and in the Start
 confirmation dialog, and a route-substituted `$32=0` driver report that warns
 on an uploaded program.
 
+`e2e/job-history.spec.js` runs a short job to completion and checks that its
+library row shows start, end, and duration, and that **View** lists the upload,
+dispatch, and worker completion events with source, driver, and opaque session
+and lease references but no lease token. It confirms history remains available
+through the API after deletion and that the history view fits a 360 px screen.
+
 ## Run locally
 
 Install the Python documentation dependency, pinned Node dependencies, and
