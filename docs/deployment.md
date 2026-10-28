@@ -1,5 +1,10 @@
 # Deployment
 
+Prometheus metrics are disabled by default and use a separate listener. See
+[metrics and monitoring](metrics.md) for native, systemd, Docker, and distributed
+worker configuration, authentication, scrape setup, and alerts. Do not expose
+the metrics port publicly.
+
 EmberDeck currently supports the job manager, simulator, a TCP-connected GRBL
 worker, and serial-connected GRBL workers. The CLI exposes serial port
 selection and enumeration. No particular cutter, controller, enclosure, or emergency-stop
@@ -26,6 +31,12 @@ The service listens on port 8080 and stores jobs in the named
 non-root user. No source tree is mounted into the container, and no simulated
 driver starts by default. Open `http://localhost:8080/` and enter the same API
 key in the browser.
+
+The optional listener is not published in the default Compose configuration.
+For a private monitoring setup, add `-metrics-listen 0.0.0.0:9090` to the
+command, publish `127.0.0.1:9090:9090` (or attach Prometheus to a private Compose
+network), and set `EMBERDECK_METRICS_KEY` to a separate secret. A commented
+Compose sketch is in `compose.yaml`.
 
 To run an explicitly software-only demo with an in-process simulator:
 

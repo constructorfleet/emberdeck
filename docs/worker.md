@@ -53,3 +53,8 @@ supervises its local worker with `worker.Supervise`. A worker failure is logged
 with the real transport, for example `serial driver /dev/ttyUSB0: ...`. The
 local driver shows as offline until a new session registers, and the HTTP
 server keeps running.
+
+Workers do not expose a metrics listener. When enabled, EmberDeck's central
+server exports its observed worker heartbeat and job state at its separate
+Prometheus listener; these are server-side observations, not physical machine
+telemetry. See [metrics and monitoring](metrics.md).

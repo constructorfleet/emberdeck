@@ -52,6 +52,7 @@ func run(args []string) error {
 func runServe(args []string) error {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	listenAddress := flags.String("listen", "127.0.0.1:8080", "HTTP listen address")
+	metricsListenAddress := flags.String("metrics-listen", "", "optional Prometheus metrics listen address (disabled by default)")
 	data := flags.String("data", "data", "job library directory")
 	plugins := flags.String("plugins", "", "optional directory of plugins to load")
 	simulate := flags.Bool("simulate", false, "run a simulated local driver")
@@ -86,9 +87,29 @@ func runServe(args []string) error {
 			log.Printf("close job library: %v", err)
 		}
 	}()
+	handler.SetBuildVersion(version)
 	listener, err := net.Listen("tcp", *listenAddress)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
+	}
+	var metricsServer *http.Server
+	var metricsServeErr chan error
+	if *metricsListenAddress != "" {
+		metricsListener, err := net.Listen("tcp", *metricsListenAddress)
+		if err != nil {
+			_ = listener.Close()
+			return fmt.Errorf("metrics listen: %w", err)
+		}
+		metricsServer = &http.Server{
+			Handler:           handler.MetricsHandler(os.Getenv("EMBERDECK_METRICS_KEY")),
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       15 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       60 * time.Second,
+		}
+		metricsServeErr = make(chan error, 1)
+		go func() { metricsServeErr <- metricsServer.Serve(metricsListener) }()
+		defer func() { _ = metricsServer.Close() }()
 	}
 	httpServer := &http.Server{
 		Handler:           handler,
@@ -137,6 +158,13 @@ func runServe(args []string) error {
 				return nil
 			}
 			return fmt.Errorf("serve HTTP: %w", err)
+		case err := <-metricsServeErr:
+			metricsServeErr = nil
+			_ = httpServer.Close()
+			if errors.Is(err, http.ErrServerClosed) {
+				return nil
+			}
+			return fmt.Errorf("serve metrics: %w", err)
 		case <-ctx.Done():
 			waiting = false
 		case err := <-workerErr:
@@ -151,6 +179,15 @@ func runServe(args []string) error {
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		_ = httpServer.Close()
 		return fmt.Errorf("shut down HTTP server: %w", err)
+	}
+	if metricsServer != nil {
+		if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+			_ = metricsServer.Close()
+			return fmt.Errorf("shut down metrics server: %w", err)
+		}
+		if err := <-metricsServeErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("serve metrics: %w", err)
+		}
 	}
 	if err := <-serveErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("serve HTTP: %w", err)

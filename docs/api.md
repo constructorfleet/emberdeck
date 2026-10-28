@@ -8,6 +8,11 @@ do not give it to untrusted users or plugins. There is no multi-user RBAC yet.
 Use HTTPS through a TLS reverse proxy for remote access. The native listener is
 loopback-only by default and does not terminate TLS itself.
 
+Optional Prometheus metrics are served from `/metrics` on the separately
+configured `serve -metrics-listen` listener, not on the authenticated API mux or
+in the generated API route index. See [metrics and monitoring](metrics.md) for
+the contract, access control, and scrape examples.
+
 Requests and responses are JSON, except successful deletion (204). Errors return
 `{"error":"description"}`. Unknown JSON fields and trailing objects are rejected.
 

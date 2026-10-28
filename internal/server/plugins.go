@@ -48,14 +48,23 @@ func (s *Server) preflight(ctx context.Context, id string) error {
 	}
 	for _, p := range s.plugins {
 		timeout, cancel := context.WithTimeout(ctx, 5*time.Second)
-		result, err := p.Run(timeout, plugin.Request{GCode: job.Gcode})
+		started := time.Now()
+		result, err := p.Run(timeout, plugin.Request{ProtocolVersion: plugin.ProtocolVersion, GCode: job.Gcode})
 		cancel()
 		if err != nil {
+			s.observePlugin("error", time.Since(started))
 			return fmt.Errorf("preflight %s failed: %w", p.Manifest.Name, err)
 		}
 		if !result.OK {
+			s.observePlugin("rejected", time.Since(started))
 			return fmt.Errorf("preflight %s rejected job: %s", p.Manifest.Name, result.Message)
 		}
+		s.observePlugin("ok", time.Since(started))
 	}
 	return nil
+}
+
+func (s *Server) observePlugin(outcome string, elapsed time.Duration) {
+	s.metrics.pluginInvokes.WithLabelValues(outcome).Inc()
+	s.metrics.pluginDuration.WithLabelValues(outcome).Observe(elapsed.Seconds())
 }
