@@ -15,14 +15,11 @@
 @media(max-width:760px){.vector-layers .layer-row{grid-template-columns:20px minmax(60px,1fr) minmax(65px,1fr) minmax(60px,1fr)}}
 
 .toolpath-live{width:100%;min-width:0;margin-top:8px;padding:8px;border:1px solid #343c37;background:#101412}.toolpath-summary,.toolpath-legend,.toolpath-caveat{margin:5px 0;color:#bac4b7;font:10px/1.5 var(--mono);overflow-wrap:anywhere}.toolpath-caveat{color:#d6c99f}.toolpath-controls{display:flex;gap:5px;margin:6px 0}.toolpath-svg{display:block;width:100%;height:180px;border:1px solid #2a302c;background:#131715;touch-action:none;cursor:grab}.toolpath-svg:active{cursor:grabbing}.toolpath-segment{fill:none;stroke-width:2.5;vector-effect:non-scaling-stroke}.path-completed{stroke:#98c95f}.path-active{stroke:#ffd27c;stroke-width:4}.path-remaining{stroke:#78847a}.path-laser-off{stroke-dasharray:6 4}.toolpath-head{fill:#ff8e78;stroke:#fff1dc;stroke-width:2;vector-effect:non-scaling-stroke}.toolpath-legend{color:#89938a}
-<<<<<<< HEAD
 .auth>.section-title{grid-column:1/-1;align-items:flex-start}
 #connection-state,#connection-controls{grid-column:2;grid-row:2;align-self:start;justify-self:end}
 .connection-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--green);font:10px var(--mono);letter-spacing:.1em}
 .connection-controls[hidden]{display:none}
 .lock-icon{align-self:flex-start}
 @media(max-width:760px){.auth>.section-title{grid-column:1}.auth #connection-state,.auth #connection-controls{grid-column:1;grid-row:auto}}
-=======
 .bounds-override{display:flex;align-items:flex-start;gap:7px;margin-top:6px;color:#e0c996;font:10px/1.45 var(--mono)}.bounds-override input{flex:none;accent-color:var(--green);margin:1px 0 0}.toolpath-profile-bounds{fill:rgba(152,201,95,.025);stroke:#98c95f;stroke-width:1.5;stroke-dasharray:5 4;vector-effect:non-scaling-stroke}
 .bounds-status-out_of_bounds{color:#ff9f8d}.bounds-status-unknown{color:#e0c996}.bounds-status-in_bounds{color:#a9d778}
->>>>>>> f8ac2a4 (feat: review uploaded G-code against machine profiles)

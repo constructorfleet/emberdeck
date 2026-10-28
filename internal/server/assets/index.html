@@ -114,16 +114,10 @@
         <div class="section-title"><div><p class="eyebrow">02 / INTAKE</p><h2 id="upload-title">Add a program</h2></div><span class="step-number">02</span></div>
         <form id="upload-form">
           <label for="job-file">G-code file</label>
-<<<<<<< HEAD
           <label class="dropzone" for="job-file"><span class="upload-icon" aria-hidden="true">↑</span><strong id="file-label">Choose a G-code file</strong><span>Plain text · up to 4 MiB</span><input id="job-file" type="file" accept=".gcode,.nc,.txt,text/plain" required disabled></label>
           <label for="job-name">Display name</label><input id="job-name" type="text" maxlength="200" placeholder="e.g. acrylic-panel.gcode" required disabled>
+          <label for="upload-profile-select">Machine profile for bounds review</label><select id="upload-profile-select" disabled><option value="">No profile selected · bounds unknown</option></select>
           <button class="button button-primary wide" type="submit" disabled>Add to library <span aria-hidden="true">→</span></button>
-=======
-          <label class="dropzone" for="job-file"><span class="upload-icon" aria-hidden="true">↑</span><strong id="file-label">Choose a G-code file</strong><span>Plain text · up to 4 MiB</span><input id="job-file" type="file" accept=".gcode,.nc,.txt,text/plain" required></label>
-          <label for="job-name">Display name</label><input id="job-name" type="text" maxlength="200" placeholder="e.g. acrylic-panel.gcode" required>
-          <label for="upload-profile-select">Machine profile for bounds review</label><select id="upload-profile-select"><option value="">No profile selected · bounds unknown</option></select>
-          <button class="button button-primary wide" type="submit">Add to library <span aria-hidden="true">→</span></button>
->>>>>>> f8ac2a4 (feat: review uploaded G-code against machine profiles)
         </form>
       </section>
       <section class="panel jobs-panel" aria-labelledby="jobs-title">
