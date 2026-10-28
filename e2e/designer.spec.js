@@ -73,7 +73,7 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
   await page.getByRole('button', { name: 'Edit profile' }).click();
   await expect(page.getByRole('button', { name: 'Generate queued job' })).toBeDisabled();
   await expect(page.locator('#profile-save-hint')).toBeVisible();
-  await page.getByRole('button', { name: 'Cancel' }).click();
+  await page.locator('#profile-form').getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.locator('#profile-save-hint')).toBeHidden();
   await expect(page.getByRole('button', { name: 'Generate queued job' })).toBeEnabled();
 
