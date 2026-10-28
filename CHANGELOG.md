@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.8.0](https://github.com/constructorfleet/emberdeck/compare/v0.7.0...v0.8.0) (2026-10-28)
+
+
+### Features
+
+* add dedicated designer page and mouse transforms ([#101](https://github.com/constructorfleet/emberdeck/issues/101)) ([f67400b](https://github.com/constructorfleet/emberdeck/commit/f67400b1a150df3dbb43306a50b6bd1341131bb9))
+* support smooth SVG path curves ([#104](https://github.com/constructorfleet/emberdeck/issues/104)) ([64ed7f8](https://github.com/constructorfleet/emberdeck/commit/64ed7f8bba868ca18267047b869590d156c9219e))
+
+
+### Bug Fixes
+
+* **designer:** resize rotated shapes in local axes ([#103](https://github.com/constructorfleet/emberdeck/issues/103)) ([c1f72dc](https://github.com/constructorfleet/emberdeck/commit/c1f72dcc66420311b8579c5a48f9ac8cb6e0d324))
+
 ## [0.7.0](https://github.com/constructorfleet/emberdeck/compare/v0.6.0...v0.7.0) (2026-10-28)
 
 
