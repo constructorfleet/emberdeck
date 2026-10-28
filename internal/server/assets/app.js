@@ -54,6 +54,9 @@
   let selectedVectorObject = "";
   let selectedVectorObjects = new Set();
   let vectorIDSequence = 0;
+  let textGeometryPending = false;
+  let textGeometryError = "";
+  let textGeometryRequest = 0;
   const toolpathCache = new Map();
   const toolpathViewports = new Map();
   const boundsOverrides = new Set();
@@ -599,6 +602,7 @@
 
   function vectorObjectPayload(object) {
     const payload = { id: object.id, kind: objectKind(object), ...(object.operation_id ? { operation_id: object.operation_id } : {}), subpaths: object.subpaths };
+    if (object.text) payload.text = { ...object.text };
     if (object.transform && !isIdentityTransform(object.transform)) payload.transform = normalizedTransform(object.transform);
     return payload;
   }
@@ -738,8 +742,25 @@
     $("#vector-transform").hidden = !object;
     if (!object) return;
     const bounds = boundsFor(object);
-    $("#vector-x").value = bounds.x.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
-    $("#vector-y").value = bounds.y.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+    const textObject = objectKind(object) === "text";
+    $("#vector-text-fields").hidden = !textObject;
+    $("#vector-width").closest("label").hidden = textObject;
+    $("#vector-height").closest("label").hidden = textObject;
+    $("#vector-text-content").value = object.text?.content || "";
+    $("#vector-text-size").value = String(object.text?.size_mm ?? 10);
+    ["#vector-x", "#vector-y"].forEach((selector) => {
+      const field = $(selector);
+      if (textObject) field.setAttribute("aria-describedby", "vector-text-error");
+      else field.removeAttribute("aria-describedby");
+    });
+    $("#vector-text-error").textContent = textGeometryError;
+    $("#vector-text-error").hidden = !textGeometryError;
+    $("#vector-x-label").firstChild.textContent = textObject ? "Origin X (mm)" : "X (mm)";
+    $("#vector-y-label").firstChild.textContent = textObject ? "Origin Y (mm)" : "Y (mm)";
+    const displayedX = textObject ? object.text.x_mm : bounds.x;
+    const displayedY = textObject ? object.text.y_mm : bounds.y;
+    $("#vector-x").value = displayedX.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+    $("#vector-y").value = displayedY.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
     $("#vector-width").value = Math.max(0.001, bounds.width).toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
     $("#vector-height").value = Math.max(0.001, bounds.height).toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
     const transform = normalizedTransform(object.transform);
@@ -750,7 +771,11 @@
     $("#vector-rotation").value = String(transform.rotation_deg);
     const assignment = $("#vector-object-operation");
     assignment.replaceChildren(new Option("Unassigned", ""));
-    vectorOperations.forEach((operation, index) => assignment.append(new Option(`${index + 1}. ${operation.type.replace("vector-", "")}`, operation.id)));
+    vectorOperations.forEach((operation, index) => {
+      const option = new Option(`${index + 1}. ${operation.type.replace("vector-", "")}`, operation.id);
+      if (textObject && operation.type === "vector-cut") option.disabled = true;
+      assignment.append(option);
+    });
     assignment.value = object.operation_id || "";
   }
 
@@ -859,6 +884,8 @@
     if (!profile) return "Select or create a declared profile first.";
     if (!$("#vector-name").value.trim()) return "Enter a project name.";
     if (!vectorObjects.length) return "Add at least one shape.";
+    if (textGeometryPending) return "Text stroke geometry is still being generated.";
+    if (textGeometryError) return textGeometryError;
     if (vectorObjects.length > 500 || vectorOperations.length > 100) return "The project exceeds the supported shape or operation count.";
     if (vectorObjects.some((object) => object.id === selectedVectorObject)) {
       const geometry = ["#vector-x", "#vector-y", "#vector-width", "#vector-height"].map(finiteField);
@@ -886,6 +913,7 @@
       if (object.operation_id) {
         const operation = vectorOperations.find((candidate) => candidate.id === object.operation_id);
         if (!operation) return "A shape refers to a missing operation layer.";
+        if (objectKind(object) === "text" && operation.type === "vector-cut") return "Text objects can only be assigned to engraving layers.";
         if (operation.type === "vector-cut" && transformed.some((path) => !path.closed || !pathHasArea(path.points))) return "Cut operations require closed shapes with nonzero area. Assign this path to an engraving layer or change its geometry.";
       }
     }
@@ -904,6 +932,10 @@
 
   function updateVectorValidation() {
     if ($("#vector-form").hidden) return;
+    const selectedObject = vectorObjects.find((candidate) => candidate.id === selectedVectorObject);
+    const textError = selectedObject && objectKind(selectedObject) === "text" ? textGeometryError : "";
+    $("#vector-text-error").textContent = textError;
+    $("#vector-text-error").hidden = !textError;
     const profile = selectedProfile();
     const error = vectorValidation();
     const stale = Boolean(openVectorProject && profile && (openVectorProject.profile_id !== profile.id || openVectorProject.profile_revision !== profile.revision));
@@ -929,10 +961,13 @@
 
   function fillVectorProject(project = null) {
     openVectorProject = project;
-    vectorObjects = project ? project.objects.map((object) => ({ ...object, kind: objectKind(object), transform: object.transform ? { ...object.transform } : undefined, subpaths: object.subpaths.map((path) => ({ ...path, points: path.points.map((point) => ({ ...point })) })) })) : [];
+    vectorObjects = project ? project.objects.map((object) => ({ ...object, text: object.text ? { ...object.text } : undefined, kind: objectKind(object), transform: object.transform ? { ...object.transform } : undefined, subpaths: object.subpaths.map((path) => ({ ...path, points: path.points.map((point) => ({ ...point })) })) })) : [];
+    textGeometryError = "";
+    textGeometryPending = false;
     vectorOperations = project ? project.operations.map((operation) => ({ ...operation })) : [{ id: vectorID("operation"), type: "vector-engrave", feed_mm_min: 600, power_percent: 25 }];
     selectedVectorObject = vectorObjects[0]?.id || "";
     selectedVectorObjects = new Set(selectedVectorObject ? [selectedVectorObject] : []);
+    $("#vector-align-status").textContent = "";
     $("#vector-form").hidden = false;
     $("#vector-name").value = project ? project.name : "Untitled vector design";
     $("#vector-form-title").textContent = project ? `Edit ${project.name}` : "New multi-path vector project";
@@ -940,24 +975,81 @@
     renderVectorEditor();
   }
 
-  function addVectorShape(type) {
+  async function addVectorShape(type) {
     const profile = selectedProfile();
     if (!profile) return;
     const x = Math.min(10 + vectorObjects.length * 5, Math.max(0, profile.width_mm - 20));
     const y = Math.min(10 + vectorObjects.length * 5, Math.max(0, profile.height_mm - 20));
     const width = Math.min(30, profile.width_mm - x), height = Math.min(20, profile.height_mm - y);
     const closed = type !== "line";
-    const object = { id: vectorID("shape"), kind: type, subpaths: [{ points: shapePoints(type, x, y, width, height), closed }] };
+    const object = type === "text"
+      ? { id: vectorID("text"), kind: "text", text: { content: "EMBER", font: "emberdeck-stick-v1", size_mm: 10, x_mm: x, y_mm: y }, subpaths: [] }
+      : { id: vectorID("shape"), kind: type, subpaths: [{ points: shapePoints(type, x, y, width, height), closed }] };
     if (vectorOperations[0]) object.operation_id = vectorOperations[0].id;
     vectorObjects.push(object);
     selectedVectorObject = object.id;
     selectedVectorObjects = new Set([object.id]);
+    if (type === "text") await requestTextGeometry(object);
     renderVectorEditor();
+  }
+
+  function localTextError(text) {
+    const errors = {
+      content: !text.content.trim() ? "Enter text to engrave."
+        : [...text.content].length > 32 ? "Text is limited to 32 characters."
+          : !/^[A-Za-z0-9 .,;:!?+\-/_()]+$/.test(text.content) ? "Use A–Z, 0–9, spaces, and . , : ; ! ? + - / _ ( )." : "",
+      size_mm: !Number.isFinite(text.size_mm) || !decimalPlacesAtMostThree(String(text.size_mm)) || text.size_mm < 1 || text.size_mm > 100 ? "Text height must be from 1 to 100 mm with at most three decimals." : "",
+      x_mm: !Number.isFinite(text.x_mm) || !decimalPlacesAtMostThree(String(text.x_mm)) || text.x_mm < 0 || text.x_mm > 10000 ? "Text X position must be from 0 to 10,000 mm with at most three decimals." : "",
+      y_mm: !Number.isFinite(text.y_mm) || !decimalPlacesAtMostThree(String(text.y_mm)) || text.y_mm < 0 || text.y_mm > 10000 ? "Text Y position must be from 0 to 10,000 mm with at most three decimals." : "",
+    };
+    [["#vector-text-content", errors.content], ["#vector-text-size", errors.size_mm], ["#vector-x", errors.x_mm], ["#vector-y", errors.y_mm]]
+      .forEach(([selector, error]) => $(selector).setAttribute("aria-invalid", error ? "true" : "false"));
+    return Object.values(errors).find(Boolean) || "";
+  }
+
+  async function requestTextGeometry(object) {
+    const text = object.text;
+    textGeometryError = localTextError(text);
+    if (textGeometryError) { textGeometryPending = false; return updateVectorValidation(); }
+    const requestID = ++textGeometryRequest;
+    textGeometryPending = true;
+    textGeometryError = "";
+    updateVectorValidation();
+    try {
+      const response = await fetch("/api/v1/designer/text-geometry", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(text),
+      });
+      const result = await response.json();
+      if (response.status === 401 && token) forgetSession({ focus: true, clearInput: false });
+      if (!response.ok) throw new Error(result.error || `Text geometry failed (${response.status})`);
+      if (requestID !== textGeometryRequest || !vectorObjects.some((candidate) => candidate.id === object.id)) return;
+      object.subpaths = result.subpaths;
+    } catch (error) {
+      if (requestID === textGeometryRequest) textGeometryError = error.message;
+    } finally {
+      if (requestID === textGeometryRequest) { textGeometryPending = false; renderVectorEditor(); }
+    }
+  }
+
+  function updateSelectedText() {
+    const object = vectorObjects.find((candidate) => candidate.id === selectedVectorObject && objectKind(candidate) === "text");
+    if (!object) return;
+    object.text = {
+      ...object.text,
+      content: $("#vector-text-content").value,
+      size_mm: finiteField("#vector-text-size"),
+      x_mm: finiteField("#vector-x"),
+      y_mm: finiteField("#vector-y"),
+    };
+    requestTextGeometry(object);
   }
 
   function updateSelectedGeometry() {
     const object = vectorObjects.find((candidate) => candidate.id === selectedVectorObject);
     if (!object) return;
+    if (objectKind(object) === "text") return updateSelectedText();
     const vals = ["#vector-x", "#vector-y", "#vector-width", "#vector-height"].map(finiteField);
     if (vals.some((value) => value === null) || vals[2] <= 0 || vals[3] <= 0) return updateVectorValidation();
     const [x, y, width, height] = vals;
@@ -1121,7 +1213,8 @@
   });
   $("#vector-form").addEventListener("submit", saveVectorProject);
   $("#vector-form").addEventListener("input", (event) => {
-    if (event.target.matches("#vector-x, #vector-y, #vector-width, #vector-height")) updateSelectedGeometry();
+    if (event.target.matches("#vector-text-content, #vector-text-size")) updateSelectedText();
+    else if (event.target.matches("#vector-x, #vector-y, #vector-width, #vector-height")) updateSelectedGeometry();
     else if (event.target.matches("#vector-translate-x, #vector-translate-y, #vector-scale-x, #vector-scale-y, #vector-rotation")) updateSelectedTransform();
     else updateVectorValidation();
   });

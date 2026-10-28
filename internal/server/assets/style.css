@@ -808,9 +808,17 @@ footer {
   line-height: 1.4;
 }
 
+.numeric-grid label[hidden] {
+  display: none;
+}
+
 .numeric-grid input {
   display: block;
   margin-top: var(--space-1);
+}
+
+.numeric-grid input[aria-invalid="true"] {
+  border-color: var(--danger);
 }
 
 .designer-form > input {
@@ -1039,6 +1047,21 @@ footer {
 
 .vector-fields {
   margin-top: var(--space-3);
+}
+
+#vector-text-fields {
+  grid-column: 1 / -1;
+}
+
+#vector-text-fields .hint,
+#vector-text-fields .field-error {
+  grid-column: 1 / -1;
+}
+
+.field-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--type-xs);
 }
 
 .layer-heading {
@@ -1277,6 +1300,10 @@ footer {
 }
 
 @media (max-width: 760px) {
+  #vector-text-fields label:first-of-type {
+    grid-column: 1 / -1;
+  }
+
   .topbar {
     height: 64px;
     padding: 0 var(--space-4);

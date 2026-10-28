@@ -33,8 +33,8 @@
       <button class="button button-small notice-dismiss" type="button" aria-label="Dismiss notification">Dismiss</button>
     </div>
     <section id="designer-panel" class="panel designer-panel" aria-labelledby="designer-title">
-      <div class="section-title"><div><p class="eyebrow">DESIGN SOURCE</p><h2 id="designer-title">Profiles and rectangle projects</h2></div><span class="step-number">MM · GRBL</span></div>
-      <p class="designer-intro">Declare the prepared work area and edit one vector-engraved rectangle. Coordinates use the lower-left work origin; controller settings are read for verification but never changed.</p>
+      <div class="section-title"><div><p class="eyebrow">DESIGN SOURCE</p><h2 id="designer-title">Profiles and vector projects</h2></div><span class="step-number">MM · GRBL</span></div>
+      <p class="designer-intro">Declare the prepared work area, edit a rectangle or multi-path vector design, and review its generated job before dispatch. Coordinates use the lower-left work origin; controller settings are read for verification but never changed.</p>
       <div id="designer-status" class="designer-status" role="status">Connect to load saved profiles and projects.</div>
       <div class="designer-columns">
         <section class="designer-section" aria-labelledby="profiles-title">
@@ -96,6 +96,7 @@
                 <button class="button button-small" type="button" data-add-shape="rectangle">Add rectangle</button>
                 <button class="button button-small" type="button" data-add-shape="ellipse">Add ellipse</button>
                 <button class="button button-small" type="button" data-add-shape="line">Add line</button>
+                <button class="button button-small" type="button" data-add-shape="text">Add text</button>
                 <label class="button button-small svg-import-button" for="vector-svg-file">Import SVG<input id="vector-svg-file" type="file" accept=".svg,image/svg+xml" disabled></label>
               </div>
               <p class="hint">Imports static paths and basic shapes. SVG C/c and Q/q curves become lines within 0.05 mm chord deviation; circles and ellipses become 32-point paths. M/L/H/V/Z and C/c/Q/q paths and element transforms are supported. Curves exceeding the 4,000-point or subdivision limits, nested groups, styling, text, and machine settings are not imported.</p>
@@ -113,8 +114,14 @@
                 <p id="vector-align-status" class="hint" aria-live="polite"></p>
               </div>
               <div id="vector-geometry" class="numeric-grid vector-fields" hidden>
-                <label>X (mm)<input id="vector-x" type="number" min="0" step="0.001"></label>
-                <label>Y (mm)<input id="vector-y" type="number" min="0" step="0.001"></label>
+                <div id="vector-text-fields" class="numeric-grid vector-fields" hidden>
+                  <label>Text<input id="vector-text-content" maxlength="32" autocomplete="off" aria-describedby="vector-text-error"></label>
+                  <label>Text height (mm)<input id="vector-text-size" type="number" min="1" max="100" step="0.001" aria-describedby="vector-text-error"></label>
+                  <p id="vector-text-error" class="field-error" role="alert" hidden></p>
+                  <p class="hint">Monoline font EmberDeck Stick v1. Engraving only. Use A–Z, 0–9, space, and . , : ; ! ? + - / _ ( ). Lowercase becomes uppercase; up to 32 characters, 1–100 mm high.</p>
+                </div>
+                <label id="vector-x-label">X (mm)<input id="vector-x" type="number" min="0" step="0.001"></label>
+                <label id="vector-y-label">Y (mm)<input id="vector-y" type="number" min="0" step="0.001"></label>
                 <label>Width (mm)<input id="vector-width" type="number" min="0.001" step="0.001"></label>
                 <label>Height (mm)<input id="vector-height" type="number" min="0.001" step="0.001"></label>
                 <label>Operation layer<select id="vector-object-operation"></select></label>

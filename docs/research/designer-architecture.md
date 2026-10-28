@@ -1,6 +1,6 @@
 # Browser laser designer: architecture review
 
-**Status:** version 1 rectangle engraving and version 2 multi-path vector projects with saved per-object translation, X/Y scale, rotation, multi-selection, and group alignment are implemented; this document also retains the source review and remaining architecture for [issue #4](https://github.com/constructorfleet/emberdeck/issues/4). The full issue remains open. Issue #4 asks for creation/import, editing, operations, profile-aware preview, editable projects, generated jobs, explicit dispatch, public-seam geometry tests, browser workflow tests, and illustrated operator instructions. It specifically requires separate milestones for vector cutting, vector engraving, and raster engraving.
+**Status:** version 1 rectangle engraving and version 2 multi-path vector projects with saved per-object translation, X/Y scale, rotation, multi-selection, group alignment, and editable monoline text engraving are implemented; this document also retains the source review and remaining architecture for [issue #4](https://github.com/constructorfleet/emberdeck/issues/4). The full issue remains open. Issue #4 asks for creation/import, editing, operations, profile-aware preview, editable projects, generated jobs, explicit dispatch, public-seam geometry tests, browser workflow tests, and illustrated operator instructions. It specifically requires separate milestones for vector cutting, vector engraving, and raster engraving.
 
 ## Implemented rectangle milestone
 
@@ -14,7 +14,7 @@ See the [API contract](../api.md) and [illustrated guide](../operator-guide.md).
 
 This version 1 milestone has one rectangle outline and one vector-engraving
 operation. The separate version 2 milestone below adds multiple objects and a
-bounded SVG importer. Text import and raster engraving remain unavailable. The
+bounded SVG importer. SVG text import and raster engraving remain unavailable. The
 static preview is not execution monitoring for
 [issue #7](https://github.com/constructorfleet/emberdeck/issues/7).
 
@@ -34,6 +34,16 @@ static SVG importer stores accepted geometry in this same editable path model;
 imported paths remain unassigned until an operator chooses an operation layer.
 No SVG style or machine setting is inferred.
 
+Native text objects preserve editable source content, font ID, height, and
+origin alongside server-generated open stroke paths. The hand-authored
+`emberdeck-stick-v1` table accepts ASCII A–Z and a–z, digits, space, and
+`. , : ; ! ? + - / _ ( )`; lowercase maps to uppercase stroke forms. Input is
+limited to 1–32 characters and 1–100 mm height, with origins bounded to
+0–10,000 mm. Generation and preview consume the same rounded millimetre
+geometry, and the server permits these open paths only on vector-engrave layers.
+No external runtime font dependency is used. Raster engraving remains
+unsupported.
+
 SVG `C/c` cubic and `Q/q` quadratic curves are flattened to editable
 millimetre polylines with a 0.05 mm chord tolerance after element transforms and
 viewport scaling, capped at 4,000 points and 16 subdivision levels. The importer
@@ -43,8 +53,8 @@ scale, and rotation around the source bounds center; profile validation,
 preview, and generation apply the same rounded transform. Group alignment uses
 the transformed point bounds of selected objects, adding only the necessary
 rounded translation to each object; normal profile validation remains in force.
-The v2 model does not provide arbitrary path-node editing, text, undo/redo, kerf
-compensation, tabs, passes, or raster engraving. Ellipses are polygonal and the
+The v2 model does not provide arbitrary path-node editing, SVG text import,
+undo/redo, kerf compensation, tabs, passes, or raster engraving. Ellipses are polygonal and the
 editor does not claim live execution progress. Version 1 projects and
 `rectangle-v1` jobs remain supported with their original data and G-code.
 
@@ -69,7 +79,7 @@ Keep the UI in the existing Go binary's embedded HTML/CSS/JavaScript assets. Def
 
 Make model geometry device-independent and in millimetres. Treat the design origin as the lower-left of the machine work area; the canvas is a view transform only (screen Y down, model Y up), and must never alter coordinates in the document. Define one profile transform from model coordinates to configured machine coordinates, including work-area width/height and any explicit machine origin offset. A profile warning is required for any transformed geometry outside the envelope; generation is blocked until corrected or explicitly resolved through a documented policy. Do not infer physical origin, homing, travel limits, or safe focus from the viewport.
 
-Suggested starter objects are rectangle, circle/ellipse, line, polyline/path, and text. Text should be converted to vector outlines at generation and save the resolved font/outline in the project so another host does not silently substitute fonts. The implemented static SVG importer accepts line commands, cubic/quadratic Bezier paths, lines, polylines, polygons, rectangles, circles/ellipses, and element transforms. It rejects scripts, event attributes, foreign objects, external URLs/references, embedded raster images, CSS imports, animation, and unsupported filters; it imposes file-size, numeric-range, point-count, and curve-subdivision limits. Nested groups and text remain future work. Parse without network fetches and normalize accepted geometry into the same editable millimetre path model.
+The starter object set now includes rectangle, ellipse, line, imported polyline/path, and native editable monoline text. Text source content, fixed font ID, size, and origin are saved beside server-generated millimetre paths. The hand-authored `emberdeck-stick-v1` font supports ASCII A–Z/a–z, digits, space, and `. , : ; ! ? + - / _ ( )`, up to 32 characters and 1–100 mm high; text paths are open and engraving-only. Raster engraving remains unsupported. SVG `<text>` import remains rejected. The implemented static SVG importer accepts line commands, cubic/quadratic Bezier paths, lines, polylines, polygons, rectangles, circles/ellipses, and element transforms. It rejects scripts, event attributes, foreign objects, external URLs/references, embedded raster images, CSS imports, animation, and unsupported filters; it imposes file-size, numeric-range, point-count, and curve-subdivision limits. Parse without network fetches and normalize accepted geometry into the same editable millimetre path model.
 
 Represent operations explicitly and independently of SVG stroke styling: initial milestones are **vector cutting** (closed/open paths only under an explicit policy; cutting settings validated against profile material bounds) and **vector engraving** (line-following paths with separate power/speed bounds). An operation layer owns order, tool mode, speed, power, and optional pass count; define whether duplicated/overlapping paths are intentional and warn on exact duplicates. The implemented importer adaptively flattens cubic and quadratic Bezier curves to a 0.05 mm chord tolerance in millimetres, caps path points and subdivision depth, and validates emitted geometry against the work envelope. Elliptical arcs remain unsupported. Toolpath preview must distinguish powered vector motion from laser-off travel and display travel/order. Raster engraving is a later independent investigation: it needs image decoding, dithering/scan strategy, power modulation, and hardware-specific validation, and is not available in this proposal.
 
@@ -77,6 +87,6 @@ Initial input: native versioned EmberDeck project JSON and the bounded SVG subse
 
 ## Verification and delivery evidence
 
-Test public geometry/toolpath functions for unit conversion, origin transforms, affine SVG transforms, curve flattening tolerance, deterministic operation order, laser-off travel, power/speed bounds, duplicate paths, segment limits, and out-of-bounds rejection. Test the project and generation HTTP APIs for malformed/versioned documents, SVG security rejection, persistence/reload, immutable generated G-code, and separation of edits from already-generated jobs. Browser acceptance should cover create shapes/text, select and transform numerically, undo/redo, import valid and rejected SVG, assign cut/engrave operations, set profile dimensions, inspect bounds warnings and toolpath modes, save/reopen project, generate and inspect a job, then explicitly confirm and dispatch through the existing operator controls. The current Playwright suite already demonstrates browser-to-HTTP operator-flow coverage and is an appropriate extension point ([`e2e/console.spec.js`](https://github.com/constructorfleet/emberdeck/blob/ccd366dd500d6fd65f84aacf8050e3f3371dac72/e2e/console.spec.js)).
+Test public geometry/toolpath functions for text determinism, size and charset limits, origin bounds, Q-at-origin coordinates, unit conversion, origin transforms, affine SVG transforms, curve flattening tolerance, deterministic operation order, laser-off travel, power/speed bounds, duplicate paths, segment limits, and out-of-bounds rejection. Test the project and generation HTTP APIs for malformed/versioned documents, text-cut rejection, SVG security rejection, persistence/reload, immutable generated G-code, and separation of edits from already-generated jobs. Browser acceptance should cover create shapes/text, edit text fields, save/reopen the source, preview generated strokes, generate and inspect a job, then explicitly confirm and dispatch through the existing operator controls, along with SVG import and profile bounds. The current Playwright suite already demonstrates browser-to-HTTP operator-flow coverage and is an appropriate extension point ([`e2e/console.spec.js`](https://github.com/constructorfleet/emberdeck/blob/ccd366dd500d6fd65f84aacf8050e3f3371dac72/e2e/console.spec.js)).
 
-Implementation milestones should be evidenced independently: (1) project model, create/edit, saved-project API and screenshots; (2) SVG subset import and geometry tests; (3) vector engraving preview/generation; (4) vector cutting validation/generation and GRBL simulator dispatch; (5) illustrated operator guide screenshots captured from the implemented UI. Raster engraving remains future evaluation. Screenshot guide work belongs after UI behavior stabilizes; the repository already uses Playwright screenshot capture for operator documentation ([contribution guidance](https://github.com/constructorfleet/emberdeck/blob/ccd366dd500d6fd65f84aacf8050e3f3371dac72/CONTRIBUTING.md)).
+Implementation milestones should be evidenced independently: (1) project model, create/edit, saved-project API and screenshots; (2) SVG subset import and geometry tests; (3) vector engraving preview/generation, including editable monoline text; (4) vector cutting validation/generation and GRBL simulator dispatch; (5) illustrated operator guide screenshots captured from the implemented UI. Raster engraving remains future evaluation. Screenshot guide work belongs after UI behavior stabilizes; the repository already uses Playwright screenshot capture for operator documentation ([contribution guidance](https://github.com/constructorfleet/emberdeck/blob/ccd366dd500d6fd65f84aacf8050e3f3371dac72/CONTRIBUTING.md)).
