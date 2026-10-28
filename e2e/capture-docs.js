@@ -47,18 +47,31 @@ async function capture(page, name) {
 }
 
 async function captureElement(page, selector, name, maxHeight = null) {
-  const element = page.locator(selector);
   await page.evaluate(() => document.activeElement?.blur());
-  const bounds = await element.boundingBox();
-  if (!bounds) throw new Error(`Cannot capture hidden or empty documentation panel: ${selector}`);
   const output = path.join(screenshotDir, name);
-  if (maxHeight && bounds.height > maxHeight) {
-    await element.evaluate((node) => window.scrollTo(0, Math.max(0, node.getBoundingClientRect().top)));
-    const viewportWidth = await page.evaluate(() => document.documentElement.clientWidth);
-    await page.screenshot({ path: output, animations: 'disabled', scale: 'device', clip: { x: 0, y: 0, width: viewportWidth, height: maxHeight } });
-  } else {
-    await element.screenshot({ path: output, animations: 'disabled', scale: 'device' });
+  let bounds;
+  let captured = false;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const element = page.locator(selector);
+    await element.waitFor({ state: 'visible' });
+    bounds = await element.boundingBox();
+    if (!bounds) throw new Error(`Cannot capture hidden or empty documentation panel: ${selector}`);
+    try {
+      if (maxHeight && bounds.height > maxHeight) {
+        await element.evaluate((node) => window.scrollTo(0, Math.max(0, node.getBoundingClientRect().top)));
+        const viewportWidth = await page.evaluate(() => document.documentElement.clientWidth);
+        await page.screenshot({ path: output, animations: 'disabled', scale: 'device', clip: { x: 0, y: 0, width: viewportWidth, height: maxHeight } });
+      } else {
+        await element.screenshot({ path: output, animations: 'disabled', scale: 'device' });
+      }
+      captured = true;
+      break;
+    } catch (error) {
+      if (attempt === 2 || !String(error).includes('not attached to the DOM')) throw error;
+      await page.waitForTimeout(50);
+    }
   }
+  if (!captured) throw new Error(`Could not capture documentation panel: ${selector}`);
   const png = fs.readFileSync(output);
   const width = png.readUInt32BE(16);
   const height = png.readUInt32BE(20);
