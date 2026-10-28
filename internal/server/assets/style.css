@@ -327,11 +327,9 @@ h2 {
   transform: translateY(-1px);
 }
 
-.button:focus-visible,
-.icon-button:focus-visible,
-input:focus-visible,
-select:focus-visible,
-.dropzone:focus-within {
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible,
+.dropzone:focus-within,
+.svg-import-button:focus-within {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -663,6 +661,21 @@ input::placeholder {
 
 .program-panel {
   margin-top: var(--space-4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .button:hover {
+    transform: none;
+  }
 }
 
 .program-code {
@@ -1111,11 +1124,6 @@ footer {
   accent-color: var(--accent);
 }
 
-.vector-alignment-select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
-
 .vector-align-controls {
   margin-top: var(--space-3);
   padding: var(--space-3);
@@ -1143,11 +1151,6 @@ footer {
   font: var(--type-xs) var(--mono);
   text-align: left;
   cursor: pointer;
-}
-
-.vector-select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 .vector-list > li > span {

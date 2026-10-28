@@ -18,6 +18,15 @@ tokens in `internal/server/assets/style.css`; its type scale starts at 12 px and
 its spacing scale uses 4 px increments. The browser suite checks computed text
 contrast against the rendered surface and guards the minimum type sizes.
 
+Keyboard focus uses the same green outline on links and controls. Opening a
+profile, project, or program view moves focus into it; closing it with its
+button or Escape returns focus to the control that opened it. Escape asks
+**Discard unsaved changes?** for a changed profile or project; cancel keeps the
+editor open. When the operating system requests reduced motion, the console
+uses immediate scrolling and removes the button hover lift.
+
+![Rectangle editor opened from the keyboard with focus on its project name field](assets/screenshots/designer-keyboard-focus.png)
+
 ## Connect and choose a driver
 
 Open the EmberDeck console and enter the private API key supplied by the server

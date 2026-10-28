@@ -48,6 +48,8 @@
   let selectedDriver = "";
   const manualRecords = new Map();
   let shownJobID = "";
+  let programReturnFocus = null;
+  let programReturnJobID = "";
   let polling = false;
   let pollTimer = null;
   let sessionVersion = 0;
@@ -55,10 +57,13 @@
   let projects = [];
   let editingProfile = null;
   let profileDraftBaseline = null;
+  let profileReturnFocus = null;
   let openProject = null;
   let projectDraftBaseline = null;
+  let projectReturnFocus = null;
   let openVectorProject = null;
   let vectorDraftBaseline = null;
+  let vectorReturnFocus = null;
   let vectorObjects = [];
   let vectorOperations = [];
   let selectedVectorObject = "";
@@ -71,6 +76,21 @@
   const toolpathViewports = new Map();
   let profileRevisionKey = null;
   const boundsOverrides = new Set();
+
+  function restoreFocus(target, fallback) {
+    let control = target?.isConnected ? target : null;
+    const label = target?.getAttribute?.("aria-label");
+    if (!control && label) {
+      control = Array.from(document.querySelectorAll("[aria-label]")).find((node) => node.getAttribute("aria-label") === label) || null;
+    }
+    if (!control?.isConnected || control.disabled) control = $(fallback);
+    control?.focus();
+  }
+
+  function scrollIntoView(element, block) {
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    element.scrollIntoView({ behavior, block });
+  }
 
   function clearNotice({ connectionOnly = false } = {}) {
     if (connectionOnly && !currentNotice?.connection) return;
@@ -448,12 +468,13 @@
 
   function beginProfileEdit(profile = null) {
     if (!$("#profile-form").hidden && profileDraftIsDirty() && !confirmDiscardChanges()) return;
+    if ($("#profile-form").hidden) profileReturnFocus = document.activeElement;
     editingProfile = profile;
     $("#profile-form").hidden = false;
     $("#profile-form-title").textContent = profile ? `Edit ${profile.name}` : "New declared profile";
     for (const [key, selector] of Object.entries(profileFields)) $(selector).value = profile ? String(profile[key]) : "";
     $("#profile-min-s").value = "0";
-    $("#profile-form").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    scrollIntoView($("#profile-form"), "nearest");
     $(profileFields.name).focus();
     profileDraftBaseline = JSON.stringify(profilePayload());
     updateProjectValidation();
@@ -472,6 +493,8 @@
     $("#profile-form").hidden = true;
     profileDraftBaseline = null;
     updateProjectValidation();
+    restoreFocus(profileReturnFocus, "#new-profile");
+    profileReturnFocus = null;
   }
 
   function projectPayload(profile) {
@@ -612,6 +635,7 @@
 
   function fillProject(project, discardConfirmed = false) {
     if (!$("#project-form").hidden && projectDraftIsDirty() && !discardConfirmed && !confirmDiscardChanges()) return false;
+    if ($("#project-form").hidden) projectReturnFocus = document.activeElement;
     openProject = project;
     $("#project-form").hidden = false;
     $("#project-form-title").textContent = project ? `Edit ${project.name}` : "New rectangle project";
@@ -627,7 +651,17 @@
     $("#delete-project").hidden = !project;
     $("#stale-profile-warning").hidden = true;
     updateProjectValidation();
+    $(projectFields.name).focus();
     return true;
+  }
+
+  function closeProjectEditor() {
+    if (projectDraftIsDirty() && !confirmDiscardChanges()) return;
+    openProject = null;
+    projectDraftBaseline = null;
+    $("#project-form").hidden = true;
+    restoreFocus(projectReturnFocus, "#new-project");
+    projectReturnFocus = null;
   }
 
   function openSavedProject(id) {
@@ -641,7 +675,7 @@
       if (priorProfile !== profile.id) setDesignerStatus(`Switched to profile ${profile.name} to reopen ${project.name}.`);
     }
     fillProject(project, true);
-    $("#project-form").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    scrollIntoView($("#project-form"), "nearest");
   }
 
   async function deleteProject(id, name) {
@@ -1170,6 +1204,7 @@
 
   function fillVectorProject(project = null, discardConfirmed = false) {
     if (!$("#vector-form").hidden && vectorDraftIsDirty() && !discardConfirmed && !confirmDiscardChanges()) return false;
+    if ($("#vector-form").hidden) vectorReturnFocus = document.activeElement;
     openVectorProject = project;
     vectorObjects = project ? project.objects.map((object) => ({ ...object, text: object.text ? { ...object.text } : undefined, kind: objectKind(object), transform: object.transform ? { ...object.transform } : undefined, subpaths: object.subpaths.map((path) => ({ ...path, points: path.points.map((point) => ({ ...point })) })) })) : [];
     vectorObjects.forEach((object) => {
@@ -1185,8 +1220,44 @@
     $("#delete-vector-project").hidden = !project;
     vectorDraftBaseline = vectorFormState(selectedProfile());
     renderVectorEditor();
+    $("#vector-name").focus();
     return true;
   }
+
+  function closeVectorEditor() {
+    if (vectorDraftIsDirty() && !confirmDiscardChanges()) return;
+    openVectorProject = null;
+    vectorDraftBaseline = null;
+    $("#vector-form").hidden = true;
+    restoreFocus(vectorReturnFocus, "#new-vector-project");
+    vectorReturnFocus = null;
+  }
+
+  function closeProgramPanel() {
+    if (programPanel.hidden) return;
+    shownJobID = "";
+    programPanel.hidden = true;
+    const fallback = programReturnJobID
+      ? document.querySelector(`[data-job-action="view"][data-job-id="${CSS.escape(programReturnJobID)}"]`)
+      : null;
+    restoreFocus(programReturnFocus?.isConnected ? programReturnFocus : fallback, "#refresh");
+    programReturnFocus = null;
+    programReturnJobID = "";
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || event.defaultPrevented || actionDialog.open) return;
+    const target = event.target instanceof Element ? event.target : null;
+    const focusedEditor = target?.closest("#vector-form, #project-form, #profile-form");
+    let close;
+    if (!programPanel.hidden) close = closeProgramPanel;
+    else if (focusedEditor?.id === "vector-form" || !$("#vector-form").hidden && !focusedEditor) close = closeVectorEditor;
+    else if (focusedEditor?.id === "project-form" || !$("#project-form").hidden && !focusedEditor) close = closeProjectEditor;
+    else if (focusedEditor?.id === "profile-form" || !$("#profile-form").hidden && !focusedEditor) close = closeProfileEdit;
+    if (!close) return;
+    event.preventDefault();
+    close();
+  });
 
   async function addVectorShape(type) {
     const profile = selectedProfile();
@@ -1314,7 +1385,7 @@
           if (priorProfile !== profile.id) setDesignerStatus(`Switched to profile ${profile.name} to reopen ${project.name}.`);
         }
         fillVectorProject(project, true);
-        $("#vector-form").scrollIntoView({ behavior: "smooth", block: "nearest" });
+        scrollIntoView($("#vector-form"), "nearest");
       }, `Reopen vector project ${project.name}`);
       reopen.disabled = !serverAvailable;
       const remove = button("Delete", "button button-small button-danger", () => deleteVectorProject(project.id, project.name), `Delete vector project ${project.name}`);
@@ -1383,6 +1454,8 @@
       $("#profile-select").value = saved.id;
       $("#profile-form").hidden = true;
       profileDraftBaseline = null;
+      restoreFocus(profileReturnFocus, "#new-profile");
+      profileReturnFocus = null;
       if (!$("#project-form").hidden) updateProjectValidation();
       if (!$("#vector-form").hidden) updateVectorValidation();
       notify("success", "Profile saved. Confirm it matches the prepared machine before use.");
@@ -1402,12 +1475,7 @@
   $("#project-form").addEventListener("submit", saveProject);
   $("#project-form").addEventListener("input", updateProjectValidation);
   $("#project-form").addEventListener("change", updateProjectValidation);
-  $("#cancel-project").addEventListener("click", () => {
-    if (projectDraftIsDirty() && !confirmDiscardChanges()) return;
-    openProject = null;
-    projectDraftBaseline = null;
-    $("#project-form").hidden = true;
-  });
+  $("#cancel-project").addEventListener("click", closeProjectEditor);
   $("#delete-project").addEventListener("click", () => { if (openProject) deleteProject(openProject.id, openProject.name); });
   $("#generate-project").addEventListener("click", generateProject);
   $("#new-vector-project").addEventListener("click", () => fillVectorProject());
@@ -1464,12 +1532,7 @@
       renderVectorEditor();
     } else updateVectorValidation();
   });
-  $("#close-vector-project").addEventListener("click", () => {
-    if (vectorDraftIsDirty() && !confirmDiscardChanges()) return;
-    openVectorProject = null;
-    vectorDraftBaseline = null;
-    $("#vector-form").hidden = true;
-  });
+  $("#close-vector-project").addEventListener("click", closeVectorEditor);
   $("#delete-vector-project").addEventListener("click", () => { if (openVectorProject) deleteVectorProject(openVectorProject.id, openVectorProject.name); });
   $("#generate-vector-project").addEventListener("click", generateVectorProject);
 
@@ -2207,6 +2270,10 @@
   });
 
   async function showProgram(id) {
+    if (programPanel.hidden) {
+      programReturnFocus = document.activeElement;
+      programReturnJobID = id;
+    }
     try {
       const job = await api(`/api/v1/jobs/${encodeURIComponent(id)}`);
       shownJobID = id;
@@ -2250,7 +2317,8 @@
       } else provenance.hidden = true;
       window.EmberDeckJobHistory?.load($("#program-history"), id, api);
       programPanel.hidden = false;
-      programPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+      scrollIntoView(programPanel, "start");
+      $("#program-title").focus();
     } catch (error) { notify("error", error.message); }
   }
 
@@ -2355,7 +2423,7 @@
   $("#jobs-newer").addEventListener("click", () => { jobOffset = Math.max(0, jobOffset - jobPageSize); refresh({ queue: true }); });
   $("#jobs-older").addEventListener("click", () => { jobOffset += jobPageSize; refresh({ queue: true }); });
   $("#refresh").addEventListener("click", refresh);
-  $("#close-program").addEventListener("click", () => { shownJobID = ""; programPanel.hidden = true; });
+  $("#close-program").addEventListener("click", closeProgramPanel);
   setSessionConnected(false);
   renderDrivers();
   renderJobs();

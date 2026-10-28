@@ -54,6 +54,7 @@ async function captureElement(page, selector, name, maxHeight = null) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const element = page.locator(selector);
     await element.waitFor({ state: 'visible' });
+    await element.scrollIntoViewIfNeeded();
     bounds = await element.boundingBox();
     if (!bounds) throw new Error(`Cannot capture hidden or empty documentation panel: ${selector}`);
     try {
@@ -193,6 +194,11 @@ async function main() {
     await page.getByRole('button', { name: 'Save profile' }).click();
     await expect(page.locator('#notice .notice-message')).toContainText('Profile saved');
     await captureElement(page, 'section[aria-labelledby="profiles-title"]', 'designer-dedicated-page.png');
+    await page.getByRole('button', { name: 'New rectangle project' }).click();
+    await expect(page.locator('#project-name')).toBeFocused();
+    await captureElement(page, '#project-form', 'designer-keyboard-focus.png');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#project-form')).toBeHidden();
     await page.getByRole('button', { name: 'Edit profile' }).click();
     await page.locator('#profile-name').evaluate((input) => input.blur());
     await captureElement(page, '#profile-form', 'designer-profile.png');
