@@ -52,7 +52,11 @@ test('rendered documentation has grouped, current, keyboard accessible navigatio
     await page.goto(pathToFileURL(path.join(docs, pageName)).href);
     await expect(page.getByRole('navigation', { name: 'Documentation' })).toBeVisible();
     await expect(page.locator('nav a[aria-current="page"]')).toHaveAttribute('href', pageName);
-    const heading = await page.locator('main h1').innerText();
+    const heading = await page.locator('main h1').evaluate((element) => {
+      const copy = element.cloneNode(true);
+      copy.querySelectorAll('.headerlink').forEach((link) => link.remove());
+      return copy.innerText;
+    });
     await expect(page).toHaveTitle(`${heading} · EmberDeck docs`);
     await expect(page.locator('nav a[aria-current="page"]')).toHaveText(heading);
     await expect(page.locator('meta[name="description"]')).toHaveAttribute('content', /.+/);
@@ -107,9 +111,9 @@ test('rendered documentation has grouped, current, keyboard accessible navigatio
         if (width <= 980) await mobileMenu.locator('summary').click();
       }
       if (width === 768) {
-        await page.locator('nav').evaluate((nav) => { nav.style.fontSize = '20px'; });
+        await page.locator('nav[aria-label="Documentation"]').evaluate((nav) => { nav.style.fontSize = '20px'; });
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${pageName} fits 768px with larger navigation text`).toBe(true);
-        await page.locator('nav').evaluate((nav) => { nav.style.fontSize = ''; });
+        await page.locator('nav[aria-label="Documentation"]').evaluate((nav) => { nav.style.fontSize = ''; });
       }
     }
     await page.setViewportSize({ width: 1440, height: 1000 });
@@ -164,7 +168,7 @@ test('rendered documentation has grouped, current, keyboard accessible navigatio
   const mobile = await browser.newPage({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
   await mobile.goto(pathToFileURL(path.join(docs, 'operator-guide.html')).href);
   expect(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  expect(await mobile.locator('nav').evaluate((nav) => nav.getBoundingClientRect().height), 'closed mobile navigation stays compact').toBeLessThanOrEqual(80);
+  expect(await mobile.locator('nav[aria-label="Documentation"]').evaluate((nav) => nav.getBoundingClientRect().height), 'closed mobile navigation stays compact').toBeLessThanOrEqual(80);
   const mobileMenu = mobile.locator('nav .mobile-menu');
   await expect(mobileMenu.locator('summary')).toHaveText('Menu');
   await mobileMenu.locator('summary').tap();
