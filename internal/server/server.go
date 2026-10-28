@@ -40,6 +40,8 @@ type Server struct {
 	progressDirty bool
 	profiles      map[string]MachineProfile
 	projects      map[string]DesignerProject
+	cameras       map[string]cameraSource
+	cameraLastGet map[string]time.Time
 	mux           *http.ServeMux
 	metrics       *serverMetrics
 	history       eventHistory
@@ -103,7 +105,7 @@ func OpenWithOptions(dir, key string, options Options) (*Server, error) {
 			_ = lock.Close()
 		}
 	}()
-	s := &Server{lock: lock, drivers: make(map[string]Driver), dir: dir, key: key, plugins: plugins, profiles: make(map[string]MachineProfile), projects: make(map[string]DesignerProject), mux: http.NewServeMux(), logger: defaultLogger(options.Logger)}
+	s := &Server{lock: lock, drivers: make(map[string]Driver), dir: dir, key: key, plugins: plugins, profiles: make(map[string]MachineProfile), projects: make(map[string]DesignerProject), cameras: make(map[string]cameraSource), cameraLastGet: make(map[string]time.Time), mux: http.NewServeMux(), logger: defaultLogger(options.Logger)}
 	s.history.limit, s.history.retention = options.EventLimit, options.EventRetention
 	s.metrics = newServerMetrics(s)
 	defer func() {
@@ -136,6 +138,17 @@ func OpenWithOptions(dir, key string, options Options) (*Server, error) {
 			return nil, errors.New("invalid designer project library entry")
 		}
 	}
+	if err := loadOptionalJSON(filepath.Join(dir, "cameras.json"), &s.cameras); err != nil {
+		return nil, err
+	}
+	if s.cameras == nil {
+		return nil, errors.New("invalid null camera source library")
+	}
+	for id, source := range s.cameras {
+		if !driverName.MatchString(id) || !validCameraSource(source) {
+			return nil, errors.New("invalid camera source library entry")
+		}
+	}
 	if err := s.loadCredentials(key); err != nil {
 		return nil, err
 	}
@@ -154,6 +167,8 @@ func OpenWithOptions(dir, key string, options Options) (*Server, error) {
 	s.handleAPI("POST /api/v1/credentials", adminRoles, false, s.createCredential)
 	s.handleAPI("DELETE /api/v1/credentials/{id}", adminRoles, false, s.revokeCredential)
 	s.handleAPI("GET /api/v1/drivers", readRoles, false, s.listDrivers)
+	s.handleAPI("PUT /api/v1/drivers/{id}/camera", adminRoles, false, s.setCameraSource)
+	s.handleAPI("GET /api/v1/drivers/{id}/camera", readRoles, false, s.getCameraFrame)
 	// Admin includes a compatibility path for the bootstrap/local worker that
 	// historically shared EMBERDECK_API_KEY. Dedicated worker keys remain scoped.
 	s.handleAPI("POST /api/v1/drivers/{id}/poll", []string{"worker", "admin"}, true, s.pollDriver)

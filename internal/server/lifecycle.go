@@ -33,6 +33,7 @@ type Driver struct {
 	ControllerSettings *driver.Settings `json:"controller_settings,omitempty"`
 	SettingsReadAt     *time.Time       `json:"settings_read_at,omitempty"`
 	SettingsError      string           `json:"settings_error,omitempty"`
+	CameraAvailable    bool             `json:"camera_available"`
 	settingsRequested  time.Time
 }
 
@@ -111,6 +112,7 @@ func (s *Server) listDrivers(w http.ResponseWriter, r *http.Request) {
 	}
 	drivers := make([]Driver, 0, len(s.drivers))
 	for _, d := range s.drivers {
+		_, d.CameraAvailable = s.cameras[d.ID]
 		drivers = append(drivers, d)
 	}
 	respond(w, 200, drivers)

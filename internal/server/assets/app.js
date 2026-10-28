@@ -44,6 +44,7 @@
   const jobFilterName = $("#job-filter-name");
   const jobFilterState = $("#job-filter-state");
   let drivers = [];
+  const cameraFrames = new Map();
   let selectedDriver = "";
   let shownJobID = "";
   let polling = false;
@@ -189,6 +190,8 @@
     sessionStorage.removeItem("emberdeck-api-key");
     setSessionConnected(false);
     jobs = [];
+    for (const frame of cameraFrames.values()) URL.revokeObjectURL(frame.url);
+    cameraFrames.clear();
     hasLoadedJobs = false;
     jobTotal = 0;
     jobOffset = 0;
@@ -235,6 +238,21 @@
       throw new Error(detail);
     }
     return response.status === 204 ? null : response.json();
+  }
+
+  async function apiBlob(path) {
+    const requestToken = token;
+    const response = await fetch(path, { headers: { Authorization: `Bearer ${requestToken}` }, cache: "no-store" });
+    if (!response.ok) {
+      let detail = `Request failed (${response.status})`;
+      try { detail = (await response.json()).error || detail; } catch (_) { /* keep status */ }
+      if (response.status === 401 && token === requestToken) {
+        forgetSession({ focus: true, clearInput: false });
+        notify("error", detail, { sticky: true, connection: true });
+      }
+      throw new Error(detail);
+    }
+    return response.blob();
   }
 
   function button(label, className, action, ariaLabel) {
@@ -1588,6 +1606,29 @@
         toolpathView.textContent = "Loading controller path feedback…";
         info.append(toolpathView);
       }
+      const assignedDriver = drivers.find((candidate) => candidate.id === job.driver_id);
+      if (assignedDriver?.camera_available) {
+        const camera = document.createElement("figure");
+        camera.className = "camera-monitor";
+        camera.dataset.cameraDriver = assignedDriver.id;
+        camera.setAttribute("aria-label", `Camera monitor for ${job.name}`);
+        const image = document.createElement("img");
+        image.alt = `Live camera feed for ${job.name}`;
+        image.hidden = true;
+        const status = document.createElement("figcaption");
+        status.className = "camera-status";
+        status.setAttribute("role", "status");
+        status.textContent = "Waiting for camera frame.";
+        const previousFrame = cameraFrames.get(assignedDriver.id);
+        if (previousFrame) {
+          image.src = previousFrame.url;
+          image.hidden = false;
+          camera.dataset.lastFrameAt = String(previousFrame.capturedAt);
+          status.textContent = `Updating camera · last frame ${Math.max(1, Math.round((Date.now() - previousFrame.capturedAt) / 1000))}s ago.`;
+        }
+        camera.append(image, status);
+        info.append(camera);
+      }
       if (job.error) {
         const failure = document.createElement("span");
         failure.className = "job-error";
@@ -1789,6 +1830,36 @@
         renderToolpathView(host, job, toolpathCache.get(job.id), job.program_review);
       } catch (error) {
         host.textContent = `Toolpath preview unavailable: ${error.message}`;
+      }
+    }
+    const cameraDriverIDs = [...new Set(jobs
+      .filter((job) => job.driver_id && drivers.some((driver) => driver.id === job.driver_id && driver.camera_available))
+      .map((job) => job.driver_id))];
+    for (const driverID of cameraDriverIDs) {
+      const views = [...list.querySelectorAll(".camera-monitor")].filter((node) => node.dataset.cameraDriver === driverID);
+      if (!views.length) continue;
+      try {
+        const blob = await apiBlob(`/api/v1/drivers/${encodeURIComponent(driverID)}/camera`);
+        const objectURL = URL.createObjectURL(blob);
+        const previousFrame = cameraFrames.get(driverID);
+        if (previousFrame) URL.revokeObjectURL(previousFrame.url);
+        const capturedAt = Date.now();
+        cameraFrames.set(driverID, { url: objectURL, capturedAt });
+        for (const view of views) {
+          const image = view.querySelector("img");
+          image.src = objectURL;
+          image.hidden = false;
+          view.querySelector(".camera-status").textContent = `Live camera · updated ${new Date().toLocaleTimeString()}.`;
+          view.dataset.lastFrameAt = String(capturedAt);
+        }
+      } catch (_) {
+        for (const view of views) {
+          const lastFrame = cameraFrames.get(driverID)?.capturedAt || 0;
+          const age = lastFrame ? Math.max(1, Math.round((Date.now() - lastFrame) / 1000)) : 0;
+          view.querySelector(".camera-status").textContent = lastFrame
+            ? `Camera offline or stale · last frame ${age}s ago.`
+            : "Camera offline or stale · no frame available.";
+        }
       }
     }
   }

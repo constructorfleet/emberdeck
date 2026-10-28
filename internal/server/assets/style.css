@@ -1187,6 +1187,33 @@ footer {
   background: var(--surface-control);
 }
 
+.camera-monitor {
+  width: 100%;
+  min-width: 0;
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  background: var(--surface-inset);
+}
+
+.camera-monitor img {
+  width: min(100%, 640px);
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  background: var(--surface-inset);
+}
+
+.camera-monitor img[hidden] {
+  display: none;
+}
+
+.camera-status {
+  display: block;
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--type-xs);
+}
+
 .toolpath-summary,
 .toolpath-legend,
 .toolpath-caveat {

@@ -50,7 +50,9 @@ Simulator and software checks do not qualify a physical machine. See
   and automatic design-to-machine configuration.
 - Universal Wi-Fi, proprietary DSP/Ruida controllers, or OctoPrint plugin
   compatibility.
-- Camera monitoring.
+- RTSP and worker-local V4L2 camera sources. Current camera monitoring accepts
+  an administrator-configured HTTP JPEG/MJPEG endpoint and proxies one bounded
+  frame per second through EmberDeck authentication.
 
 ## Feature request planning
 
