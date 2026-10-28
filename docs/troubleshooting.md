@@ -50,7 +50,7 @@ credential's `driver_ids` includes its `-id`. In the browser, use **Change key**
 to enter the correct value; the console validates it before saving it for that
 tab session. Keep the bootstrap admin key on the server side and give each
 remote worker its own credential. See the
-[credential contract](api.md#credential-roles-and-lifecycle) and the
+[credential contract](api.md#authentication-and-roles) and the
 [Operator Guide](operator-guide.md#connect-and-choose-a-driver).
 
 ## Server or worker shows no useful logs

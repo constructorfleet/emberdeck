@@ -11,7 +11,20 @@ configured `serve -metrics-listen` listener, not on the authenticated API mux or
 in the generated API route index. See [metrics and monitoring](metrics.md) for
 the contract, access control, and scrape examples.
 
-## Credential roles and lifecycle
+Requests are JSON except raw `image/svg+xml` on `POST /api/v1/svg-import`,
+`GET /api/v1/drivers/{id}/camera` JPEG responses, and range responses on
+`GET /api/v1/drivers/{id}/jobs/{job_id}/content`. Successful deletions return
+`204`; other responses are JSON. Errors return `{"error":"description"}`.
+Unknown JSON fields and trailing objects are rejected.
+
+A complete authenticated request:
+
+```sh
+curl --fail-with-body https://emberdeck.example.net/api/v1/jobs \
+  -H 'Authorization: Bearer OPERATOR_KEY'
+```
+
+## Authentication and roles
 
 Credentials are named, independently revocable bearer secrets. The server stores
 only SHA-256 hashes of secrets in `credentials.json`, written atomically in the
@@ -32,8 +45,16 @@ existing `EMBERDECK_API_KEY` bootstrap and in-process worker compatibility. Use
 dedicated worker credentials for distributed devices; they cannot call any
 operator route. Active worker credential driver-ID scopes cannot overlap.
 
-`GET /api/v1/auth` describes the caller's ID, name, role, and worker driver IDs.
-For example, a worker's response contains only its assigned IDs:
+### `GET /api/v1/auth`
+
+Describe the caller so a client can check its role and worker scope before using
+other routes.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| No body. | `200` with the caller's `id`, `name`, `role`, and worker `driver_ids`. | `401` missing or invalid bearer key. |
+
+A worker's response contains only its assigned IDs:
 
 ```json
 {
@@ -44,20 +65,26 @@ For example, a worker's response contains only its assigned IDs:
 }
 ```
 
-Admins manage credentials through these routes:
+### `GET /api/v1/credentials`
 
-### `GET /credentials`
+List credential metadata, including revoked entries for audit. Secrets and
+hashes are never returned.
 
-Returns credential metadata, including revoked entries for audit. It never
-returns a key or hash.
+| Request | Response | Errors |
+| --- | --- | --- |
+| No body. | `200` array of credential metadata sorted by ID. | `401` missing or invalid key; `403` caller is not an admin. |
 
-### `POST /credentials`
+### `POST /api/v1/credentials`
 
 Create a `viewer`, `operator`, `admin`, or `worker` credential. Worker
 credentials must include one or more unique `driver_ids`; other roles must omit
 them. An active worker credential already claiming a driver ID prevents another
 worker credential from claiming it. The `201` response contains the generated
 `key` exactly once, along with the metadata to record securely.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| JSON object with `name`, `role`, and optional `driver_ids` for workers. | `201` with metadata and the one-time `key`. | `400` invalid name, role, or scope; `401` missing or invalid key; `403` caller is not an admin; `409` worker ID already claimed. |
 
 ```sh
 curl --fail-with-body -X POST https://emberdeck.example.net/api/v1/credentials \
@@ -67,27 +94,26 @@ curl --fail-with-body -X POST https://emberdeck.example.net/api/v1/credentials \
 
 Store the returned `key` in that device's secret manager or protected service
 environment. Never put it in source control, a URL, shell history, support logs,
-or an untrusted plugin. A `409` means a requested worker ID is already claimed.
+or an untrusted plugin.
 
-### `DELETE /credentials/{id}`
+### `DELETE /api/v1/credentials/{id}`
 
-Revokes one credential and returns `204`. The final active admin cannot be
-revoked; create and verify a replacement admin first. Revoking a worker
-credential deletes only its online driver sessions and marks its active jobs
-`interrupted`, clears their leases, and does not replay them. The worker's next
-poll/report is rejected; its active stream fails closed. Other worker sessions
-continue.
+Revoke one credential and erase its active sessions. The final active admin
+cannot be revoked; create and verify a replacement admin first. Revoking a
+worker credential deletes only its online driver sessions and marks its active
+jobs `interrupted`, clears their leases, and does not replay them. The worker's
+next poll/report is rejected; its active stream fails closed. Other worker
+sessions continue.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| No body; credential ID in the path. | `204`. | `401` missing or invalid key; `403` caller is not an admin; `404` unknown or already revoked credential; `409` attempting to revoke the last active admin. |
 
 ```sh
 curl --fail-with-body -X DELETE \
   https://emberdeck.example.net/api/v1/credentials/CREDENTIAL_ID \
   -H 'Authorization: Bearer ADMIN_KEY'
 ```
-
-Credential routes return `401` for a missing, unknown, or revoked bearer key,
-`403` when the authenticated role is not allowed, `400` for invalid role/name/
-scope input, and `409` when worker IDs overlap or an administrator attempts to
-revoke the last active admin. An unknown credential ID returns `404`.
 
 ### Bootstrap, migration, and rotation
 
@@ -120,30 +146,32 @@ scope it to only its driver ID, and give operator/admin keys only to people who
 need those capabilities. Do not share the bootstrap admin key with remote workers;
 replace legacy workers with scoped worker keys before revoking the bootstrap key.
 
-Requests are JSON except raw `image/svg+xml` on `POST /svg-import`; responses are
-JSON except successful deletion (204). Errors return
-`{"error":"description"}`. Unknown JSON fields and trailing objects are rejected.
+## Jobs
 
-## Job library
+### `POST /api/v1/jobs`
 
-`POST /jobs` accepts `{"name":"square.gcode","gcode":"G21\nG90\nM5","profile_id":"optional-profile-id"}` and
-returns 201, the job metadata, and its Location. G-code content is limited to 4 MiB;
-the complete JSON upload is capped at 24 MiB plus 64 KiB to bound escaping and
-framing overhead. Names are 1–200 bytes. Control bytes other than tabs and line
-endings are rejected.
-Driver line validation runs at upload; an invalid line returns 422 with its line
-number. An optional `profile_id` binds a declared profile revision for the
-program bounds review. Uploading stores a program; it does not execute it or
-certify its machine safety.
+Upload a program to the job library. Uploading stores a program; it does not
+execute it or certify its machine safety. Driver line validation runs at upload;
+an invalid line returns 422 with its line number. An optional `profile_id` binds
+a declared profile revision for the program bounds review.
 
-`GET /jobs` returns one page of job metadata, newest first:
+| Request | Response | Errors |
+| --- | --- | --- |
+| JSON object with `name`, `gcode`, and optional `profile_id`. | `201` with job metadata and a `Location` header. | `400` malformed JSON, control bytes, or unknown profile; `401`/`403` authentication or role; `413` program over 4 MiB; `422` invalid G-code line. |
 
-```json
-{"jobs":[{"id":"…","name":"square.gcode","state":"queued","size":10,"acked":0,"total":0,"created":"…"}],
- "total":1,"offset":0,"limit":50}
-```
+G-code content is limited to 4 MiB; the complete JSON upload is capped at 24 MiB
+plus 64 KiB to bound escaping and framing overhead. Names are 1–200 bytes.
+Control bytes other than tabs and line endings are rejected.
 
-Query parameters are optional and combine with AND:
+### `GET /api/v1/jobs`
+
+Return one page of job metadata, newest first.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| No body. Optional query: `limit`, `offset`, `state`, `name`, `driver`. | `200` with `jobs`, `total`, `offset`, and `limit`. | `400` invalid filter or unknown state; `401`/`403` authentication or role; `500` storage failure. |
+
+Query parameters combine with AND:
 
 | Parameter | Meaning |
 | --- | --- |
@@ -158,38 +186,100 @@ Jobs that have been dispatched also include `started`; jobs that reached
 `duration_ms` when they had started. Jobs stored before these fields existed
 omit them.
 
-`total` counts every job that matches the filters. Invalid values, including
-unknown states, return 400. List entries never include program bytes (`gcode`)
-or a worker `lease`; `size` is the stored program length in bytes. `GET
-/jobs/{id}` returns the same metadata plus the exact uploaded or generated
-program as `gcode`. Both include optional live `execution` telemetry and, for
-uploaded jobs, an optional `program_review` summary. The review's
-`constant_power_m3` is true when the program selects GRBL's `M3` constant laser
-power mode, which keeps output on while motion stops. No operator endpoint
-returns a lease. `GET /jobs/{id}/review` returns the selected profile's
-revision, program bounds, profile envelope, bounds status (`in_bounds`,
-`out_of_bounds`, or `unknown`), warnings, and derived path. `profile_stale` is
-true when the declared profile is missing or its revision changed since the job
-was uploaded or generated. In that case bounds status is `unknown`;
-`profile_bounds`, when present, is the saved profile snapshot for context and
-must not be shown as the current work area. The profile envelope is
-operator-declared information, not sensed or verified machine travel. A partial
-path can show known bounds while its status remains `unknown`. `GET
-/jobs/{id}/toolpath` returns a derived 2D path for visualization; it does not
-change or validate the uploaded source. `DELETE /jobs/{id}` removes a queued or
-terminal job;
-a running or canceling job must first stop. These operations persist to the
-private data directory. Run one server per directory; file locking enforces it.
-
-### Job event history
-
-`GET /jobs/{id}/events` returns the job's retained history, oldest first:
+`total` counts every job that matches the filters. List entries never include
+program bytes (`gcode`) or a worker `lease`; `size` is the stored program length
+in bytes.
 
 ```json
-{"job_id":"…","events":[
- {"seq":1,"time":"…","job_id":"…","to":"queued","source":"operator","action":"upload"},
- {"seq":2,"time":"…","job_id":"…","from":"queued","to":"running","source":"operator","action":"start",
-  "driver_id":"bench","session_id":"3f9c0a1b2c3d4e5f","lease_id":"8d7e6f5a4b3c2d1e"}]}
+{
+  "jobs": [
+    {
+      "id": "0123456789abcdef0123456789abcdef",
+      "name": "square.gcode",
+      "state": "queued",
+      "size": 10,
+      "acked": 0,
+      "total": 0,
+      "created": "2026-10-27T12:00:00Z"
+    }
+  ],
+  "total": 1,
+  "offset": 0,
+  "limit": 50
+}
+```
+
+### `GET /api/v1/jobs/{id}`
+
+Return one job's metadata plus the exact uploaded or generated program as
+`gcode`. List entries omit the program; this route includes it. The response
+also includes optional live `execution` telemetry and, for uploaded jobs, an
+optional `program_review` summary. The review's `constant_power_m3` is true when
+the program selects GRBL's `M3` constant laser power mode, which keeps output on
+while motion stops. No operator endpoint returns a lease.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| No body; job ID in the path. | `200` with job metadata and `gcode`. | `401`/`403` authentication or role; `404` unknown job; `500` unreadable stored program. |
+
+### `GET /api/v1/jobs/{id}/review`
+
+Return the selected profile's revision, program bounds, profile envelope, bounds
+status (`in_bounds`, `out_of_bounds`, or `unknown`), warnings, and derived path.
+`profile_stale` is true when the declared profile is missing or its revision
+changed since the job was uploaded or generated. In that case bounds status is
+`unknown`; `profile_bounds`, when present, is the saved profile snapshot for
+context and must not be shown as the current work area. The profile envelope is
+operator-declared information, not sensed or verified machine travel. A partial
+path can show known bounds while its status remains `unknown`.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| No body; job ID in the path. | `200` with the current review or generated-job snapshot. | `401`/`403` authentication or role; `404` unknown job. |
+
+### `GET /api/v1/jobs/{id}/toolpath`
+
+Return a derived 2D path for visualization. It does not change or validate the
+uploaded source.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| No body; job ID in the path. | `200` with parsed segments, bounds, warnings, and support status. | `401`/`403` authentication or role; `404` unknown job; `500` unreadable stored program. |
+
+### `GET /api/v1/jobs/{id}/events`
+
+Return one job's retained history, oldest first.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| No body; job ID in the path. | `200` with `job_id` and `events`. | `401`/`403` authentication or role; `404` unknown job with no retained events; `500` storage failure. |
+
+```json
+{
+  "job_id": "0123456789abcdef0123456789abcdef",
+  "events": [
+    {
+      "seq": 1,
+      "time": "2026-10-27T12:00:00Z",
+      "job_id": "0123456789abcdef0123456789abcdef",
+      "to": "queued",
+      "source": "operator",
+      "action": "upload"
+    },
+    {
+      "seq": 2,
+      "time": "2026-10-27T12:01:00Z",
+      "job_id": "0123456789abcdef0123456789abcdef",
+      "from": "queued",
+      "to": "running",
+      "source": "operator",
+      "action": "start",
+      "driver_id": "bench",
+      "session_id": "3f9c0a1b2c3d4e5f",
+      "lease_id": "8d7e6f5a4b3c2d1e"
+    }
+  ]
+}
 ```
 
 Every job state change produces exactly one event, recorded where the change
@@ -220,6 +310,14 @@ number of events kept, removing the oldest first, and `serve
 -job-event-retention` (default `2160h`, 90 days; `0` disables the age limit)
 removes older events. Pruned events stop being served immediately. The log file
 is compacted at startup and after pruned events exceed 10% of the limit.
+
+### `DELETE /api/v1/jobs/{id}`
+
+Remove a queued or terminal job. A running or canceling job must first stop.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| No body; job ID in the path. | `204`. | `401`/`403` authentication or role; `404` unknown job; `409` active job; `500` could not persist deletion. |
 
 ### Job storage
 
@@ -267,69 +365,42 @@ omitted, such as an initial move whose start position is unknown. This parser
 is a visualization aid; the normal GRBL validator and operator review remain
 separate.
 
-## Dispatch and monitoring
+## Dispatch, control, and monitoring
 
-`GET /drivers` returns online workers, their last heartbeat time, and busy status.
-It also returns `camera_available`, a boolean that does not reveal the source
-URL or credentials. Workers that implement machine-preparation controls advertise
-per-action capabilities: `manual_home`, `manual_unlock`, `manual_jog`,
-`manual_set_zero`, and `manual_frame`. The console enables an action only when
-its capability is present and the reported controller state permits it.
+### `GET /api/v1/drivers`
 
-`POST /drivers/{id}/manual` queues one typed manual assignment. Every request
-requires `confirmed:true`; jog additionally requires `axis` (`X`, `Y`, or `Z`),
-`distance_mm` within ±25 mm, and `feed_mm_min` from 1 to 3000. Frame requires a
-`job_id` whose geometry review is known and in bounds. Home, jog, and frame
-require a reported `Idle` controller; unlock requires `Alarm`; setting X/Y zero
-requires `Idle`. The response includes an opaque public assignment ID, action,
-state, `laser_off:true`, and a maximum duration. The worker lease secret is never
-returned. A manual assignment reserves the driver separately from a job lease;
-job G-code is not included.
-
-`GET /drivers/{id}/manual` returns the current manual assignment, or 404 when
-none exists. `DELETE /drivers/{id}/manual` requires `{"confirmed":true}`. A
-queued assignment is released immediately; a worker-owned assignment enters
-`canceling` and must report completion before the lease clears. An interrupted
-assignment requires a fresh Idle report before release. If GRBL's parser reset
-cannot be confirmed after an ambiguous partial command write, a durable driver
-quarantine blocks job starts, manual assignments, and lease release across
-server restarts. The worker retries a soft reset and clears quarantine only
-after the GRBL restart banner and a terminal Idle or Alarm status are confirmed.
-Manual control never starts automatically after a worker reconnects.
-
-An administrator can configure a driver's optional HTTP
-camera source with `PUT /drivers/{id}/camera` and
-`{"url":"http://camera.local/mjpeg","username":"viewer","password":"secret"}`.
-Use `{}` to remove the source. The URL must not contain embedded user-info;
-optional Basic Auth credentials are stored server-side and never returned by
-the API. Basic Auth over HTTP sends credentials without encryption: use HTTPS
-where the camera supports it, or restrict HTTP sources to a trusted, isolated
-network. EmberDeck accepts an MJPEG multipart stream or a single JPEG response,
-refuses redirects, and reads at most one 2 MiB frame within three seconds.
-
-`GET /drivers/{id}/camera` returns the first JPEG frame from the configured
-source. The endpoint requires an authenticated viewer, operator, or admin
-credential, disables caching, and limits requests to one frame per second per
-driver. A missing, slow, or invalid source returns `502 camera offline or
-stale`. Camera delivery is independent of job execution; a camera failure does
-not change job state. Cameras are for observation only and do not replace
-supervision, enclosures, interlocks, or emergency stops.
-
-When the worker has read them, `controller_settings` holds the controller's
-`$20` (soft limits), `$30`/`$31` (spindle range), `$32` (laser mode), and
-`$130`/`$131` (X/Y max travel) with `settings_read_at`; a failed read is
-reported as `settings_error`. Values come from GRBL's read-only `$$` command.
+Return online workers, their last heartbeat time, busy status, and optional
+controller settings. It also returns `camera_available`, a boolean that does not
+reveal the source URL or credentials. Workers that implement machine-preparation
+controls advertise per-action capabilities: `manual_home`, `manual_unlock`,
+`manual_jog`, `manual_set_zero`, and `manual_frame`. The console enables an
+action only when its capability is present and the reported controller state
+permits it. When the worker has read them, `controller_settings` holds
+the controller's `$20` (soft limits), `$30`/`$31` (spindle range), `$32` (laser
+mode), and `$130`/`$131` (X/Y max travel) with `settings_read_at`; a failed read
+is reported as `settings_error`. Values come from GRBL's read-only `$$` command.
 EmberDeck never writes `$` settings.
 
-`POST /jobs/{id}/start` takes `{"driver_id":"bench","confirmed":true,"bounds_override":true}`.
-For uploaded jobs, `bounds_override:true` is required when the profile review is
-unknown or out of bounds; review results do not replace the existing supervision
-confirmation. Designer-generated jobs keep their profile-bound generation
-validation and do not require this override. The operator must supervise work
-and confirm physical readiness. A queued job can
-start only on an online, idle worker. The server validates the complete program
-and runs all configured preflight plugins before assignment. A plugin rejection,
-error, or timeout prevents dispatch (422). No automatic queue advancement occurs.
+| Request | Response | Errors |
+| --- | --- | --- |
+| No body. | `200` array of driver records, including `camera_available` when configured. | `401`/`403` authentication or role; `500` could not persist driver expiration. |
+
+### `POST /api/v1/jobs/{id}/start`
+
+Assign one queued job to an online, idle worker. The server validates the
+complete program and runs all configured preflight plugins before assignment. A
+plugin rejection, error, or timeout prevents dispatch (422). No automatic queue
+advancement occurs.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| JSON object with `driver_id`, `confirmed`, and optional `bounds_override`. | `200` with the running job. | `400` missing confirmation; `401`/`403`; `404` unknown job; `409` not queued, offline/busy driver, bounds override required, settings mismatch, or active manual lease; `413` legacy assignment too large; `422` validation or plugin rejection; `500` persistence failure. |
+
+`confirmed` must be true: the operator must supervise work and confirm physical
+readiness. For uploaded jobs, `bounds_override:true` is required when the
+profile review is unknown or out of bounds; review results do not replace the
+existing supervision confirmation. Designer-generated jobs keep their
+profile-bound generation validation and do not require this override.
 
 A designer-generated job also requires the selected driver's last reported
 controller settings to match its immutable profile snapshot: `$30` equals
@@ -343,22 +414,40 @@ profile does not declare soft limits or travel, so `$20`, `$130`, and `$131` are
 reported but not compared. Uploaded jobs are not blocked by settings; the
 console warns when the driver reports `$32=0` or the program uses `M3`.
 
-`POST /jobs/{id}/pause` takes `{}`. An assigned worker must advertise
-`pause_resume`; older workers return 409 instead of receiving an unsupported
-control command. Running or resuming work becomes pausing. It becomes paused
-only after the worker observes GRBL `Hold:0` or `Idle` following feed hold.
-`Hold:1` means decelerating, and remains pausing. Repeating pause preserves a
-confirmed hold.
+### `POST /api/v1/jobs/{id}/pause`
 
-`POST /jobs/{id}/resume` takes `{"confirmed":true}` and requires a confirmed
-paused job. Readiness must be explicitly reconfirmed by the operator. The job
-becomes resuming until the worker observes a fresh `Run` or `Idle` after the
-resume command. There is no automatic resume when a held controller reports
-ready. All pause states retain the same lease and keep the assigned driver busy.
+Request a confirmed pause. An assigned worker must advertise `pause_resume`;
+older workers return 409 instead of receiving an unsupported control command.
+Running or resuming work becomes pausing. It becomes paused only after the
+worker observes GRBL `Hold:0` or `Idle` following feed hold. `Hold:1` means
+decelerating, and remains pausing. Repeating pause preserves a confirmed hold.
 
-`POST /jobs/{id}/cancel` takes `{}`. Queued work becomes canceled immediately;
-running, pausing, paused, or resuming work becomes canceling until the worker reports its best-effort stop.
-Network or software cancellation cannot guarantee that a laser has stopped.
+| Request | Response | Errors |
+| --- | --- | --- |
+| Empty JSON object `{}`. | `200` with the job in `pausing` or `paused`. | `401`/`403`; `404` unknown job; `409` job not running/pausable or worker lacks `pause_resume`; `500` persistence failure. |
+
+### `POST /api/v1/jobs/{id}/resume`
+
+Resume a confirmed paused job. Readiness must be explicitly reconfirmed by the
+operator. The job becomes resuming until the worker observes a fresh `Run` or
+`Idle` after the resume command. There is no automatic resume when a held
+controller reports ready. All pause states retain the same lease and keep the
+assigned driver busy.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| JSON object with `confirmed:true`. | `200` with the job in `resuming`. | `400` missing confirmation; `401`/`403`; `404` unknown job; `409` job not paused; `500` persistence failure. |
+
+### `POST /api/v1/jobs/{id}/cancel`
+
+Cancel a queued or active job. Queued work becomes canceled immediately;
+running, pausing, paused, or resuming work becomes canceling until the worker
+reports its best-effort stop. Network or software cancellation cannot guarantee
+that a laser has stopped.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| Empty JSON object `{}`. | `200` with the canceled or canceling job. | `401`/`403`; `404` unknown job; `409` job already terminal; `500` persistence failure. |
 
 Job fields include `state`, `driver_id`, `acked`, `total`, `controller_state`,
 optional `execution`, and `error`. Acknowledged-line progress is kept separate
@@ -391,11 +480,96 @@ Interrupted/failed/completed/canceled jobs are terminal; inspect the machine and
 upload a new job if another run is appropriate. The system never automatically
 replays a job after a restart.
 
-## Driver polling and content transfer
+## Camera monitoring
 
-`POST /drivers/{id}/poll` registers or reports one trusted worker. Driver IDs are
-1–64 letters, numbers, underscores, or hyphens. Every poll includes a process
-unique `session` string. Reusing a live ID with another session returns 409.
+### `PUT /api/v1/drivers/{id}/camera`
+
+Configure or clear one driver's camera source. The upstream URL and credentials
+stay on the server; the browser receives JPEG frames only through the
+authenticated frame route. The URL must not contain embedded user-info; optional
+Basic Auth credentials are stored server-side and never returned by the API.
+Basic Auth over HTTP sends credentials without encryption: use HTTPS where the
+camera supports it, or restrict HTTP sources to a trusted, isolated network.
+EmberDeck accepts an MJPEG multipart stream or a single JPEG response, refuses
+redirects, and reads at most one 2 MiB frame within three seconds. Camera failure
+never affects job execution. A camera is not a safety device.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| JSON object with optional `url`, `username`, and `password`; an empty `url` clears the source. | `204`. | `400` invalid driver ID, non-HTTP(S) URL, embedded URL credentials, or credentials without a URL; `401`/`403`; `500` could not persist; `503` storage unavailable. |
+
+### `GET /api/v1/drivers/{id}/camera`
+
+Fetch one JPEG frame from the configured source. The endpoint requires an
+authenticated viewer, operator, or admin credential, disables caching, and
+limits requests to one frame per second per driver. A missing, slow, or invalid
+source returns `502 camera offline or stale`. Camera delivery is independent of
+job execution; a camera failure does not change job state. Cameras are for
+observation only and do not replace supervision, enclosures, interlocks, or
+emergency stops.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| No body; driver ID in the path. | `200 image/jpeg` with one frame. | `400` invalid driver ID; `401`/`403`; `404` no camera configured; `429` frame rate limited with `Retry-After: 1`; `502` camera offline or stale. |
+
+## Manual machine preparation
+
+Manual actions use a short-lived, driver-scoped lease. They require operator
+confirmation, advertise explicit worker capabilities, and never run while a job
+is active. Motion requires an `Idle` controller; `unlock` requires `Alarm`.
+Laser output is off for every manual action.
+
+### `POST /api/v1/drivers/{id}/manual`
+
+Queue one typed manual assignment for `jog`, `home`, `unlock`, `set-zero`, or
+`frame`. Every request requires `confirmed:true`; jog additionally requires
+`axis` (`X`, `Y`, or `Z`), `distance_mm` within ±25 mm, and `feed_mm_min` from 1
+to 3000. Frame requires a `job_id` whose geometry review is known and in bounds.
+Home, jog, and frame require a reported `Idle` controller; unlock requires
+`Alarm`; setting X/Y zero requires `Idle`. The response includes an opaque
+public assignment ID, action, state, `laser_off:true`, and a maximum duration.
+The worker lease secret is never returned. A manual assignment reserves the
+driver separately from a job lease; job G-code is not included.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| JSON object with `action`, `confirmed:true`, and action-specific `axis`, `distance_mm`, `feed_mm_min`, or `job_id`. | `201` with the lease, bounds for framing, and maximum duration. | `400` unsupported action, invalid jog, missing fields, or missing confirmation; `401`/`403`; `409` driver offline/busy, missing capability, wrong controller state, active job, or unconfirmed parser reset; `500` persistence failure. |
+
+### `GET /api/v1/drivers/{id}/manual`
+
+Read the current manual-control lease and its state.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| No body; driver ID in the path. | `200` with the lease state and worker-reported progress. | `401`/`403`; `404` no manual assignment. |
+
+### `DELETE /api/v1/drivers/{id}/manual`
+
+Release or cancel a manual-control lease. A queued assignment is released
+immediately; a worker-owned assignment enters `canceling` and must report
+completion before the lease clears. An interrupted assignment requires a fresh
+Idle report before release. If GRBL's parser reset cannot be confirmed after an
+ambiguous partial command write, a durable driver quarantine blocks job starts,
+manual assignments, and lease release across server restarts. The worker retries
+a soft reset and clears quarantine only after the GRBL restart banner and a
+terminal Idle or Alarm status are confirmed. Manual control never starts
+automatically after a worker reconnects.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| JSON object with `confirmed:true`. | `200` released, or `202` canceling. | `400` missing confirmation; `401`/`403`; `404` no assignment; `409` driver offline, unconfirmed parser reset, or missing fresh Idle status; `500` persistence failure. |
+
+## Worker polling and content transfer
+
+### `POST /api/v1/drivers/{id}/poll`
+
+Register or report one trusted worker. Driver IDs are 1–64 letters, numbers,
+underscores, or hyphens. Every poll includes a process unique `session` string.
+Reusing a live ID with another session returns 409.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| JSON object with `session` and optional `job_id`, `lease`, `state`, `acked`, `total`, `error`, `controller_state`, controller settings, execution telemetry, or manual receipt. | `200` with idle metadata or an assignment. | `400` invalid driver ID, session, settings, or progress; `401`/`403` wrong credential scope; `409` duplicate session or invalid lease; `500` storage failure. |
 
 An idle poll is `{"session":"random-session-id"}`. The response is idle metadata
 or an assignment with `command:"run"`, `protocol`, `lease`, and `job`. Workers
@@ -419,32 +593,19 @@ Workers advertising `capabilities:["chunked_content_v1"]` receive protocol 2
 assignments with an immutable manifest instead of `job.gcode`:
 
 ```json
-{"command":"run","protocol":2,"lease":"…","job":{"id":"…","content":{"size":11,"sha256":"…"}}}
+{
+  "command": "run",
+  "protocol": 2,
+  "lease": "lease-value",
+  "job": {
+    "id": "0123456789abcdef0123456789abcdef",
+    "content": {
+      "size": 11,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  }
+}
 ```
-
-Fetch the content with `GET /drivers/{id}/jobs/{job_id}/content`, an explicit
-single `Range: bytes=start-end`, and `X-EmberDeck-Session` plus
-`X-EmberDeck-Lease` headers. Each inclusive range is at most 64 KiB. A successful
-response is `206 application/octet-stream` with `Content-Range` and
-`X-EmberDeck-Content-SHA256`. Ranges are idempotent and may be retried. The
-endpoint is restricted to the current worker credential, session, driver, active
-job, and lease; canceled or terminal leases cannot fetch more bytes. The server
-accepts no program over 4 MiB.
-
-Before opening the controller connection, the worker must receive every byte,
-check each response range, verify the exact size and SHA-256 against the
-assignment manifest, then validate all G-code. A truncated, altered, oversized,
-or malformed program is failed without sending any program bytes. Workers keep
-the complete verified program in memory in this Go implementation; a constrained
-firmware implementation may stage the same bounded content in PSRAM or flash.
-For a failure before streaming, the worker reports `acked:0` and the assignment's
-`total` line count so the server can accept and persist the failed receipt without
-claiming controller progress.
-Protocol 1 assignments are capped at 8 MiB to keep existing Go workers within
-their response-reader limit; starting a larger encoded assignment with a legacy
-worker returns 413 and leaves the job queued. New workers also accept a
-protocol-1 full-program assignment from an older server, preserving mixed-version
-deployments.
 
 Workers supporting confirmed control include `pause_resume` in polls. Chunked
 workers also include `chunked_content_v1`. While assigned, poll each second with
@@ -476,15 +637,42 @@ and releases the worker instead of leaving the job stuck canceling. Identical te
 regressing progress, and duplicate sessions are rejected. Lost communication
 stops the worker; restart it only after inspecting the machine.
 
-`GET /plugins` lists configured preflight manifests. Plugins are explicit trusted
-executables loaded at startup. See the plugin protocol for installation and limits.
+### `GET /api/v1/drivers/{id}/jobs/{job_id}/content`
+
+Fetch part of the immutable manifest assigned to a chunked worker. Fetch the
+content with an explicit single `Range: bytes=start-end` and
+`X-EmberDeck-Session` plus `X-EmberDeck-Lease` headers. Each inclusive range is
+at most 64 KiB. A successful response is `206 application/octet-stream` with
+`Content-Range` and `X-EmberDeck-Content-SHA256`. Ranges are idempotent and may
+be retried. The endpoint is restricted to the current worker credential,
+session, driver, active job, and lease; canceled or terminal leases cannot fetch
+more bytes. The server accepts no program over 4 MiB.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| No body. `Range`, `X-EmberDeck-Session`, and `X-EmberDeck-Lease` headers are required. | `206` with the requested bytes and integrity headers. | `400` invalid IDs or missing headers; `401`/`403` wrong credential; `404` missing program; `409` stale session or lease; `416` invalid or oversized range, with `Content-Range: bytes */SIZE`; `500` unreadable program. |
+
+Before opening the controller connection, the worker must receive every byte,
+check each response range, verify the exact size and SHA-256 against the
+assignment manifest, then validate all G-code. A truncated, altered, oversized,
+or malformed program is failed without sending any program bytes. Workers keep
+the complete verified program in memory in this Go implementation; a constrained
+firmware implementation may stage the same bounded content in PSRAM or flash.
+For a failure before streaming, the worker reports `acked:0` and the assignment's
+`total` line count so the server can accept and persist the failed receipt without
+claiming controller progress.
+Protocol 1 assignments are capped at 8 MiB to keep existing Go workers within
+their response-reader limit; starting a larger encoded assignment with a legacy
+worker returns 413 and leaves the job queued. New workers also accept a
+protocol-1 full-program assignment from an older server, preserving mixed-version
+deployments.
 
 ## Declared machine profiles
 
 Profiles are operator declarations stored separately from `jobs.json` in the
 durable `profiles.json` library. EmberDeck never configures a controller from
 these values; it reads `$30`, `$31`, and `$32` and refuses to start a generated
-job when they differ (see [Dispatch and monitoring](#dispatch-and-monitoring)). The initial designer profile supports only
+job when they differ (see [Dispatch, control, and monitoring](#dispatch-control-and-monitoring)). The initial designer profile supports only
 `controller:"grbl-1.1"`, `units:"mm"`, `origin:"lower-left"`, and
 `laser_mode_enabled:true`. The declared work origin is the currently prepared
 GRBL work origin; EmberDeck does not home, zero, change coordinate systems, or
@@ -494,14 +682,6 @@ explicitly declare `min_s:0`; other values are unsupported because linear power
 percentage conversion would not match a nonzero GRBL minimum PWM. See GRBL's
 [settings reference at commit `bfb67f0`](https://github.com/gnea/grbl/blob/bfb67f0c7963fe3ce4aaf8a97f9009ea5a8db36e/doc/markdown/settings.md)
 and [laser mode reference at the same commit](https://github.com/gnea/grbl/blob/bfb67f0c7963fe3ce4aaf8a97f9009ea5a8db36e/doc/markdown/laser_mode.md).
-
-`GET /profiles` lists profiles in ID order. `POST /profiles` creates one and
-returns 201 with a Location header; omit `id` and `revision`. `GET /profiles/{id}`
-reads a profile. `PUT /profiles/{id}` replaces its declaration and requires the
-current positive `revision`; successful updates increment the revision, while
-stale updates return 409. `DELETE /profiles/{id}` requires `{"revision":N}` and
-returns 204. Missing profiles return 404. A profile referenced by a saved
-project cannot be deleted.
 
 All profile requests are authenticated, strict single JSON objects limited to
 64 KiB, and reject unknown fields. Names are trimmed and must contain 1–120
@@ -515,16 +695,333 @@ limits, not hardware qualification or safety claims.
 Example profile creation body (updates also include the expected `revision`):
 
 ```json
-{"schema_version":1,"name":"Declared GRBL","controller":"grbl-1.1","units":"mm","origin":"lower-left","width_mm":300,"height_mm":200,"min_s":0,"max_s":1000,"min_feed_mm_min":1,"max_feed_mm_min":6000,"max_power_percent":100,"laser_mode_enabled":true}
+{
+  "schema_version": 1,
+  "name": "Declared GRBL",
+  "controller": "grbl-1.1",
+  "units": "mm",
+  "origin": "lower-left",
+  "width_mm": 300,
+  "height_mm": 200,
+  "min_s": 0,
+  "max_s": 1000,
+  "min_feed_mm_min": 1,
+  "max_feed_mm_min": 6000,
+  "max_power_percent": 100,
+  "laser_mode_enabled": true
+}
 ```
+
+### `GET /api/v1/profiles`
+
+List declared profiles in ID order.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| No body. | `200` array of profiles. | `401`/`403` authentication or role. |
+
+### `POST /api/v1/profiles`
+
+Create a declared profile.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| JSON profile object without `id` or `revision`. | `201` with the stored profile and a `Location` header. | `400` invalid or unknown fields; `401`/`403`; `500` persistence failure. |
+
+### `GET /api/v1/profiles/{id}`
+
+Read one declared profile.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| No body; profile ID in the path. | `200` with the profile. | `401`/`403`; `404` unknown profile. |
+
+### `PUT /api/v1/profiles/{id}`
+
+Replace a profile declaration. The request must include the current positive
+`revision`; successful updates increment it.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| JSON profile object including `revision`. | `200` with the updated profile. | `400` invalid fields; `401`/`403`; `404` unknown profile; `409` stale revision; `500` persistence failure. |
+
+### `DELETE /api/v1/profiles/{id}`
+
+Delete a declared profile. A profile referenced by a saved project cannot be
+deleted.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| JSON object with `revision`. | `204`. | `400` invalid revision; `401`/`403`; `404` unknown profile; `409` stale revision or project reference; `500` persistence failure. |
+
+## Editable design projects
+
+Projects are saved independently in the durable `designs.json` library. Schema
+version 1 remains supported for the original single rectangle/vector-engraving
+editor. Schema version 2 stores multiple ordered line paths and operation
+layers. Both use millimetres from the lower-left declared work origin. The
+profile reference includes its revision. `profile_stale` is computed on reads
+and is true after the profile revision changes; save the project with the
+current reviewed profile revision before generation. Project creation and
+updates require the referenced profile to exist at the submitted revision.
+Missing or changed profiles return 409. Profile deletion returns 409 while a
+project references it.
+
+`GET /api/v1/projects/{id}` reads one project. Each save advances the positive
+integer `revision` and returns `updated_at` (RFC 3339 UTC) and `updated_by` (the
+authenticated credential name, when present). `PUT /api/v1/projects/{id}`
+requires the revision the editor read; stale writes return 409 with both `error`
+and the current saved project, including its revision and save metadata. Clients
+must keep local edits when this happens and offer reload or save-as-copy
+recovery. This revision check also protects the race where another save lands
+after a client's last refresh. Projects written before save metadata was
+introduced may omit `updated_at` and `updated_by` until the next save.
+
+```json
+{
+  "error": "project revision conflict",
+  "current": {
+    "schema_version": 1,
+    "id": "PROJECT_ID",
+    "revision": 3,
+    "updated_at": "2026-10-28T18:42:00Z",
+    "updated_by": "shop operator",
+    "name": "Panel outline",
+    "profile_id": "PROFILE_ID",
+    "profile_revision": 1,
+    "rectangle": {
+      "x_mm": 10,
+      "y_mm": 20,
+      "width_mm": 30,
+      "height_mm": 20
+    },
+    "operation": {
+      "type": "vector-engrave",
+      "feed_mm_min": 600,
+      "power_percent": 25
+    },
+    "profile_stale": false
+  }
+}
+```
+
+Version 1 request shape is a single rectangle and operation. Updates also
+include `revision`. All requests are authenticated strict JSON objects limited
+to 64 KiB, with no unknown fields. Names are trimmed and 1–120 bytes.
+Coordinates are nonnegative, rectangle dimensions are positive, and the full
+rectangle must fit the profile envelope. Coordinates, dimensions, feed, and
+power accept at most three decimal places. Feed must fit the profile range;
+power must be above zero and at most the profile maximum, and must round to at
+least one GRBL S unit. Other operation types are not supported by version 1.
+
+```json
+{
+  "schema_version": 1,
+  "name": "Panel outline",
+  "profile_id": "PROFILE_ID",
+  "profile_revision": 1,
+  "rectangle": {
+    "x_mm": 10,
+    "y_mm": 20,
+    "width_mm": 30,
+    "height_mm": 20
+  },
+  "operation": {
+    "type": "vector-engrave",
+    "feed_mm_min": 600,
+    "power_percent": 25
+  }
+}
+```
+
+Version 2 geometry is an ordered list of objects, each with an ID, a `kind`
+(`rectangle`, `ellipse`, `line`, or generic `path`), and one or more subpaths.
+A subpath is a list of `{x_mm,y_mm}` points plus a `closed` boolean. An optional
+`transform` stores `translate_x_mm`, `translate_y_mm`, `scale_x`, `scale_y`, and
+`rotation_deg`. Scale and rotation are applied around the source geometry's
+bounding-box center, then the millimetre translation is applied. Omitted
+transforms use identity values. Scales range from 0.01 to 100, rotation from
+−360 to 360 degrees, and transform values use at most three decimal places.
+Transformed points are rounded to 0.001 mm and must fit the profile workspace.
+SVG element transforms are applied at import time, while styling and machine
+operation settings are not inferred.
+Operations are ordered independently from the objects. Each object names its
+operation with `operation_id`; imported or newly drawn unassigned paths may be
+saved while they are reviewed, but generation requires every path to be
+assigned. An engraving path can be open or closed. A cutting path must be closed
+and enclose nonzero area.
+
+```json
+{
+  "schema_version": 2,
+  "name": "Mixed vector design",
+  "units": "mm",
+  "profile_id": "PROFILE_ID",
+  "profile_revision": 1,
+  "objects": [
+    {
+      "id": "outline",
+      "operation_id": "cut",
+      "subpaths": [
+        {
+          "points": [
+            {
+              "x_mm": 10,
+              "y_mm": 10
+            },
+            {
+              "x_mm": 40,
+              "y_mm": 10
+            },
+            {
+              "x_mm": 40,
+              "y_mm": 30
+            },
+            {
+              "x_mm": 10,
+              "y_mm": 30
+            }
+          ],
+          "closed": true
+        }
+      ]
+    },
+    {
+      "id": "mark",
+      "operation_id": "engrave",
+      "subpaths": [
+        {
+          "points": [
+            {
+              "x_mm": 15,
+              "y_mm": 15
+            },
+            {
+              "x_mm": 35,
+              "y_mm": 25
+            }
+          ],
+          "closed": false
+        }
+      ]
+    }
+  ],
+  "operations": [
+    {
+      "id": "cut",
+      "type": "vector-cut",
+      "feed_mm_min": 300,
+      "power_percent": 80
+    },
+    {
+      "id": "engrave",
+      "type": "vector-engrave",
+      "feed_mm_min": 600,
+      "power_percent": 25
+    }
+  ]
+}
+```
+
+The `operations` array defines execution order; paths within an operation keep
+their object and subpath order. IDs are 1–64 ASCII letters, digits, `_`, or `-`.
+Version 2 accepts at most 500 objects, 100 operations, and 4,000 points across
+all subpaths. Points must be finite, nonnegative, within 10,000 mm, use at most
+three decimal places, and fit the declared workspace. Operation feed/power
+limits are checked against the profile. All requests remain strict JSON with a
+64 KiB body limit.
+
+### `GET /api/v1/projects`
+
+List saved projects in ID order.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| No body. | `200` array of projects with computed `profile_stale`. | `401`/`403` authentication or role. |
+
+### `POST /api/v1/projects`
+
+Create an editable design project at schema version 1 or 2.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| JSON project object without `id` or `revision`. | `201` with the stored project and a `Location` header. | `400` invalid geometry or fields; `401`/`403`; `409` missing or changed profile revision; `500` persistence failure. |
+
+### `GET /api/v1/projects/{id}`
+
+Read one saved project.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| No body; project ID in the path. | `200` with the project and computed `profile_stale`. | `401`/`403`; `404` unknown project. |
+
+### `PUT /api/v1/projects/{id}`
+
+Replace a saved project. The request must include its current positive
+`revision`; stale writes return 409.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| JSON project object including `revision`. | `200` with the updated project and save metadata. | `400` invalid geometry or fields; `401`/`403`; `404` unknown project; `409` stale revision or profile revision, with the current saved project; `500` persistence failure. |
+
+### `DELETE /api/v1/projects/{id}`
+
+Delete a saved project.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| JSON object with `revision`. | `204`. | `400` invalid revision; `401`/`403`; `404` unknown project; `409` stale revision; `500` persistence failure. |
+
+### `POST /api/v1/projects/{id}/generate`
+
+Generate an immutable queued job from a saved project. It requires the current
+project revision and the exact current profile revision. The full G-code is
+checked by the existing GRBL driver validator before persistence. The generated
+program is an immutable job named `<project name>.gcode`; it contains
+deterministic rectangle vector engraving moves for version 1, or ordered vector
+cut/engrave path moves for version 2, and is never dispatched automatically.
+Version 2 generation emits laser-off rapid positioning and GRBL dynamic laser
+mode (`M4`) for both operation types so output is disabled when motion is
+stopped or held. Cutting paths are closed contours; no kerf compensation, tabs,
+pass count, or raster engraving is implemented. Generated jobs include
+`provenance` with `generator_version`, and complete `project` and `profile`
+value snapshots including IDs and revisions. Later project edits, project
+deletion, and profile deletion do not alter those job bytes or snapshots.
+Uploaded jobs have no provenance and retain their existing upload behavior.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| JSON object with `revision`. | `201` with the queued job and a `Location` header. | `400` invalid revision; `401`/`403`; `404` unknown project; `409` stale project/profile revision or unassigned paths; `422` generated program rejected by validation; `500` persistence failure. |
+
+### `POST /api/v1/designer/text-geometry`
+
+Convert bounded monoline text into editable path geometry. The response is not
+a saved project or job; it never selects machine power, speed, origin, or units
+other than millimetres.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| JSON object with `content`, `font`, `size_mm`, `x_mm`, and `y_mm`. | `200` with `subpaths` in millimetres. | `400` unsupported font, empty or overlong text, out-of-range size/origin, or generated geometry beyond 10,000 mm. |
+
+Text is 1–32 characters in the documented monoline font, height is 1–100 mm,
+and the origin and generated strokes must stay within 0–10,000 mm. Coordinates
+use at most three decimal places.
 
 ## Static SVG import
 
-`POST /svg-import` accepts raw `image/svg+xml` bytes up to 1 MiB and returns
-normalized editable geometry plus `provenance` identifying the built-in importer
-and its version. It does not save the source or project, persist provenance, or
-assign machine operations. Import the returned paths into a version 2 project
-with the regular project endpoints. The root SVG must declare physical `width`, `height`, and
+### `POST /api/v1/svg-import`
+
+Accept raw `image/svg+xml` bytes up to 1 MiB and return normalized editable
+geometry plus `provenance` identifying the built-in importer and its version. It
+does not save the source or project, persist provenance, or assign machine
+operations. Import the returned paths into a version 2 project with the regular
+project endpoints.
+
+| Request | Response | Errors |
+| --- | --- | --- |
+| Raw `image/svg+xml` body, up to 1 MiB. | `200` with imported subpaths and importer provenance. | `400` malformed SVG, missing physical dimensions, unsupported elements, active content, or external references; `401`/`403`; `413` body over 1 MiB. |
+
+The root SVG must declare physical `width`, `height`, and
 `viewBox`; supported units are mm, cm, inches, points, picas, and CSS pixels.
 The viewport is mapped to lower-left-origin millimetres. A mismatched aspect ratio
 requires explicit `preserveAspectRatio="none"`.
@@ -588,7 +1085,7 @@ before saving or dispatching it. Importing never starts a machine.
 
 The first adapter is `svgimport.Importer`, advertising `.svg`/
 `image/svg+xml` input and `editable_design` output. It has no conversion options.
-The existing `POST /svg-import` endpoint invokes it and returns normalized
+The existing `POST /api/v1/svg-import` endpoint invokes it and returns normalized
 unassigned geometry with importer ID/version provenance. The designer already
 previews and saves this geometry to a project; desktop and mobile screenshots
 are in the [operator guide](operator-guide.md#create-a-multi-path-vector-project). The server
@@ -618,216 +1115,93 @@ import (
     "github.com/ConstructorFleet/emberdeck/importer"
 )
 
-type Importer struct{}
-
+// Manifest returns stable, versioned capability metadata. Keep IDs stable:
+// saved results may reference them.
 func (Importer) Manifest() importer.Manifest {
     return importer.Manifest{
         ProtocolVersion: importer.ProtocolVersion,
-        ID:              "example.vector",
-        Name:            "Example vector",
+        ID:              "example-dxf",
+        Name:            "Example DXF importer",
         Version:         "1.0.0",
         SourceFormats: []importer.SourceFormat{{
-            ID:         "example-vector",
-            Name:       "Example Vector",
-            Extensions: []string{".evf"},
-            MediaTypes: []string{"application/vnd.example.vector"},
+            ID: "dxf", Name: "DXF",
+            Extensions: []string{".dxf"},
+            MediaTypes: []string{"image/vnd.dxf"},
         }},
-        OutputTypes: []importer.OutputType{importer.OutputEditableDesign},
-        OptionsSchema: json.RawMessage(`{"type":"object","properties":{"scale":{"type":"number","minimum":0.01,"maximum":100}},"additionalProperties":false}`),
+        OutputTypes:   []importer.OutputType{importer.OutputEditableDesign},
+        OptionsSchema: json.RawMessage(`{"type":"object","additionalProperties":false}`),
     }
 }
 
+// Import receives an immutable, registry-bounded request. The registry fills
+// provenance after this method returns; never dispatch a machine or fetch a
+// network resource here.
 func (Importer) Import(ctx context.Context, request importer.Request) (importer.Result, error) {
     if err := ctx.Err(); err != nil {
         return importer.Result{}, err
     }
-    if request.SourceFormat != "example-vector" || request.OutputType != importer.OutputEditableDesign {
-        return importer.Result{}, errors.New("example importer requires example-vector editable-design input")
-    }
-    // Validate request.Options against Manifest().OptionsSchema, then parse
-    // request.Source and marshal the agreed editable-design representation.
-    payload, err := json.Marshal(map[string]any{"objects": []any{}})
-    if err != nil {
-        return importer.Result{}, err
+    if len(request.Source) == 0 {
+        return importer.Result{}, errors.New("source is empty")
     }
     return importer.Result{
-        OutputType: importer.OutputEditableDesign,
-        Payload:    payload,
+        OutputType: request.OutputType,
+        Payload:    json.RawMessage(`{"objects":[]}`),
         Warnings: []importer.Warning{{
-            Code: "metadata-dropped", Message: "The source title was not retained.", Lossy: true,
+            Code: "empty-geometry", Message: "example importer produced no geometry", Lossy: true,
         }},
     }, nil
 }
 ```
 
-The example's empty `objects` payload only illustrates the interface shape; it
-is not a supported design document. Agree on a payload representation with the
-consumer before registering a real importer. `editable_design` and `gcode_job`
-are output labels, not schemas. Today, `svgimport.Document` is the only editable
-design payload consumed by the EmberDeck server. The generic `gcode_job` output
-has no registered consumer yet and cannot be saved or dispatched through the
-current importer endpoint.
-
 ## Register and call it
 
-A Go host creates a registry from implementations it trusts. The registry
-rejects invalid manifests and duplicate IDs. Capability lists are sorted by ID
-and returned as defensive copies.
+Build a registry from trusted constructors and fail closed when a manifest is
+invalid or duplicated. Call `Import` with an explicit importer ID, source format,
+output type, source bytes, and options. Treat the result as untrusted input even
+though the implementation is trusted: bound its size and validate geometry
+before preview or save.
 
 ```go
 registry, err := importer.NewRegistry(sample.Importer{})
 if err != nil {
     return err
 }
-
-result, err := registry.Import(ctx, "example.vector", importer.Request{
-    SourceFormat: "example-vector",
+result, err := registry.Import(ctx, "example-dxf", importer.Request{
+    SourceFormat: "dxf",
     OutputType:   importer.OutputEditableDesign,
-    Source:       sourceBytes,
-    Options:      json.RawMessage(`{"scale":1.5}`),
+    Source:       source,
 })
-if err != nil {
-    return err
-}
-// result.Provenance identifies the importer, version, format, and options.
-// Review result.Warnings before accepting the conversion.
 ```
-
-The registry accepts non-empty source data up to 1 MiB, JSON options up to 1 MiB,
-and a JSON result payload up to 4 MiB. It allows at most 64 warnings; each needs
-a non-empty code and message within the documented bounds. It checks that the
-selected format and output were declared and that the result uses the requested
-output type. It does not enforce an import timeout or terminate code that ignores
-context cancellation. Importers must check `ctx` during long work and reject
-malformed input with an actionable error.
-
-The registry requires an options schema to be a JSON object, but does not
-interpret JSON Schema keywords or validate the supplied options against that
-schema. Importer implementations must perform that validation. Do not silently
-choose scale, units, origin, speed, power, or controller settings.
 
 ## Compatibility and versioning
 
-`ProtocolVersion` must equal the host's supported `importer.ProtocolVersion`
-(currently `1`); there is no protocol negotiation or fallback. Increment the
-protocol version when changing the shared Go contract incompatibly. `Manifest.Version`
-is recorded verbatim in result provenance but is not parsed or compared by the
-registry; use semantic versions as a publisher convention and document the compatibility
-policy for their releases. Treat importer IDs and source-format IDs
-as stable identifiers. A breaking input or output change should use a new
-importer or format ID so callers can select it deliberately. The registry does
-not infer a format from a filename or MIME type: callers select the declared
-format ID explicitly.
-
-The registry fills provenance after a successful conversion with the importer
-ID/version, selected format, and exact options bytes. It does not retain original
-source files or persist provenance with projects. Preserve source and conversion
-metadata in the host application when reproducibility is required.
+`importer.ProtocolVersion` and each manifest's `ProtocolVersion` must match. The
+registry rejects unknown output types and mismatched formats. Capability metadata
+is versioned; adding a new output type is a contract revision, not a silent
+extension. Keep importer IDs and versions in persisted provenance so an
+operator can identify the converter and options that produced a result. Do not
+claim compatibility with every file from an external application; document the
+supported subset and version limits.
 
 ## Safety and output handling
 
-Treat source files as untrusted. Reject malformed data, external references,
-active content, and archive traversal unless the importer has a reviewed,
-explicit policy for them. Do not fetch network resources. Bound decompressed
-size, nesting, work, and temporary files in the importer; the generic registry
-only bounds byte payloads and warning counts.
+Conversion is not validation and never starts a machine. A candidate
+`gcode_job` must pass the same driver validation, profile review, preview, and
+explicit operator confirmation as a native job. Imported editable geometry is
+saved with its operation assignment still pending; generation remains a separate
+explicit step. Malformed, oversized, unsupported, externally referenced, or
+active content must fail with an actionable error rather than a partial result.
+Plugin processes are trusted code unless a separate isolation design exists;
+this contract does not sandbox them.
 
-A conversion warning can set `Lossy: true` when information was dropped or
-approximated. Return actionable errors for unsupported features rather than
-silently producing misleading geometry. Geometry import must not assign
-machine operations. A generated G-code payload is only a candidate: the host
-must validate it, review it against a machine profile, show a preview, and ask
-for explicit operator confirmation before saving or dispatching. Importing
-never starts a machine.
+## Plugins
 
-See the [HTTP API and worker contract](api.md#importer-interface-go-api) for the
-built-in SVG subset and current server behavior. The implemented SVG upload,
-preview, and save flow is illustrated in the [operator guide](operator-guide.md#create-a-multi-path-vector-project).
+### `GET /api/v1/plugins`
 
-## Editable design projects
+List configured preflight plugin manifests. Plugins are explicit trusted
+executables loaded at startup. They are not sandboxes, machine drivers, or file
+converters. See [the plugin protocol](plugins.md) for installation and limits.
 
-Projects are saved independently in the durable `designs.json` library. Schema
-version 1 remains supported for the original single rectangle/vector-engraving
-editor. Schema version 2 stores multiple ordered line paths and operation
-layers. Both use millimetres from the lower-left declared work origin. The
-profile reference includes its revision. `profile_stale` is computed on reads
-and is true after the profile revision changes; save the project with the
-current reviewed profile revision before generation. Project creation and
-updates require the referenced profile to exist at the submitted revision.
-Missing or changed profiles return 409. Profile deletion returns 409 while a
-project references it.
-
-`GET /projects` returns projects in ID order. `POST /projects` creates an
-editable project and returns 201 with a Location header. `GET /projects/{id}`
-reads one project. Each save advances the positive integer `revision` and
-returns `updated_at` (RFC 3339 UTC) and `updated_by` (the authenticated
-credential name, when present). `PUT /projects/{id}` requires the revision the
-editor read; stale writes return 409 with both `error` and the current saved
-project, including its revision and save metadata. Clients must keep local edits
-when this happens and offer reload or save-as-copy recovery. This revision check
-also protects the race where another save lands after a client's last refresh.
-`DELETE /projects/{id}` requires `{"revision":N}` and returns 204. Missing
-projects return 404. Projects written before save metadata was introduced may
-omit `updated_at` and `updated_by` until the next save.
-
-```json
-{"error":"project revision conflict","current":{"schema_version":1,"id":"PROJECT_ID","revision":3,"updated_at":"2026-10-28T18:42:00Z","updated_by":"shop operator","name":"Panel outline","profile_id":"PROFILE_ID","profile_revision":1,"rectangle":{"x_mm":10,"y_mm":20,"width_mm":30,"height_mm":20},"operation":{"type":"vector-engrave","feed_mm_min":600,"power_percent":25},"profile_stale":false}}
-```
-
-Version 1 request shape is `{"schema_version":1,"name":"Panel outline",
-"profile_id":"PROFILE_ID","profile_revision":1,"rectangle":{"x_mm":10,
-"y_mm":20,"width_mm":30,"height_mm":20},"operation":{"type":"vector-engrave",
-"feed_mm_min":600,"power_percent":25}}`. Updates also include `revision`.
-All requests are authenticated strict JSON objects limited to 64 KiB, with no
-unknown fields. Names are trimmed and 1–120 bytes. Coordinates are nonnegative,
-rectangle dimensions are positive, and the full rectangle must fit the profile
-envelope. Coordinates, dimensions, feed, and power accept at most three decimal
-places. Feed must fit the profile range; power must be above zero and at most
-the profile maximum, and must round to at least one GRBL S unit. Other operation
-types are not supported by version 1.
-
-Version 2 geometry is an ordered list of objects, each with an ID, a `kind`
-(`rectangle`, `ellipse`, `line`, or generic `path`), and one or more subpaths.
-A subpath is a list of `{x_mm,y_mm}` points plus a `closed` boolean. An optional
-`transform` stores `translate_x_mm`, `translate_y_mm`, `scale_x`, `scale_y`, and
-`rotation_deg`. Scale and rotation are applied around the source geometry's
-bounding-box center, then the millimetre translation is applied. Omitted
-transforms use identity values. Scales range from 0.01 to 100, rotation from
-−360 to 360 degrees, and transform values use at most three decimal places.
-Transformed points are rounded to 0.001 mm and must fit the profile workspace.
-SVG element transforms are applied at import time, while styling and machine
-operation settings are not inferred.
-Operations are ordered independently from the objects. Each object names its
-operation with `operation_id`; imported or newly drawn unassigned paths may be
-saved while they are reviewed, but generation requires every path to be
-assigned. An engraving path can be open or closed. A cutting path must be closed
-and enclose nonzero area.
-
-```json
-{"schema_version":2,"name":"Mixed vector design","units":"mm","profile_id":"PROFILE_ID","profile_revision":1,"objects":[{"id":"outline","operation_id":"cut","subpaths":[{"points":[{"x_mm":10,"y_mm":10},{"x_mm":40,"y_mm":10},{"x_mm":40,"y_mm":30},{"x_mm":10,"y_mm":30}],"closed":true}]},{"id":"mark","operation_id":"engrave","subpaths":[{"points":[{"x_mm":15,"y_mm":15},{"x_mm":35,"y_mm":25}],"closed":false}]}],"operations":[{"id":"cut","type":"vector-cut","feed_mm_min":300,"power_percent":80},{"id":"engrave","type":"vector-engrave","feed_mm_min":600,"power_percent":25}]}
-```
-
-The `operations` array defines execution order; paths within an operation keep
-their object and subpath order. IDs are 1–64 ASCII letters, digits, `_`, or `-`.
-Version 2 accepts at most 500 objects, 100 operations, and 4,000 points across
-all subpaths. Source points must be finite, within 0–10,000 mm, and use at most
-three decimal places; transformed points must also fit the declared workspace. Operation feed/power
-limits are checked against the profile. All requests remain strict JSON with a
-64 KiB body limit.
-
-`POST /projects/{id}/generate` accepts `{"revision":N}` and returns 201 with a
-Location pointing to a normal queued job. It requires the current project
-revision and the exact current profile revision. The full G-code is checked by
-the existing GRBL driver validator before persistence. The generated program is
-an immutable job named `<project name>.gcode`; it contains deterministic
-rectangle vector engraving moves for version 1, or ordered vector cut/engrave
-path moves for version 2, and is never dispatched automatically. Version 2
-generation emits laser-off rapid positioning and GRBL dynamic laser mode
-(`M4`) for both operation types so output is disabled when motion is stopped or
-held. Cutting paths are closed contours; no kerf compensation, tabs, pass
-count, or raster engraving is implemented.
-Generated jobs include `provenance` with `generator_version`, and complete
-`project` and `profile` value snapshots including IDs and revisions. Later
-project edits, project deletion, and profile deletion do not alter those job
-bytes or snapshots. Uploaded jobs have no provenance and retain their existing
-upload behavior.
+| Request | Response | Errors |
+| --- | --- | --- |
+| No body. | `200` array of plugin manifests. | `401`/`403` authentication or role. |
