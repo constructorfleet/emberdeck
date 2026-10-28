@@ -30,6 +30,9 @@ type Job struct {
 	Name            string              `json:"name"`
 	State           string              `json:"state"`
 	Created         time.Time           `json:"created"`
+	Started         *time.Time          `json:"started,omitempty"`
+	Ended           *time.Time          `json:"ended,omitempty"`
+	DurationMS      *int64              `json:"duration_ms,omitempty"`
 	ProfileID       string              `json:"profile_id,omitempty"`
 	ProfileRevision int                 `json:"profile_revision,omitempty"`
 	Provenance      *JobProvenance      `json:"provenance,omitempty"`
@@ -54,7 +57,7 @@ type workerJob struct {
 	Content          *jobtransfer.Manifest `json:"content,omitempty"`
 }
 
-// jobRecord is one durable metadata entry in jobs.json (format version 2).
+// jobRecord is one durable metadata entry in jobs.json (format version 3).
 type jobRecord struct {
 	Job
 	Lease  string `json:"lease,omitempty"`
@@ -64,9 +67,12 @@ type jobRecord struct {
 	segments int
 }
 
+// jobIndex is jobs.json. EventSeq is the last job event committed with this
+// index; the event log may hold later, uncommitted events after a crash.
 type jobIndex struct {
-	Version int                  `json:"version"`
-	Jobs    map[string]jobRecord `json:"jobs"`
+	Version  int                  `json:"version"`
+	EventSeq int64                `json:"event_seq"`
+	Jobs     map[string]jobRecord `json:"jobs"`
 }
 
 // legacyJob is the version 1 jobs.json entry that embedded program bytes.
@@ -76,7 +82,9 @@ type legacyJob struct {
 	Gcode string `json:"gcode"`
 }
 
-const jobIndexVersion = 2
+// Version 3 adds the committed event sequence. Version 2 libraries load
+// with no history and are rewritten as version 3 on the next save.
+const jobIndexVersion = 3
 
 var (
 	errProgramMissing = errors.New("job program is missing")
@@ -152,6 +160,9 @@ func (s *Server) loadJobs() error {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		s.jobs = make(map[string]jobRecord)
+		if err := s.loadHistory(0); err != nil {
+			return err
+		}
 		return s.removeOrphanPrograms()
 	}
 	if err != nil {
@@ -171,7 +182,7 @@ func (s *Server) loadJobs() error {
 	if err := json.Unmarshal(data, &index); err != nil {
 		return fmt.Errorf("job library: %w", err)
 	}
-	if index.Version != jobIndexVersion || index.Jobs == nil {
+	if (index.Version != jobIndexVersion && index.Version != 2) || index.Jobs == nil || index.EventSeq < 0 || (index.Version == 2 && index.EventSeq != 0) {
 		return fmt.Errorf("unsupported job library version %d", index.Version)
 	}
 	for id, record := range index.Jobs {
@@ -182,6 +193,9 @@ func (s *Server) loadJobs() error {
 		if err != nil || !info.Mode().IsRegular() || info.Size() != record.Size {
 			return fmt.Errorf("job %s program file is missing or damaged", id)
 		}
+	}
+	if err := s.loadHistory(index.EventSeq); err != nil {
+		return err
 	}
 	s.jobs = index.Jobs
 	return s.removeOrphanPrograms()
@@ -212,10 +226,13 @@ func (s *Server) migrateLegacyJobs(data []byte) error {
 			return fmt.Errorf("migrate job %s program: %w", id, err)
 		}
 	}
+	if err := s.loadHistory(0); err != nil {
+		return err
+	}
 	// Migration is not a lifecycle transition; compare against the same
 	// states so existing jobs are not counted as new in metrics.
 	s.jobs = jobs
-	if err := s.save(s.copyJobs()); err != nil {
+	if err := s.save(s.copyJobs(), transitionCause{}); err != nil {
 		return fmt.Errorf("commit migrated job library: %w", err)
 	}
 	return s.removeOrphanPrograms()
@@ -244,18 +261,65 @@ func (s *Server) removeOrphanPrograms() error {
 	return nil
 }
 
-// save durably replaces the metadata index. Callers hold the server mutex.
-func (s *Server) save(jobs map[string]jobRecord) error {
+// save durably replaces the metadata index. It is the only place job state
+// changes are committed, so it derives the event history from the state
+// difference: events are appended to the log first, then the index rename
+// commits them together with the new states. Callers hold the server mutex.
+func (s *Server) save(jobs map[string]jobRecord, cause transitionCause) error {
 	if s.closed {
 		return errors.New("server is closed")
 	}
 	if s.storageErr != nil {
 		return s.storageErr
 	}
-	data, err := json.Marshal(jobIndex{Version: jobIndexVersion, Jobs: jobs})
+	now := time.Now().UTC()
+	events := s.transitionEvents(jobs, cause, now)
+	eventSeq := s.history.seq
+	if len(events) > 0 {
+		eventSeq = events[len(events)-1].Seq
+	}
+	data, err := json.Marshal(jobIndex{Version: jobIndexVersion, EventSeq: eventSeq, Jobs: jobs})
 	if err != nil {
 		return err
 	}
+	rollback := int64(-1)
+	if len(events) > 0 {
+		if rollback, err = s.appendEvents(events); err != nil {
+			return err
+		}
+	}
+	if err := s.writeIndex(data); err != nil {
+		if rollback >= 0 {
+			s.rollbackEvents(rollback)
+		}
+		return err
+	}
+	if err := syncDirectory(s.dir); err != nil {
+		// Rename is already visible. Reject all subsequent API work so no uncertain
+		// assignment can be dispatched from either old or new in-memory state.
+		s.failStorage(err)
+		return err
+	}
+	for id, job := range jobs {
+		previous, exists := s.jobs[id]
+		from := "new"
+		if exists {
+			from = previous.State
+		}
+		if from != job.State && (from == "new" || isMetricJobState(from)) && isMetricJobState(job.State) {
+			s.metrics.transitions.WithLabelValues(from, job.State).Inc()
+		}
+	}
+	previous := s.jobs
+	s.jobs = jobs
+	s.progressDirty = false
+	s.metrics.syncJobStates(jobs)
+	s.commitEvents(events, previous, now)
+	return nil
+}
+
+// writeIndex writes jobs.json through a synced temporary file and rename.
+func (s *Server) writeIndex(data []byte) error {
 	f, err := os.CreateTemp(s.dir, ".jobs-*.tmp")
 	if err != nil {
 		return err
@@ -272,32 +336,7 @@ func (s *Server) save(jobs map[string]jobRecord) error {
 	if err = f.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(f.Name(), filepath.Join(s.dir, "jobs.json")); err != nil {
-		return err
-	}
-	if err := syncDirectory(s.dir); err != nil {
-		// Rename is already visible. Reject all subsequent API work so no uncertain
-		// assignment can be dispatched from either old or new in-memory state.
-		s.failStorage(err)
-		return err
-	}
-	for id, job := range jobs {
-		previous, exists := s.jobs[id]
-		from := "new"
-		if exists {
-			from = previous.State
-		}
-		if from != job.State {
-			s.logJobTransition(from, job.Job)
-		}
-		if from != job.State && (from == "new" || isMetricJobState(from)) && isMetricJobState(job.State) {
-			s.metrics.transitions.WithLabelValues(from, job.State).Inc()
-		}
-	}
-	s.jobs = jobs
-	s.progressDirty = false
-	s.metrics.syncJobStates(jobs)
-	return nil
+	return os.Rename(f.Name(), filepath.Join(s.dir, "jobs.json"))
 }
 
 func isMetricJobState(state string) bool {

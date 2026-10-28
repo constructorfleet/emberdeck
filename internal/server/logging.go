@@ -44,26 +44,37 @@ func isWorkerPoll(r *http.Request) bool {
 	return r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/v1/drivers/") && strings.HasSuffix(r.URL.Path, "/poll")
 }
 
-// logJobTransition records a durable job state change. Failed and interrupted
-// jobs are warnings so operators can find them at the default level.
-func (s *Server) logJobTransition(from string, job Job) {
+// logJobTransition records one committed job event together with the job's
+// name and progress. Failed and interrupted jobs are warnings so operators can
+// find them at the default level. Session and lease values are logged only as
+// the event's opaque references.
+func (s *Server) logJobTransition(event JobEvent, job Job) {
 	level := slog.LevelInfo
-	if job.State == "failed" || job.State == "interrupted" {
+	if event.To == "failed" || event.To == "interrupted" {
 		level = slog.LevelWarn
 	}
+	from := event.From
+	if from == "" {
+		from = "new"
+	}
 	attrs := []slog.Attr{
-		slog.String("job_id", job.ID),
+		slog.Int64("seq", event.Seq),
+		slog.String("job_id", event.JobID),
 		slog.String("name", job.Name),
 		slog.String("from", from),
-		slog.String("to", job.State),
+		slog.String("to", event.To),
+		slog.String("source", event.Source),
+		slog.String("action", event.Action),
 	}
-	if job.DriverID != "" {
-		attrs = append(attrs, slog.String("driver_id", job.DriverID))
+	for _, field := range [][2]string{{"credential_id", event.CredentialID}, {"credential_name", event.CredentialName}, {"driver_id", event.DriverID}, {"session_id", event.SessionID}, {"lease_id", event.LeaseID}} {
+		if field[1] != "" {
+			attrs = append(attrs, slog.String(field[0], field[1]))
+		}
 	}
-	if job.State != "queued" {
+	if event.To != "queued" && event.To != "deleted" {
 		attrs = append(attrs, slog.Int("acked", job.Acked), slog.Int("total", job.Total))
 	}
-	if job.Error != "" {
+	if job.Error != "" && (event.To == "failed" || event.To == "interrupted") {
 		attrs = append(attrs, slog.String("error", job.Error))
 	}
 	s.logger.LogAttrs(context.Background(), level, "job state changed", attrs...)

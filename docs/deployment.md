@@ -143,7 +143,7 @@ docker compose logs -f emberdeck
 A server log line in the default text format looks like:
 
 ```text
-time=2026-10-28T12:00:00.000Z level=INFO msg="job state changed" job_id=4f0c... name=panel.gcode from=queued to=running driver_id=bench acked=0 total=412
+time=2026-10-28T12:00:00.000Z level=INFO msg="job state changed" seq=42 job_id=4f0c... name=panel.gcode from=queued to=running source=operator action=start credential_id=39120f... credential_name=bootstrap-admin driver_id=bench session_id=2e6fa5281e17051a lease_id=7e28154b21a2ff95 acked=0 total=412
 ```
 
 ## Docker Compose

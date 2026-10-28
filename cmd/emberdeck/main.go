@@ -59,6 +59,8 @@ func runServe(args []string) error {
 	tcpAddress := flags.String("tcp", "", "run a driver connected to a GRBL TCP controller")
 	serialPort := flags.String("serial", "", "run a driver connected to a serial controller")
 	baud := flags.Int("baud", 115200, "serial connection baud rate")
+	eventLimit := flags.Int("job-event-limit", server.DefaultEventLimit, "maximum number of job history events to keep (oldest are removed first)")
+	eventRetention := flags.Duration("job-event-retention", 90*24*time.Hour, "maximum age of job history events; 0 keeps them until -job-event-limit removes them")
 	serialDTR, serialRTS := addSerialModemFlags(flags)
 	logLevel, logFormat := addLogFlags(flags)
 	if err := flags.Parse(args); err != nil {
@@ -69,6 +71,12 @@ func runServe(args []string) error {
 	}
 	if flags.NArg() != 0 {
 		return errors.New("serve does not accept positional arguments")
+	}
+	if *eventLimit < 1 {
+		return errors.New("-job-event-limit must be at least 1")
+	}
+	if *eventRetention < 0 {
+		return errors.New("-job-event-retention must not be negative")
 	}
 	logger, err := newLogger(os.Stderr, *logLevel, *logFormat)
 	if err != nil {
@@ -90,7 +98,12 @@ func runServe(args []string) error {
 		return errors.New("EMBERDECK_API_KEY is required")
 	}
 	logger.Info("starting EmberDeck server", "version", version, "data", *data, "plugins", *plugins)
-	handler, err := server.OpenWithPlugins(*data, key, *plugins)
+	handler, err := server.OpenWithOptions(*data, key, server.Options{
+		PluginDir:      *plugins,
+		Logger:         logger,
+		EventLimit:     *eventLimit,
+		EventRetention: *eventRetention,
+	})
 	if err != nil {
 		return fmt.Errorf("open job library: %w", err)
 	}
@@ -99,7 +112,6 @@ func runServe(args []string) error {
 			logger.Error("close job library", "error", err)
 		}
 	}()
-	handler.SetLogger(logger)
 	handler.SetBuildVersion(version)
 	listener, err := net.Listen("tcp", *listenAddress)
 	if err != nil {

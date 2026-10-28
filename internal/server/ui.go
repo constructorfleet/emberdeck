@@ -24,6 +24,10 @@ func (s *Server) serveUI(w http.ResponseWriter, r *http.Request) bool {
 		name, contentType = "assets/controller-settings.js", "text/javascript; charset=utf-8"
 	case "/style.css":
 		name, contentType = "assets/style.css", "text/css; charset=utf-8"
+	case "/job-history.js":
+		name, contentType = "assets/job-history.js", "text/javascript; charset=utf-8"
+	case "/job-history.css":
+		name, contentType = "assets/job-history.css", "text/css; charset=utf-8"
 	case "/favicon.ico":
 		name, contentType = "assets/favicon.ico", "image/x-icon"
 	default:

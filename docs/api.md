@@ -153,6 +153,11 @@ Query parameters are optional and combine with AND:
 | `name` | Case-insensitive substring of the job name. |
 | `driver` | Exact assigned `driver_id`. |
 
+Jobs that have been dispatched also include `started`; jobs that reached
+`completed`, `failed`, `canceled`, or `interrupted` include `ended`, and
+`duration_ms` when they had started. Jobs stored before these fields existed
+omit them.
+
 `total` counts every job that matches the filters. Invalid values, including
 unknown states, return 400. List entries never include program bytes (`gcode`)
 or a worker `lease`; `size` is the stored program length in bytes. `GET
@@ -170,9 +175,49 @@ path for visualization; it does not change or validate the uploaded source. `DEL
 a running or canceling job must first stop. These operations persist to the
 private data directory. Run one server per directory; file locking enforces it.
 
+### Job event history
+
+`GET /jobs/{id}/events` returns the job's retained history, oldest first:
+
+```json
+{"job_id":"…","events":[
+ {"seq":1,"time":"…","job_id":"…","to":"queued","source":"operator","action":"upload"},
+ {"seq":2,"time":"…","job_id":"…","from":"queued","to":"running","source":"operator","action":"start",
+  "driver_id":"bench","session_id":"3f9c0a1b2c3d4e5f","lease_id":"8d7e6f5a4b3c2d1e"}]}
+```
+
+Every job state change produces exactly one event, recorded where the change
+is persisted. `from` is omitted when a job is created and `to` is `deleted`
+when it is removed. `source` is `operator` (API requests), `worker` (driver
+reports), or `server` (recovery and expiry). `action` is one of `upload`,
+`generate`, `start`, `pause`, `resume`, `cancel`, `delete`, `report`,
+`restart`, `heartbeat_expired`, or `credential_revoked` (an admin revoked the
+worker credential of an active job). `credential_id` and `credential_name`
+identify the API credential whose request caused the change; server events
+have none. Any role that can read jobs can read their history. `detail` carries the reported error for
+`failed` and `interrupted` events. Progress-only reports and repeated requests
+that do not change the state record nothing.
+
+`session_id` and `lease_id` are opaque 16-hex-digit digests of the worker
+session and job lease. They correlate events and logs but cannot be used as
+credentials; neither the session nor the lease is ever returned. `seq` grows
+across all jobs. History remains readable after a job is deleted until retention
+removes it; an ID with no job and no retained events returns 404.
+
+With `serve -log-level info` or lower, the server also writes one structured
+log record (`msg="job state changed"`) per event. It has the same `seq`,
+`source`, `action`, credential, driver, and session/lease reference fields, plus
+the job name and progress. A job created by an upload logs `from=new`.
+
+Retention is always bounded. `serve -job-event-limit` (default 50,000) caps the
+number of events kept, removing the oldest first, and `serve
+-job-event-retention` (default `2160h`, 90 days; `0` disables the age limit)
+removes older events. Pruned events stop being served immediately. The log file
+is compacted at startup and after pruned events exceed 10% of the limit.
+
 ### Job storage
 
-The data directory holds job metadata in `jobs.json` (format version 2) and
+The data directory holds job metadata in `jobs.json` (format version 3) and
 each program in its own `programs/<id>.gcode` file. Metadata records each
 program's size and SHA-256 digest. Startup fails closed if a listed program is
 missing or has the wrong size. Reading a program whose bytes do not match the
@@ -187,13 +232,24 @@ execution telemetry while the job state is unchanged) update memory only. A
 graceful shutdown saves them. After a crash, restart marks active work
 interrupted anyway, so the latest progress before the crash may be lost.
 
+Job events are appended to `job-events.jsonl` and synced before `jobs.json` is
+replaced, and `jobs.json` records the last committed event sequence, so its
+atomic rename commits states and their events together. At startup, events
+beyond that sequence come from a save interrupted by a crash; they are
+discarded. A missing, malformed, or incomplete committed history makes the
+server refuse to start without rewriting anything. If an index write fails, the
+appended events are removed; if that is impossible, the server stops accepting
+API requests. Version 2 libraries open with empty histories and are written as
+version 3 on the next change; existing jobs get no reconstructed events.
+
 Libraries written by earlier releases embed programs in `jobs.json`. On startup
 the server validates every entry, writes and syncs each program file, then
-replaces `jobs.json` with the version 2 metadata in one atomic rename. If any
+replaces `jobs.json` with the version 3 metadata in one atomic rename. If any
 entry is invalid or any write fails, the server refuses to start and leaves the
 original `jobs.json` unchanged. An interrupted migration simply runs again.
-Earlier releases cannot read a migrated library and refuse to start, so keep a
-backup of the data directory before upgrading if you might roll back.
+Earlier releases cannot read a migrated library and refuse to start; releases
+without job history likewise refuse version 3. Keep a backup of the data
+directory before upgrading if you might roll back.
 
 The derived path supports up to 10,000 linear XY segments and a 4 MiB source.
 It interprets G0/G1, G20/G21, G90/G91, G17/G40/G49/G80/G94, and M3/M4/M5.

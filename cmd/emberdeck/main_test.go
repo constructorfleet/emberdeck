@@ -130,3 +130,15 @@ func TestServeRejectsInvalidLogLevelBeforeOpeningLibrary(t *testing.T) {
 		t.Fatalf("invalid log level accepted: %v", err)
 	}
 }
+
+func TestServeJobEventRetentionFlagsAreValidated(t *testing.T) {
+	t.Setenv("EMBERDECK_API_KEY", "")
+	if err := runServe([]string{"-job-event-limit", "1000", "-job-event-retention", "720h"}); err == nil || !strings.Contains(err.Error(), "EMBERDECK_API_KEY is required") {
+		t.Fatalf("job event retention flags were not accepted: %v", err)
+	}
+	for _, args := range [][]string{{"-job-event-limit", "0"}, {"-job-event-limit", "-1"}, {"-job-event-retention", "-1h"}} {
+		if err := runServe(args); err == nil || !strings.Contains(err.Error(), "job-event") {
+			t.Fatalf("%v: invalid retention accepted: %v", args, err)
+		}
+	}
+}

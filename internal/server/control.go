@@ -71,11 +71,15 @@ func (s *Server) controlJob(w http.ResponseWriter, r *http.Request, resume bool)
 			return
 		}
 	}
+	action := "pause"
+	if resume {
+		action = "resume"
+	}
 	jobs := s.copyJobs()
 	jobs[job.ID] = job
-	if err := s.save(jobs); err != nil {
+	if err := s.save(jobs, operatorCause(r, action)); err != nil {
 		fail(w, 500, "could not persist controller request")
 		return
 	}
-	respond(w, 200, job.Job)
+	respond(w, 200, s.jobs[job.ID].Job)
 }

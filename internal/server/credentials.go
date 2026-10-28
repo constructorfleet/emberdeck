@@ -417,7 +417,7 @@ func (s *Server) revokeCredential(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if changed {
-		if err := s.save(jobs); err != nil {
+		if err := s.save(jobs, operatorCause(r, "credential_revoked")); err != nil {
 			// The credential revocation is already durable. Until the active job
 			// transition is certain, disable all APIs; restart recovery interrupts it.
 			s.failStorage(err)

@@ -298,6 +298,35 @@ prompt.
 
 ![Narrow console layout showing the pause control and live job status](assets/screenshots/operator-console-mobile.png)
 
+## Review job history
+
+Each job row shows when the job started (was dispatched to a driver), when it
+ended in a completed, failed, canceled, or interrupted state, and how long it
+ran. A queued job shows **Not started**. Jobs stored before EmberDeck recorded
+history have no start or end time.
+
+**View** also opens the job's event history, oldest first. Each entry shows the
+change (for example `queued → running`), when the server recorded it, and who
+caused it:
+
+- **operator**: upload, generation, Start, Pause, Resume, Cancel, or Delete
+  requests made through the API or console, or revoking the credential of a
+  worker that had an active job. The entry names the credential used.
+- **worker**: a state reported by the assigned driver, such as a confirmed
+  hold, completion, or failure, with the worker credential's name.
+- **server**: an interruption recorded by the server itself after a restart or
+  when the driver's heartbeat expired.
+
+Entries for dispatched jobs name the driver and short session and lease
+references. These are opaque digests for matching entries to each other and to
+server logs; they are not the worker's credentials. Failure and interruption
+entries include the reported reason. History stays available after a job is
+deleted until retention removes it. The server keeps at most
+`serve -job-event-limit` events (default 50,000) and drops events older than
+`serve -job-event-retention` (default 90 days).
+
+![Event history of a completed job showing who started it and the worker's completion report](assets/screenshots/operator-console-job-history.png)
+
 ## Local browser walkthrough
 
 The Playwright browser suite runs the console against an isolated local server
