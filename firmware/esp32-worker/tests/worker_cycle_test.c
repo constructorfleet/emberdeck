@@ -25,6 +25,8 @@ typedef struct {
     int callback_error;
     ed_terminal_state reported_state;
     char reported_error[ED_WORKER_ERROR_BYTES];
+    char reported_controller_state[ED_WORKER_CONTROLLER_STATE_BYTES];
+    char active_controller_state[ED_WORKER_CONTROLLER_STATE_BYTES];
     char session[ED_WORKER_SESSION_BYTES];
     const char *expected_lease;
     int active_calls;
@@ -44,7 +46,7 @@ static int poll_active(void *context, const char *session, const char *job_id,
     f->active_calls++;
     if (strcmp(session, f->session) != 0 || strcmp(job_id, "job-7") != 0 ||
         strcmp(lease, f->expected_lease) != 0 || acked < f->last_acked ||
-        acked > total || strcmp(controller_state, "Run") != 0) {
+        acked > total || strcmp(controller_state, f->active_controller_state) != 0) {
         f->callback_error = 1;
         return -1;
     }
@@ -72,7 +74,8 @@ static int controller_send(void *context, const unsigned char *bytes, size_t len
         if (uart_sink(stream->f, bytes + i, 1) != 0) return -1;
         if (bytes[i] == '\n') {
             size_t acked = stream->f->last_acked + 1;
-            if (stream->active_poll(stream->poll_context, acked, 2, "Run",
+            if (stream->active_poll(stream->poll_context, acked, 2,
+                                    stream->f->active_controller_state,
                                     &command) != 0) return -1;
             if (command == ED_ACTIVE_CANCEL) {
                 stream->f->cancel_at = -1;
@@ -203,6 +206,7 @@ static int report_terminal(void *context, const char *session,
     fixture *f = (fixture *)context;
     f->report_calls++;
     f->reported_state = receipt->state;
+    strcpy(f->reported_controller_state, receipt->controller_state);
     if (strcmp(session, f->session) != 0 || strcmp(job_id, "job-7") != 0 ||
         strcmp(lease, f->expected_lease) != 0) {
         if (strcmp(lease, f->expected_lease) != 0) f->report_rejected = 1;
@@ -248,6 +252,7 @@ static void prepare(fixture *f, ed_worker_adapters *adapters,
     f->source = program;
     f->source_size = length;
     f->expected_lease = "lease-one";
+    strcpy(f->active_controller_state, "Run");
     adapters->http.context = f;
     adapters->http.open_fresh_session = open_session;
     adapters->http.poll_assignment = poll_assignment;
@@ -382,12 +387,14 @@ static int test_active_poll_failure_stops_stream_and_reports_failure(void) {
     ed_worker_result result;
     prepare(&f, &adapters, program, sizeof(program) - 1);
     f.active_fail_at = 1;
+    strcpy(f.active_controller_state, "Hold");
     if (!check(ed_worker_run_one(&adapters, &result) == ED_ERR_SESSION,
                "failed active poll halts the claimed lease")) return 0;
     return check(f.active_calls == 1 && f.uart_size == 6 && f.report_calls == 1 &&
                  f.reported_state == ED_TERMINAL_FAILED && f.close_calls == 1 &&
-                 f.open_calls == 1 && f.fetch_calls == 1,
-                 "poll failure halts output and does not open/replay another session");
+                 f.open_calls == 1 && f.fetch_calls == 1 &&
+                 strcmp(f.reported_controller_state, "Hold") == 0,
+                 "poll failure halts output, preserves state, and does not replay");
 }
 
 static int test_active_poll_identity_change_stops_stream(void) {

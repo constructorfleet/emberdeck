@@ -16,6 +16,7 @@ typedef struct {
     size_t total;
     int have_progress;
     int failed;
+    char controller_state[ED_WORKER_CONTROLLER_STATE_BYTES];
 } active_context;
 
 static int terminated(const char *text, size_t capacity);
@@ -38,6 +39,8 @@ static int poll_active(void *context, size_t acked, size_t total,
     active->acked = acked;
     active->total = total;
     active->have_progress = 1;
+    (void)strncpy(active->controller_state, controller_state,
+                  sizeof(active->controller_state) - 1);
     if (active->http->poll_active(active->http->context, active->session,
                                   active->assignment->job_id,
                                   active->assignment->lease, acked, total,
@@ -132,7 +135,7 @@ static ed_result report_failed_progress(const ed_http_worker_adapter *http,
     if (active != NULL && active->have_progress) {
         receipt.acked = active->acked;
         receipt.total = active->total;
-        (void)strncpy(receipt.controller_state, "Run",
+        (void)strncpy(receipt.controller_state, active->controller_state,
                       sizeof(receipt.controller_state) - 1);
     }
     (void)strncpy(receipt.error, failure_message(cause), sizeof(receipt.error) - 1);
