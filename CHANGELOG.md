@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/constructorfleet/emberdeck/compare/v0.2.1...v0.2.2) (2026-10-28)
+
+
+### Bug Fixes
+
+* cancel pending resume when a new pause is applied ([#11](https://github.com/constructorfleet/emberdeck/issues/11)) ([3707035](https://github.com/constructorfleet/emberdeck/commit/37070357216df67b8c1874bc3612f6e65640fb73))
+
 ## [0.2.1](https://github.com/constructorfleet/emberdeck/compare/v0.2.0...v0.2.1) (2026-10-28)
 
 
