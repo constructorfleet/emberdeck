@@ -43,11 +43,28 @@ async function stopServer(child) {
 }
 
 async function capture(page, name) {
-  await page.screenshot({ path: path.join(screenshotDir, name), fullPage: true });
+  await page.screenshot({ path: path.join(screenshotDir, name), fullPage: true, scale: 'css' });
 }
 
-async function captureElement(page, selector, name) {
-  await page.locator(selector).screenshot({ path: path.join(screenshotDir, name), animations: 'disabled' });
+async function captureElement(page, selector, name, maxHeight = null) {
+  const element = page.locator(selector);
+  await page.evaluate(() => document.activeElement?.blur());
+  const bounds = await element.boundingBox();
+  if (!bounds) throw new Error(`Cannot capture hidden or empty documentation panel: ${selector}`);
+  const output = path.join(screenshotDir, name);
+  if (maxHeight && bounds.height > maxHeight) {
+    await element.evaluate((node) => window.scrollTo(0, Math.max(0, node.getBoundingClientRect().top)));
+    const viewportWidth = await page.evaluate(() => document.documentElement.clientWidth);
+    await page.screenshot({ path: output, animations: 'disabled', scale: 'device', clip: { x: 0, y: 0, width: viewportWidth, height: maxHeight } });
+  } else {
+    await element.screenshot({ path: output, animations: 'disabled', scale: 'device' });
+  }
+  const png = fs.readFileSync(output);
+  const width = png.readUInt32BE(16);
+  const height = png.readUInt32BE(20);
+  if (width < Math.round(bounds.width * 1.9) || height < Math.round(Math.min(bounds.height, maxHeight || bounds.height) * 1.9)) {
+    throw new Error(`Documentation panel capture must be 2× (${name}: ${width}×${height}, CSS ${bounds.width}×${bounds.height})`);
+  }
 }
 
 async function captureDocumentationNavigation(browser) {
@@ -58,12 +75,50 @@ async function captureDocumentationNavigation(browser) {
 
   for (const [name, width, height, isMobile] of [
     ['desktop', 1440, 1000, false],
-    ['mobile', 390, 844, true],
+    ['mobile', 375, 812, true],
   ]) {
     const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1, isMobile, hasTouch: isMobile });
     await page.goto(guide);
     await expect(page.getByRole('navigation', { name: 'Documentation' })).toBeVisible();
     await expect(page.locator('nav a[aria-current="page"]')).toHaveAttribute('href', 'operator-guide.html');
+    const screenshots = page.locator('img.documentation-screenshot');
+    const screenshotCount = await screenshots.count();
+    expect(screenshotCount).toBeGreaterThan(10);
+    for (const screenshot of await screenshots.all()) {
+      await screenshot.scrollIntoViewIfNeeded();
+      await expect.poll(() => screenshot.evaluate((image) => image.complete && image.naturalWidth > 0)).toBe(true);
+      const details = await screenshot.evaluate((image) => ({
+        src: image.getAttribute('src'),
+        alt: image.getAttribute('alt'),
+        width: image.getAttribute('width'),
+        height: image.getAttribute('height'),
+        loading: image.getAttribute('loading'),
+        parentHref: image.parentElement?.getAttribute('href'),
+        imageWidth: image.getBoundingClientRect().width,
+        paneWidth: image.parentElement?.getBoundingClientRect().width,
+        paneScrollWidth: image.parentElement?.scrollWidth,
+        paneLeft: image.parentElement?.getBoundingClientRect().left,
+        mainWidth: document.querySelector('main').getBoundingClientRect().width,
+        isMobile: image.classList.contains('documentation-screenshot-mobile'),
+        imageLeft: image.getBoundingClientRect().left,
+        mainLeft: document.querySelector('main').getBoundingClientRect().left,
+      }));
+      expect(details.alt).toBeTruthy();
+      expect(details.width).toMatch(/^\d+$/);
+      expect(details.height).toMatch(/^\d+$/);
+      expect(details.loading).toBe('lazy');
+      expect(details.parentHref).toBe(details.src);
+      expect(details.paneWidth).toBeLessThanOrEqual(width - 32 + 1);
+      const centerDiff = Math.abs((details.paneLeft + details.paneWidth / 2) - width / 2);
+      expect(centerDiff).toBeLessThanOrEqual(2);
+      if (isMobile) {
+        if (details.imageWidth > details.paneWidth + 1) {
+          expect(details.paneScrollWidth).toBeGreaterThan(details.paneWidth);
+        }
+        const imageHeight = await screenshot.evaluate((image) => image.getBoundingClientRect().height);
+        expect(imageHeight).toBeLessThanOrEqual(height * 0.75 + 1);
+      }
+    }
     const menu = page.locator('nav details').nth(isMobile ? 0 : 3);
     const summary = menu.locator('summary');
     if (isMobile) await summary.tap();
@@ -71,6 +126,14 @@ async function captureDocumentationNavigation(browser) {
     await expect(menu).toHaveAttribute('open', '');
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: path.join(screenshotDir, `docs-navigation-after-${name}.png`) });
+    await page.goto(guide);
+    const guideImages = await page.locator('img.documentation-screenshot').all();
+    for (const image of guideImages) {
+      await image.scrollIntoViewIfNeeded();
+      await expect.poll(() => image.evaluate((node) => node.complete && node.naturalWidth > 0)).toBe(true);
+    }
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({ path: path.join(os.tmpdir(), `emberdeck-operator-guide-${name}.png`), fullPage: true });
     await page.close();
   }
 }
@@ -94,7 +157,7 @@ async function main() {
   try {
     await waitForServer(baseURL, server);
     browser = await chromium.launch();
-    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 2, reducedMotion: 'reduce' });
     const page = await context.newPage();
     await page.goto(baseURL);
     await page.locator('#api-key').fill(apiKey);
@@ -113,10 +176,10 @@ async function main() {
     await page.getByLabel('Maximum commanded power (%)').fill('100');
     await page.getByRole('button', { name: 'Save profile' }).click();
     await expect(page.locator('#notice .notice-message')).toContainText('Profile saved');
-    await capture(page, 'designer-dedicated-page.png');
+    await captureElement(page, 'section[aria-labelledby="profiles-title"]', 'designer-dedicated-page.png');
     await page.getByRole('button', { name: 'Edit profile' }).click();
     await page.locator('#profile-name').evaluate((input) => input.blur());
-    await captureElement(page, '#designer-panel', 'designer-profile.png');
+    await captureElement(page, '#profile-form', 'designer-profile.png');
     await page.getByRole('button', { name: 'Cancel' }).click();
 
     await page.getByRole('button', { name: 'New rectangle project' }).click();
@@ -141,13 +204,15 @@ async function main() {
     await page.getByRole('button', { name: 'Close editor' }).click();
     await expect(page.getByRole('button', { name: 'Reopen Panel outline' })).toBeVisible();
     await capture(page, 'designer-console-overview.png');
+    await captureElement(page, 'section[aria-labelledby="profiles-title"]', 'designer-console-overview-profile-detail.png');
+    await captureElement(page, 'section[aria-labelledby="projects-title"]', 'designer-console-overview-project-detail.png');
     await page.getByRole('button', { name: 'Reopen Panel outline' }).click();
     await page.getByRole('button', { name: 'Edit profile' }).click();
     await page.getByLabel('Work area width (mm)').fill('290');
     await page.getByRole('button', { name: 'Save profile' }).click();
     await expect(page.locator('#stale-profile-warning')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Generate queued job' })).toBeDisabled();
-    await capture(page, 'designer-stale-profile.png');
+    await captureElement(page, '#project-form', 'designer-stale-profile.png');
     await page.getByRole('button', { name: 'Save project' }).click();
     await expect(page.locator('#stale-profile-warning')).toBeHidden();
     await page.getByRole('button', { name: 'Generate queued job' }).click();
@@ -156,10 +221,10 @@ async function main() {
     await expect(designerRow).toContainText(/queued/i);
     await designerRow.getByRole('button', { name: /^View / }).click();
     await expect(page.locator('#program-provenance')).toContainText('Panel outline');
-    await captureElement(page, '#program-panel', 'designer-generated-review.png');
+    await captureElement(page, '#program-provenance', 'designer-generated-review.png');
     await page.getByRole('link', { name: 'Designer' }).click();
-    await page.setViewportSize({ width: 390, height: 844 });
-    await captureElement(page, '#designer-panel', 'designer-mobile.png');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await captureElement(page, 'section[aria-labelledby="projects-title"]', 'designer-mobile.png');
     await page.setViewportSize({ width: 1440, height: 1000 });
 
     await page.getByRole('button', { name: 'New vector project' }).click();
@@ -181,28 +246,28 @@ async function main() {
     await page.getByLabel('Scale X').fill('1.2');
     await page.getByLabel('Rotation (degrees)').fill('15');
     await expect(page.locator('#vector-validation')).toBeHidden();
-    await captureElement(page, '#vector-form', 'designer-vector-transform.png');
+    await captureElement(page, '#vector-transform', 'designer-vector-transform.png');
     const alignmentChecks = page.getByRole('checkbox', { name: /Select shape/ });
     await alignmentChecks.nth(0).check();
     await alignmentChecks.nth(1).check();
     await expect(page.getByRole('button', { name: 'Align left' })).toBeEnabled();
     await page.getByRole('button', { name: 'Align left' }).click();
     await expect(page.locator('#vector-align-status')).toContainText('2 shapes aligned left');
-    await captureElement(page, '#vector-form', 'designer-vector-alignment.png');
+    await captureElement(page, '#vector-align-controls', 'designer-vector-alignment.png');
     await page.getByRole('button', { name: 'Save vector project' }).click();
     await expect(page.locator('#notice .notice-message')).toContainText('Vector project saved');
-    await captureElement(page, '#vector-form', 'designer-vector-project.png');
+    await captureElement(page, '#vector-object-list', 'designer-vector-project.png');
     await page.locator('#generate-vector-project').click();
     await page.getByRole('link', { name: 'Job library' }).click();
     const vectorRow = page.locator('#job-list li').filter({ hasText: 'Three shapes, two operations.gcode' });
     await expect(vectorRow).toContainText(/queued/i);
     await vectorRow.getByRole('button', { name: /^View / }).click();
     await expect(page.locator('#program-provenance')).toContainText('2. Cut');
-    await captureElement(page, '#program-panel', 'designer-vector-review.png');
+    await captureElement(page, '#program-provenance', 'designer-vector-review.png');
     await page.getByRole('link', { name: 'Designer' }).click();
     await page.getByRole('button', { name: 'Reopen vector Three shapes, two operations' }).click();
-    await page.setViewportSize({ width: 390, height: 844 });
-    await captureElement(page, '#vector-form', 'designer-vector-mobile.png');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await captureElement(page, '#vector-object-list', 'designer-vector-mobile.png');
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.getByRole('button', { name: 'New vector project' }).click();
     await page.locator('#vector-name').fill('Monoline text engraving');
@@ -210,9 +275,9 @@ async function main() {
     await page.locator('#vector-text-content').fill('EMBER 42');
     await page.locator('#vector-text-size').fill('18');
     await expect(page.locator('#vector-validation')).toBeHidden();
-    await captureElement(page, '#vector-form', 'designer-monoline-text.png');
-    await page.setViewportSize({ width: 390, height: 844 });
-    await captureElement(page, '#vector-form', 'designer-monoline-text-mobile.png');
+    await captureElement(page, '#vector-text-fields', 'designer-monoline-text.png');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await captureElement(page, '#vector-text-fields', 'designer-monoline-text-mobile.png');
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.getByRole('button', { name: 'New vector project' }).click();
     await page.locator('#vector-name').fill('Three shapes, two operations');
@@ -226,8 +291,8 @@ async function main() {
     await page.getByRole('button', { name: '1. rectangle' }).click();
     await page.getByRole('checkbox', { name: /Select shape 1 rectangle/ }).check();
     await page.getByRole('checkbox', { name: /Select shape 2 ellipse/ }).check();
-    await page.setViewportSize({ width: 390, height: 844 });
-    await captureElement(page, '#vector-form', 'designer-vector-alignment-mobile.png');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await captureElement(page, '#vector-align-controls', 'designer-vector-alignment-mobile.png');
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.getByRole('button', { name: 'New vector project' }).click();
     await page.locator('#vector-name').fill('Imported SVG paths');
@@ -235,9 +300,11 @@ async function main() {
     await page.locator('#vector-svg-file').setInputFiles({ name: 'imported-shapes.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(svg) });
     await expect(page.locator('#notice .notice-message')).toContainText('Imported 3 editable SVG paths');
     await expect(page.locator('#vector-object-list li')).toHaveCount(3);
-    await captureElement(page, '#vector-form', 'designer-svg-import.png');
-    await page.setViewportSize({ width: 390, height: 844 });
-    await captureElement(page, '#vector-form', 'designer-svg-import-mobile.png');
+    await captureElement(page, '#vector-object-list', 'designer-svg-import.png');
+    await captureElement(page, '#vector-preview', 'designer-svg-import-preview.png');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await captureElement(page, '#vector-object-list', 'designer-svg-import-mobile.png');
+    await captureElement(page, '#vector-preview', 'designer-svg-import-preview-mobile.png');
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.locator('#close-vector-project').click();
     const vectorProject = page.locator('#vector-project-list li').filter({ hasText: 'Three shapes, two operations' });
@@ -271,7 +338,7 @@ async function main() {
     await expect(page.locator('#controller-settings')).toContainText('$32=1 (laser mode)');
     await expect(page.locator('#job-list li').filter({ hasText: 'Settings mismatch.gcode' })).toContainText('Start will be refused');
     await expect(page.locator('#job-list li').filter({ hasText: 'constant-power-m3.gcode' })).toContainText('Program uses M3 constant power');
-    await captureElement(page, '.jobs-panel', 'operator-console-controller-settings.png');
+    await captureElement(page, '.driver-controls', 'operator-console-controller-settings.png');
     await docsApi('DELETE', `/api/v1/jobs/${mismatchJob.id}`);
     await docsApi('DELETE', `/api/v1/jobs/${constantJob.id}`);
     await docsApi('DELETE', `/api/v1/projects/${mismatchProject.id}`, { revision: 1 });
@@ -292,8 +359,8 @@ async function main() {
     await expect(row.locator('.toolpath-summary')).toContainText(/bounds out_of_bounds/i);
     await expect(row.locator('.toolpath-profile-bounds')).toHaveCount(1);
     await expect(row.getByRole('checkbox', { name: /Override out_of_bounds bounds review/ })).toBeVisible();
-    await capture(page, 'operator-console-uploaded-bounds-review.png');
-    await capture(page, 'operator-console-library.png');
+    await captureElement(page, '#job-list .job-item', 'operator-console-uploaded-bounds-review.png');
+    await captureElement(page, '.job-filters', 'operator-console-library.png');
 
     await page.locator('#operator-confirmation').check();
     const boundsOverride = row.getByRole('checkbox', { name: /Override .* bounds review/ });
@@ -309,7 +376,7 @@ async function main() {
     await expect(page.locator('#program-panel')).toBeVisible();
     await expect(row.locator('.toolpath-live')).toBeVisible();
     await expect(row.locator('.toolpath-summary')).toContainText(/estimated/i);
-    await capture(page, 'operator-console-running-view.png');
+    await captureElement(page, '#job-list .job-item', 'operator-console-running-view.png');
 
     await row.getByRole('button', { name: /^Pause / }).click();
     await expect(row).toContainText(/paused/i, { timeout: 15000 });
@@ -325,10 +392,10 @@ async function main() {
       return holdReports.filter((state) => state === 'Hold:0').length;
     }, { timeout: 5000, intervals: [250] }).toBeGreaterThanOrEqual(2);
     await row.getByRole('button', { name: /^View / }).click();
-    await capture(page, 'operator-console-paused.png');
+    await captureElement(page, '#job-list .job-item', 'operator-console-paused.png');
 
-    await page.setViewportSize({ width: 390, height: 844 });
-    await capture(page, 'operator-console-mobile.png');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await captureElement(page, '#job-list .job-item', 'operator-console-mobile.png', 280);
     await page.setViewportSize({ width: 1440, height: 1000 });
 
     await page.locator('#operator-confirmation').check();
@@ -336,7 +403,7 @@ async function main() {
     await expect(page.locator('#operator-confirmation')).not.toBeChecked();
     await expect(row).toContainText(/completed/i, { timeout: 120000 });
     await row.getByRole('button', { name: /^View / }).click();
-    await capture(page, 'operator-console-completed.png');
+    await captureElement(page, '#job-list .job-item', 'operator-console-completed.png');
     const history = page.getByRole('list', { name: 'Job event history' });
     // A short run can finish before a Run report, recording resuming → completed.
     await expect(history.getByRole('listitem').last().locator('.job-history-states')).toHaveText(/^(running|resuming) → completed$/, { timeout: 10000 });
@@ -371,7 +438,7 @@ async function main() {
     await expect(canceledRow).toContainText(/canceled/i, { timeout: 10000 });
     await expect(canceledRow.getByRole('button', { name: /^Delete / })).toBeVisible();
     await canceledRow.getByRole('button', { name: /^View / }).click();
-    await capture(page, 'operator-console-canceled.png');
+    await captureElement(page, '#job-list .job-item', 'operator-console-canceled.png');
     await captureDocumentationNavigation(browser);
     await context.close();
   } finally {

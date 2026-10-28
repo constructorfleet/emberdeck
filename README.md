@@ -93,9 +93,7 @@ to named credentials after initial access; see the
 [HTTP API and worker contract](docs/api.md). Open
 `http://127.0.0.1:8080` in your browser and enter the displayed key.
 
-![EmberDeck operator console showing a controller-confirmed paused job](docs/assets/screenshots/operator-console-paused.png)
-
-![Console overview with a declared machine profile, saved project, G-code intake, and job library](docs/assets/screenshots/designer-console-overview.png)
+[![EmberDeck console overview with a declared profile, saved project, and job controls](docs/assets/screenshots/designer-console-overview.png)](docs/assets/screenshots/designer-console-overview.png)
 
 ## Available now
 
@@ -130,8 +128,6 @@ project, then generate a separate queued program for review. Generation clears
 the previous readiness confirmation and never starts the machine. See the
 [designer walkthrough](docs/operator-guide.md#declare-a-machine-profile-and-design-a-rectangle)
 for the supported GRBL settings and coordinate assumptions.
-
-![Saved rectangle engraving source and its declared work-area preview](docs/assets/screenshots/designer-project.png)
 
 ## What EmberDeck does
 

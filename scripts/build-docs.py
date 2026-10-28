@@ -58,6 +58,42 @@ def rewrite_link(match, source):
             pass
     return match[0]
 
+
+def enhance_operator_guide_screenshots(body, page_name):
+    """Link guide screenshots to originals and declare their PNG dimensions."""
+    if page_name != 'operator-guide':
+        return body
+
+    def enhance(match):
+        raw_tag = match.group(0)
+        attributes = dict(re.findall(r'([\w-]+)="([^"]*)"', raw_tag))
+        src = attributes.get('src', '')
+        if not src.startswith('assets/screenshots/'):
+            return raw_tag
+        path = assets_root / src.removeprefix('assets/')
+        header = path.read_bytes()[:24]
+        if len(header) < 24 or header[:8] != b'\x89PNG\r\n\x1a\n' or header[12:16] != b'IHDR':
+            raise SystemExit(f'Operator guide screenshot must be a PNG: {path}')
+        width = int.from_bytes(header[16:20], 'big')
+        height = int.from_bytes(header[20:24], 'big')
+        if width < 1 or height < 1:
+            raise SystemExit(f'Operator guide screenshot has invalid dimensions: {path}')
+        alt = attributes.get('alt', '')
+        classes = ['documentation-screenshot']
+        if Path(src).stem.endswith('-mobile'):
+            classes.append('documentation-screenshot-mobile')
+        image = (
+            '<img src="' + escape(src, quote=True) + '" alt="' + alt + '"'
+            ' width="' + str(width) + '" height="' + str(height) + '"'
+            ' loading="lazy" decoding="async" class="' + ' '.join(classes) + '">'
+        )
+        return (
+            '<a class="screenshot-full-size" href="' + escape(src, quote=True) + '"'
+            ' aria-label="Open full-size screenshot: ' + alt + '">' + image + '</a>'
+        )
+
+    return re.sub(r'<img\b[^>]*>', enhance, body)
+
 routes = set()
 for path in Path('internal/server').glob('*.go'):
     if not path.name.endswith('_test.go'):
@@ -156,7 +192,7 @@ def make_nav(page_name):
             result += '<li><a href="' + name + '.html"' + current + '>' + escape(title) + '</a></li>'
         result += '</ul></details>'
     return result + '</div></div></nav>'
-style = '''*{box-sizing:border-box}body{margin:0;background:#10161e;color:#dae3ec;font:16px/1.7 system-ui,-apple-system,sans-serif}a{color:#ffb171;text-underline-offset:.18em}a:hover{color:#ffd0a4}a:focus-visible,summary:focus-visible{outline:3px solid #ffd18f;outline-offset:3px;border-radius:3px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.skip-link{position:absolute;left:1rem;top:-5rem;z-index:10;padding:.65rem 1rem;background:#fff;color:#10161e;border-radius:4px}.skip-link:focus{top:1rem}nav{position:relative;z-index:2;display:flex;flex-wrap:wrap;justify-content:space-between;gap:.75rem;padding:.8rem max(1rem,4vw);background:#1a2532;align-items:center;border-bottom:1px solid #435264}nav .brand{font-weight:800;font-size:1.3rem;text-decoration:none;color:#fff}nav .version{color:#b6c4d2;font-size:.9rem}nav details{position:relative;min-width:0}nav summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:.4rem;cursor:pointer;list-style:none;padding:.5rem .7rem;border-radius:4px;font-weight:650;color:#eef4fa}nav summary::-webkit-details-marker{display:none}nav summary::after{content:"▾";margin-left:.15em;color:#ffb171}.current-page{font-size:.76rem;color:#ffb171;font-weight:500}nav details[open] summary{background:#2a3949}nav ul{position:absolute;top:100%;right:0;min-width:15rem;margin:.3rem 0 0;padding:.4rem;list-style:none;background:#1a2532;border:1px solid #536579;border-radius:6px;box-shadow:0 8px 24px #0008}nav li a{display:block;padding:.45rem .65rem;border-radius:3px;text-decoration:none}nav li a:hover,nav li a[aria-current="page"]{background:#304256;color:#fff}nav li a[aria-current="page"]{box-shadow:inset 3px 0 #ffb171;font-weight:700}main{max-width:78ch;margin:2.5rem auto;padding:0 1.5rem;overflow-wrap:anywhere}h1{font-size:clamp(2rem,4vw,2.7rem);margin-top:0}h2{margin-top:2.5rem}h1,h2,h3{line-height:1.25;color:#fff}p,li{max-width:75ch}pre{overflow:auto;background:#1a2532;padding:1.2rem;border-radius:8px;border:1px solid #435264}code{font-size:.9em;overflow-wrap:anywhere}img{display:block;max-width:100%;height:auto;border:1px solid #536579;border-radius:8px;margin:1.2rem 0}table{display:block;overflow-x:auto;border-collapse:collapse;max-width:100%;width:max-content}td,th{padding:.6rem;border:1px solid #435264;text-align:left}footer{margin:3rem 0;border-top:1px solid #435264;padding-top:1rem;color:#b6c4d2}@media(max-width:740px){nav{display:grid;grid-template-columns:1fr auto;gap:.3rem .4rem;padding:.7rem 1rem}nav .brand{grid-column:1;grid-row:1}nav .version{grid-column:2;grid-row:1;margin:0;text-align:right}nav details{grid-column:1/-1;min-width:0}nav summary{padding:.6rem .45rem;font-size:.92rem;flex-wrap:wrap;gap:0 .35rem}nav details[open]{grid-column:1/-1}nav ul{position:static;min-width:0;margin:.2rem 0 .5rem;box-shadow:none}main{margin:1.75rem auto;padding:0 1rem}pre{padding:.85rem}img{margin:.9rem 0}}'''
+style = '''*{box-sizing:border-box}body{margin:0;background:#10161e;color:#dae3ec;font:16px/1.7 system-ui,-apple-system,sans-serif}a{color:#ffb171;text-underline-offset:.18em}a:hover{color:#ffd0a4}a:focus-visible,summary:focus-visible{outline:3px solid #ffd18f;outline-offset:3px;border-radius:3px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.skip-link{position:absolute;left:1rem;top:-5rem;z-index:10;padding:.65rem 1rem;background:#fff;color:#10161e;border-radius:4px}.skip-link:focus{top:1rem}nav{position:relative;z-index:2;display:flex;flex-wrap:wrap;justify-content:space-between;gap:.75rem;padding:.8rem max(1rem,4vw);background:#1a2532;align-items:center;border-bottom:1px solid #435264}nav .brand{font-weight:800;font-size:1.3rem;text-decoration:none;color:#fff}nav .version{color:#b6c4d2;font-size:.9rem}nav details{position:relative;min-width:0}nav summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:.4rem;cursor:pointer;list-style:none;padding:.5rem .7rem;border-radius:4px;font-weight:650;color:#eef4fa}nav summary::-webkit-details-marker{display:none}nav summary::after{content:"▾";margin-left:.15em;color:#ffb171}.current-page{font-size:.76rem;color:#ffb171;font-weight:500}nav details[open] summary{background:#2a3949}nav ul{position:absolute;top:100%;right:0;min-width:15rem;margin:.3rem 0 0;padding:.4rem;list-style:none;background:#1a2532;border:1px solid #536579;border-radius:6px;box-shadow:0 8px 24px #0008}nav li a{display:block;padding:.45rem .65rem;border-radius:3px;text-decoration:none}nav li a:hover,nav li a[aria-current="page"]{background:#304256;color:#fff}nav li a[aria-current="page"]{box-shadow:inset 3px 0 #ffb171;font-weight:700}main{max-width:78ch;margin:2.5rem auto;padding:0 1.5rem;overflow-wrap:anywhere}h1{font-size:clamp(2rem,4vw,2.7rem);margin-top:0}h2{margin-top:2.5rem}h1,h2,h3{line-height:1.25;color:#fff}p,li{max-width:75ch}pre{overflow:auto;background:#1a2532;padding:1.2rem;border-radius:8px;border:1px solid #435264}code{font-size:.9em;overflow-wrap:anywhere}img{display:block;max-width:100%;height:auto;border:1px solid #536579;border-radius:8px;margin:1.2rem 0}a.screenshot-full-size{position:relative;left:50%;transform:translateX(-50%);display:block;width:fit-content;max-width:min(1200px,calc(100vw - 2rem));margin:1.2rem 0}img.documentation-screenshot{margin:0}img.documentation-screenshot-mobile{width:auto;max-height:min(75vh,720px);object-fit:contain;margin-inline:auto}table{display:block;overflow-x:auto;border-collapse:collapse;max-width:100%;width:max-content}td,th{padding:.6rem;border:1px solid #435264;text-align:left}footer{margin:3rem 0;border-top:1px solid #435264;padding-top:1rem;color:#b6c4d2}@media(max-width:740px){nav{display:grid;grid-template-columns:1fr auto;gap:.3rem .4rem;padding:.7rem 1rem}nav .brand{grid-column:1;grid-row:1}nav .version{grid-column:2;grid-row:1;margin:0;text-align:right}nav details{grid-column:1/-1;min-width:0}nav summary{padding:.6rem .45rem;font-size:.92rem;flex-wrap:wrap;gap:0 .35rem}nav details[open]{grid-column:1/-1}nav ul{position:static;min-width:0;margin:.2rem 0 .5rem;box-shadow:none}main{margin:1.75rem auto;padding:0 1rem}pre{padding:.85rem}img{margin:.9rem 0}a.screenshot-full-size{max-width:calc(100vw - 2rem);margin:.9rem 0}}'''
 
 nav_style = '''
 nav{display:block;padding:0;background:#1a2532}
@@ -179,7 +215,7 @@ nav summary{align-items:baseline;gap:.2rem .35rem;padding:.4rem .35rem}
  .nav-groups>details{position:static;grid-column:auto;width:100%}
  .nav-groups>details>summary{width:100%;padding:.55rem .5rem}
  .nav-groups>details>ul{position:static;width:auto;min-width:0;max-width:100%;margin:.15rem 0 .4rem;box-shadow:none}
- main{margin:1.75rem auto;padding:0 1rem}pre{padding:.85rem}img{margin:.9rem 0}
+ main{margin:1.75rem auto;padding:0 1rem}pre{padding:.85rem}img{margin:.9rem 0}a.screenshot-full-size{width:calc(100vw - 2rem);max-width:calc(100vw - 2rem);overflow:auto;overscroll-behavior-inline:contain;margin:.9rem 0}img.documentation-screenshot{width:auto;max-width:none;max-height:min(75vh,720px);object-fit:contain;margin:0 auto}
 }
 '''
 
@@ -253,6 +289,7 @@ for name, text in pages.items():
     if name in source_paths:
         text = re.sub(r'\]\(([^)\s]+)\)', lambda match: rewrite_link(match, source_paths[name]), text)
     body = markdown.markdown(text, extensions=['fenced_code', 'tables', 'toc'])
+    body = enhance_operator_guide_screenshots(body, name)
     (out / (name + '.html')).write_text(render_page(name, body, name), encoding='utf-8')
 
 not_found_body = markdown.markdown(
