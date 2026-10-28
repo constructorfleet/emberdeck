@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.2](https://github.com/constructorfleet/emberdeck/compare/v0.10.1...v0.10.2) (2026-10-28)
+
+
+### Bug Fixes
+
+* discard stale MCU staging on oversized jobs ([#97](https://github.com/constructorfleet/emberdeck/issues/97)) ([2187c4e](https://github.com/constructorfleet/emberdeck/commit/2187c4eb8d7b0cdd9ede6c1eb629dace6395bf31))
+* **server:** enforce exact terminal receipt retries ([#115](https://github.com/constructorfleet/emberdeck/issues/115)) ([8bc550d](https://github.com/constructorfleet/emberdeck/commit/8bc550d588c2324d2e015adec9f09a7b7a7dafc6))
+
 ## [0.10.1](https://github.com/constructorfleet/emberdeck/compare/v0.10.0...v0.10.1) (2026-10-28)
 
 
