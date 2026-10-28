@@ -78,7 +78,7 @@ func TestMetricsScrapeContractAndJobLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	request(t, s, "POST", "/api/v1/drivers/bench/poll", `{"session":"session-a","capabilities":["pause_resume"]}`, "test-key")
-	w = request(t, s, "POST", "/api/v1/jobs/"+first.ID+"/start", `{"driver_id":"bench","confirmed":true}`, "test-key")
+	w = request(t, s, "POST", "/api/v1/jobs/"+first.ID+"/start", `{"driver_id":"bench","confirmed":true,"bounds_override":true}`, "test-key")
 	if w.Code != http.StatusOK {
 		t.Fatalf("start: %d %s", w.Code, w.Body.String())
 	}
@@ -142,7 +142,7 @@ func TestMetricsScrapeContractAndJobLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	request(t, s, "POST", "/api/v1/drivers/bench/poll", `{"session":"session-a","capabilities":["pause_resume"]}`, "test-key")
-	w = request(t, s, "POST", "/api/v1/jobs/"+second.ID+"/start", `{"driver_id":"bench","confirmed":true}`, "test-key")
+	w = request(t, s, "POST", "/api/v1/jobs/"+second.ID+"/start", `{"driver_id":"bench","confirmed":true,"bounds_override":true}`, "test-key")
 	if w.Code != http.StatusOK {
 		t.Fatalf("start second: %d %s", w.Code, w.Body.String())
 	}
