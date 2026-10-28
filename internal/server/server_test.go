@@ -329,6 +329,8 @@ func TestPublicAssetsAndUnknownPaths(t *testing.T) {
 		{"/", "text/html"},
 		{"/app.js", "text/javascript"},
 		{"/style.css", "text/css"},
+		{"/job-history.js", "text/javascript"},
+		{"/job-history.css", "text/css"},
 		{"/favicon.ico", "image/"},
 	}
 	for _, want := range public {

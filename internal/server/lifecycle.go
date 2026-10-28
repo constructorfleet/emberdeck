@@ -61,7 +61,7 @@ func (s *Server) recoverInterrupted() error {
 		}
 	}
 	if changed {
-		return s.save(jobs)
+		return s.save(jobs, transitionCause{source: "server", action: "restart"})
 	}
 	return nil
 }
@@ -88,7 +88,9 @@ func (s *Server) expire() error {
 		}
 	}
 	if jobs != nil {
-		if err := s.save(jobs); err != nil {
+		// Drivers are removed only after the save, so events still name the
+		// expired session.
+		if err := s.save(jobs, transitionCause{source: "server", action: "heartbeat_expired"}); err != nil {
 			return err
 		}
 	}
@@ -222,13 +224,13 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 	}
 	jobs := s.copyJobs()
 	jobs[j.ID] = j
-	if err := s.save(jobs); err != nil {
+	if err := s.save(jobs, operatorCause(r, "start")); err != nil {
 		fail(w, 500, "could not persist assignment")
 		return
 	}
 	d.Busy = true
 	s.drivers[d.ID] = d
-	respond(w, 200, j.Job)
+	respond(w, 200, s.jobs[j.ID].Job)
 }
 func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
 	var in struct{}
@@ -253,11 +255,11 @@ func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
 	}
 	jobs := s.copyJobs()
 	jobs[j.ID] = j
-	if err := s.save(jobs); err != nil {
+	if err := s.save(jobs, operatorCause(r, "cancel")); err != nil {
 		fail(w, 500, "could not persist cancellation")
 		return
 	}
-	respond(w, 200, j.Job)
+	respond(w, 200, s.jobs[j.ID].Job)
 }
 func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -273,7 +275,7 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "worker session is required")
 		return
 	}
-	assignment, needsProgram, ok := s.pollLocked(w, id, requestPrincipal(r).ID, &in)
+	assignment, needsProgram, ok := s.pollLocked(w, id, workerCause(r, in.Session), &in)
 	if !ok {
 		return
 	}
@@ -361,10 +363,10 @@ func sameCapabilities(left, right []string) bool {
 
 // pollLocked applies one worker report under the mutex. Progress-only reports
 // update memory; state transitions are persisted before acknowledgement.
-func (s *Server) pollLocked(w http.ResponseWriter, id, credentialID string, in *pollReport) (*pollAssignment, bool, bool) {
+func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCause, in *pollReport) (*pollAssignment, bool, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	credential, credentialActive := s.credentials[credentialID]
+	credential, credentialActive := s.credentials[cause.actor.ID]
 	if !credentialActive || credential.Revoked {
 		fail(w, http.StatusUnauthorized, "authentication required")
 		return nil, false, false
@@ -378,7 +380,7 @@ func (s *Server) pollLocked(w http.ResponseWriter, id, credentialID string, in *
 		return nil, false, false
 	}
 	d, ok := s.drivers[id]
-	if ok && d.CredentialID != credentialID {
+	if ok && d.CredentialID != cause.actor.ID {
 		fail(w, 409, "driver ID is already owned by another credential")
 		return nil, false, false
 	}
@@ -415,7 +417,7 @@ func (s *Server) pollLocked(w http.ResponseWriter, id, credentialID string, in *
 	}
 	d.ID = id
 	d.Session = in.Session
-	d.CredentialID = credentialID
+	d.CredentialID = cause.actor.ID
 	d.LastSeen = time.Now().UTC()
 	if in.JobID != "" {
 		j, exists := s.jobs[in.JobID]
@@ -494,7 +496,7 @@ func (s *Server) pollLocked(w http.ResponseWriter, id, credentialID string, in *
 			} else {
 				jobs := s.copyJobs()
 				jobs[j.ID] = j
-				if err := s.save(jobs); err != nil {
+				if err := s.save(jobs, cause); err != nil {
 					fail(w, 500, "could not persist progress")
 					return nil, false, false
 				}

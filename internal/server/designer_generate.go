@@ -81,7 +81,7 @@ func (s *Server) generateProject(w http.ResponseWriter, r *http.Request) {
 	// the job's provenance snapshots were captured above.
 	s.mu.Unlock()
 	unlocked = true
-	job, ok = s.addJob(w, job, program)
+	job, ok = s.addJob(w, job, program, operatorCause(r, "generate"))
 	if !ok {
 		return
 	}

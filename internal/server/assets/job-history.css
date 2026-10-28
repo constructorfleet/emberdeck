@@ -1,0 +1,12 @@
+.job-times{color:#aab3a7}
+.job-times time{color:var(--text)}
+.job-history{margin:0 0 14px;border:1px solid var(--line);background:#121713;padding:12px 14px}
+.job-history[hidden]{display:none}
+.job-history-title{margin:0 0 10px;font-size:13px;font-weight:500;letter-spacing:.02em}
+.job-history-empty{margin:0;color:var(--muted);font-size:12px}
+.job-history-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.job-history-event{border-left:2px solid var(--green-dark);padding:4px 0 4px 10px;min-width:0}
+.job-history-head{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;font-size:13px}
+.job-history-states{font-family:var(--mono);font-size:11px;color:var(--green)}
+.job-history-meta{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:3px;overflow-wrap:anywhere}
+.job-history-detail{margin:4px 0 0;color:var(--red);font-size:12px;overflow-wrap:anywhere}

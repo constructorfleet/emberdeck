@@ -7,6 +7,8 @@
   <title>EmberDeck — Job library</title>
   <link rel="icon" href="/favicon.ico" sizes="32x32">
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/job-history.css">
+  <script src="/job-history.js" defer></script>
   <script src="/controller-settings.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
@@ -143,6 +145,7 @@
     <section id="program-panel" class="panel program-panel" hidden aria-labelledby="program-title">
       <div class="section-title"><div><p class="eyebrow">PROGRAM VIEW</p><h2 id="program-title">Program</h2></div><button id="close-program" class="icon-button" type="button" aria-label="Close program"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"></path></svg></button></div>
       <div id="program-provenance" class="program-provenance" hidden></div>
+      <section id="program-history" class="job-history" aria-label="Job event history section" hidden></section>
       <pre id="program-code" class="program-code"></pre>
     </section>
   </main>

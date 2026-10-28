@@ -42,13 +42,49 @@ type Server struct {
 	projects      map[string]DesignerProject
 	mux           *http.ServeMux
 	metrics       *serverMetrics
+	history       eventHistory
 	logger        *slog.Logger
+}
+
+// Options configures a server beyond its data directory and API key.
+type Options struct {
+	// PluginDir optionally names a directory of trusted preflight plugins.
+	PluginDir string
+	// Logger receives request, job transition, and storage logs, including
+	// restart recoveries during Open. Nil discards them; SetLogger can
+	// replace it later.
+	Logger *slog.Logger
+	// EventLimit is the maximum number of retained job events. Zero uses
+	// DefaultEventLimit; history is always bounded.
+	EventLimit int
+	// EventRetention is the maximum age of retained job events. Zero keeps
+	// events until EventLimit removes them.
+	EventRetention time.Duration
 }
 
 // Open owns the data directory and loads its job, profile, and project libraries.
 func Open(dir, key string) (*Server, error) {
+	return OpenWithOptions(dir, key, Options{})
+}
+
+// OpenWithOptions opens a server with plugins, logging, and job event
+// retention. Plugin discovery and every library load fail closed.
+func OpenWithOptions(dir, key string, options Options) (*Server, error) {
 	if key == "" {
 		return nil, errors.New("API key is required")
+	}
+	if options.EventLimit < 0 || options.EventRetention < 0 {
+		return nil, errors.New("job event retention must not be negative")
+	}
+	if options.EventLimit == 0 {
+		options.EventLimit = DefaultEventLimit
+	}
+	var plugins []plugin.Plugin
+	if options.PluginDir != "" {
+		var err error
+		if plugins, err = plugin.Discover(options.PluginDir); err != nil {
+			return nil, err
+		}
 	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
@@ -67,8 +103,14 @@ func Open(dir, key string) (*Server, error) {
 			_ = lock.Close()
 		}
 	}()
-	s := &Server{lock: lock, drivers: make(map[string]Driver), dir: dir, key: key, profiles: make(map[string]MachineProfile), projects: make(map[string]DesignerProject), mux: http.NewServeMux(), logger: slog.New(slog.DiscardHandler)}
+	s := &Server{lock: lock, drivers: make(map[string]Driver), dir: dir, key: key, plugins: plugins, profiles: make(map[string]MachineProfile), projects: make(map[string]DesignerProject), mux: http.NewServeMux(), logger: defaultLogger(options.Logger)}
+	s.history.limit, s.history.retention = options.EventLimit, options.EventRetention
 	s.metrics = newServerMetrics(s)
+	defer func() {
+		if !opened {
+			_ = s.history.close()
+		}
+	}()
 	if err := s.loadJobs(); err != nil {
 		return nil, err
 	}
@@ -124,6 +166,7 @@ func Open(dir, key string) (*Server, error) {
 	s.handleAPI("GET /api/v1/jobs", readRoles, false, s.list)
 	s.handleAPI("GET /api/v1/jobs/{id}/toolpath", readRoles, false, s.getToolpath)
 	s.handleAPI("GET /api/v1/jobs/{id}/review", readRoles, false, s.getJobReview)
+	s.handleAPI("GET /api/v1/jobs/{id}/events", readRoles, false, s.listEvents)
 	s.handleAPI("GET /api/v1/jobs/{id}", readRoles, false, s.get)
 	s.handleAPI("DELETE /api/v1/jobs/{id}", writeRoles, false, s.delete)
 	s.handleAPI("GET /api/v1/profiles", readRoles, false, s.listProfiles)
@@ -138,6 +181,7 @@ func Open(dir, key string) (*Server, error) {
 	s.handleAPI("PUT /api/v1/projects/{id}", writeRoles, false, s.updateProject)
 	s.handleAPI("DELETE /api/v1/projects/{id}", writeRoles, false, s.deleteProject)
 	s.handleAPI("POST /api/v1/projects/{id}/generate", writeRoles, false, s.generateProject)
+	s.handleAPI("GET /api/v1/plugins", readRoles, false, s.listPlugins)
 	opened = true
 	return s, nil
 }
@@ -179,7 +223,7 @@ func (s *Server) populateMissingReviews() error {
 		jobs[id] = record
 	}
 	if jobs != nil {
-		return s.save(jobs)
+		return s.save(jobs, transitionCause{})
 	}
 	return nil
 }
@@ -293,7 +337,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	if profile != nil {
 		job.ProfileID, job.ProfileRevision = profile.ID, profile.Revision
 	}
-	job, ok := s.addJob(w, job, input.Gcode)
+	job, ok := s.addJob(w, job, input.Gcode, operatorCause(r, "upload"))
 	if !ok {
 		return
 	}
@@ -303,7 +347,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 
 // addJob stores the program file outside the mutex, then publishes metadata.
 // It writes the failure response itself and reports whether the job exists.
-func (s *Server) addJob(w http.ResponseWriter, job Job, gcode string) (Job, bool) {
+func (s *Server) addJob(w http.ResponseWriter, job Job, gcode string, cause transitionCause) (Job, bool) {
 	if len(gcode) > jobtransfer.MaxProgramBytes {
 		fail(w, http.StatusRequestEntityTooLarge, "job program exceeds the 4 MiB maximum")
 		return job, false
@@ -317,7 +361,7 @@ func (s *Server) addJob(w http.ResponseWriter, job Job, gcode string) (Job, bool
 	defer s.mu.Unlock()
 	jobs := s.copyJobs()
 	jobs[job.ID] = jobRecord{Job: job, SHA256: programDigest(gcode)}
-	if err := s.save(jobs); err != nil {
+	if err := s.save(jobs, cause); err != nil {
 		_ = os.Remove(s.programPath(job.ID))
 		fail(w, 500, "could not persist job")
 		return job, false
@@ -455,7 +499,7 @@ func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	jobs := s.copyJobs()
 	delete(jobs, id)
-	if err := s.save(jobs); err != nil {
+	if err := s.save(jobs, operatorCause(r, "delete")); err != nil {
 		fail(w, 500, "could not persist deletion")
 		return
 	}
@@ -474,8 +518,8 @@ func (s *Server) Close() error {
 	var flushErr error
 	if s.progressDirty && s.storageErr == nil {
 		// Keep the latest reported progress after a graceful shutdown.
-		flushErr = s.save(s.copyJobs())
+		flushErr = s.save(s.copyJobs(), transitionCause{})
 	}
 	s.closed = true
-	return errors.Join(flushErr, s.lock.Close())
+	return errors.Join(flushErr, s.history.close(), s.lock.Close())
 }

@@ -1176,6 +1176,7 @@
       if (job.state === "running" || job.state === "canceling" || job.total > 0) details.push(`${job.acked || 0} / ${job.total || 0} lines`);
       state.textContent = details.join(" · ");
       info.append(title, state);
+      window.EmberDeckJobHistory?.appendTimes(info, job);
       if (job.controller_state) {
         const controller = document.createElement("span");
         controller.className = "controller-state";
@@ -1458,6 +1459,7 @@
       renderDrivers();
       renderJobs();
       await refreshToolpathViews();
+      if (shownJobID && !programPanel.hidden) window.EmberDeckJobHistory?.load($("#program-history"), shownJobID, api);
       await refreshDesigner();
     } catch (error) {
       if (!connected || version !== sessionVersion) return;
@@ -1516,6 +1518,7 @@
         }
         provenance.hidden = false;
       } else provenance.hidden = true;
+      window.EmberDeckJobHistory?.load($("#program-history"), id, api);
       programPanel.hidden = false;
       programPanel.scrollIntoView({ behavior: "smooth", block: "start" });
       message("");

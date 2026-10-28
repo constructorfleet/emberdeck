@@ -14,27 +14,15 @@ import (
 // OpenWithPlugins loads explicitly configured trusted preflight plugins.
 // Discovery fails closed; an invalid plugin prevents server startup.
 func OpenWithPlugins(dir, key, pluginDir string) (*Server, error) {
-	var plugins []plugin.Plugin
-	if pluginDir != "" {
-		var err error
-		plugins, err = plugin.Discover(pluginDir)
-		if err != nil {
-			return nil, err
-		}
+	return OpenWithOptions(dir, key, Options{PluginDir: pluginDir})
+}
+
+func (s *Server) listPlugins(w http.ResponseWriter, r *http.Request) {
+	manifests := make([]plugin.Manifest, 0, len(s.plugins))
+	for _, p := range s.plugins {
+		manifests = append(manifests, p.Manifest)
 	}
-	s, err := Open(dir, key)
-	if err != nil {
-		return nil, err
-	}
-	s.plugins = plugins
-	s.handleAPI("GET /api/v1/plugins", []string{"viewer", "operator", "admin"}, false, func(w http.ResponseWriter, r *http.Request) {
-		manifests := make([]plugin.Manifest, 0, len(plugins))
-		for _, p := range plugins {
-			manifests = append(manifests, p.Manifest)
-		}
-		respond(w, 200, manifests)
-	})
-	return s, nil
+	respond(w, 200, manifests)
 }
 
 // preflight validates a program and runs trusted plugins outside the server
