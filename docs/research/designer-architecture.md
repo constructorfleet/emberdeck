@@ -14,7 +14,8 @@ See the [API contract](../api.md) and [illustrated guide](../operator-guide.md).
 
 This version 1 milestone has one rectangle outline and one vector-engraving
 operation. The separate version 2 milestone below adds multiple objects and a
-bounded SVG importer. SVG text import and raster engraving remain unavailable. The
+bounded SVG importer. SVG text import uses a restricted monoline font subset;
+raster engraving remains unavailable. The
 static preview is not execution monitoring for
 [issue #7](https://github.com/constructorfleet/emberdeck/issues/7).
 
@@ -51,16 +52,19 @@ levels. Smooth commands reflect the previous compatible control point, or use
 the current point when a different command intervenes. Nested SVG `<g>` groups
 compose their `transform` with descendant group and element transforms. Groups
 accept only `id` and `transform` attributes, with a maximum nesting depth of 16;
-unsupported group attributes (including styling) are rejected. The importer
-rejects `A/a` arcs, styles, text, and active or external content. Accepted paths
-remain editable and unassigned; no SVG operation or machine settings are
-imported. V2 stores per-object translation, nonuniform
+unsupported group attributes (including styling) are rejected. SVG text imports
+as restricted monoline geometry using `emberdeck-stick-v1`; text accepts only
+the bounded supported ASCII subset and is converted into open editable paths.
+The importer rejects `A/a` arcs, styles, unsupported text features, and active
+or external content. Accepted paths remain editable and unassigned; no SVG
+operation or machine settings are imported. V2 stores per-object translation,
+nonuniform
 scale, and rotation around the source bounds center; profile validation,
 preview, and generation apply the same rounded transform. Group alignment uses
 the transformed point bounds of selected objects, adding only the necessary
 rounded translation to each object; normal profile validation remains in force.
-The v2 model does not provide arbitrary path-node editing, SVG text import,
-undo/redo, kerf compensation, tabs, passes, or raster engraving. Ellipses are polygonal and the
+The v2 model does not provide arbitrary path-node editing, undo/redo, kerf
+compensation, tabs, passes, or raster engraving. Ellipses are polygonal and the
 editor does not claim live execution progress. Version 1 projects and
 `rectangle-v1` jobs remain supported with their original data and G-code.
 
@@ -85,7 +89,7 @@ Keep the UI in the existing Go binary's embedded HTML/CSS/JavaScript assets. Def
 
 Make model geometry device-independent and in millimetres. Treat the design origin as the lower-left of the machine work area; the canvas is a view transform only (screen Y down, model Y up), and must never alter coordinates in the document. Define one profile transform from model coordinates to configured machine coordinates, including work-area width/height and any explicit machine origin offset. A profile warning is required for any transformed geometry outside the envelope; generation is blocked until corrected or explicitly resolved through a documented policy. Do not infer physical origin, homing, travel limits, or safe focus from the viewport.
 
-The starter object set now includes rectangle, ellipse, line, imported polyline/path, and native editable monoline text. Text source content, fixed font ID, size, and origin are saved beside server-generated millimetre paths. The hand-authored `emberdeck-stick-v1` font supports ASCII A–Z/a–z, digits, space, and `. , : ; ! ? + - / _ ( )`, up to 32 characters and 1–100 mm high; text paths are open and engraving-only. Raster engraving remains unsupported. SVG `<text>` import remains rejected. The implemented static SVG importer accepts line commands, cubic/quadratic Bezier paths, lines, polylines, polygons, rectangles, circles/ellipses, and element transforms. It rejects scripts, event attributes, foreign objects, external URLs/references, embedded raster images, CSS imports, animation, and unsupported filters; it imposes file-size, numeric-range, point-count, and curve-subdivision limits. Parse without network fetches and normalize accepted geometry into the same editable millimetre path model.
+The starter object set now includes rectangle, ellipse, line, imported polyline/path, and native editable monoline text. Text source content, fixed font ID, size, and origin are saved beside server-generated millimetre paths. The hand-authored `emberdeck-stick-v1` font supports ASCII A–Z/a–z, digits, space, and `. , : ; ! ? + - / _ ( )`, up to 32 characters and 1–100 mm high; text paths are open and engraving-only. SVG `<text>` import uses the same font as a restricted subset: explicit `font-family="emberdeck-stick-v1"`, a unitless `font-size` from 1–100 viewBox units, optional unitless `x`/`y`, and plain content limited to the same 32 ASCII characters. Text uses the SVG `y` baseline and imports as geometry rather than editable source text. Other fonts, `<tspan>`, text styling, anchoring, and spacing, raster engraving, and SVG arcs remain unsupported. The implemented static SVG importer accepts line commands, cubic/quadratic Bezier paths, lines, polylines, polygons, rectangles, circles/ellipses, element transforms, and nested groups up to 16 levels. It rejects scripts, event attributes, foreign objects, external URLs/references, embedded raster images, CSS imports, animation, and unsupported filters; it imposes file-size, numeric-range, point-count, and curve-subdivision limits. Parse without network fetches and normalize accepted geometry into the same editable millimetre path model.
 
 Represent operations explicitly and independently of SVG stroke styling: initial milestones are **vector cutting** (closed/open paths only under an explicit policy; cutting settings validated against profile material bounds) and **vector engraving** (line-following paths with separate power/speed bounds). An operation layer owns order, tool mode, speed, power, and optional pass count; define whether duplicated/overlapping paths are intentional and warn on exact duplicates. The implemented importer adaptively flattens cubic and quadratic Bezier curves to a 0.05 mm chord tolerance in millimetres, caps path points and subdivision depth, and validates emitted geometry against the work envelope. Elliptical arcs remain unsupported. Toolpath preview must distinguish powered vector motion from laser-off travel and display travel/order. Raster engraving is a later independent investigation: it needs image decoding, dithering/scan strategy, power modulation, and hardware-specific validation, and is not available in this proposal.
 

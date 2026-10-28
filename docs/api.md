@@ -467,18 +467,30 @@ project endpoints. The root SVG must declare physical `width`, `height`, and
 The viewport is mapped to lower-left-origin millimetres. A mismatched aspect ratio
 requires explicit `preserveAspectRatio="none"`.
 
-The static subset supports direct-child paths made from M/L/H/V/Z line commands,
-C/c and S/s cubic Bezier commands, and Q/q and T/t quadratic Bezier commands,
-plus lines, polylines, polygons, rectangles, circles, ellipses, and element-level
-affine transforms. Curves are flattened deterministically to editable line
-segments with a maximum 0.05 mm
-chord deviation in final imported millimetre coordinates. Flattening rejects
+The static subset supports paths made from M/L/H/V/Z line commands, C/c and S/s
+cubic Bezier commands, and Q/q and T/t quadratic Bezier commands, plus lines,
+polylines, polygons, rectangles, circles, ellipses, and affine transforms on
+elements and nested `<g>` groups. Groups may be nested up to 16 levels and may
+contain only groups, supported shapes, and supported text. Curves are flattened
+deterministically to editable line segments with a maximum 0.05 mm chord
+deviation in final imported millimetre coordinates. Flattening rejects
 curves that cannot meet that tolerance within 16 subdivision levels or the
 4,000-point import limit. Circles and ellipses are represented by 32-point
 editable polylines.
-Elliptical arcs (A/a), group nesting, CSS/style,
-text, animation, DTD/entities, external references, and active content are
-rejected. Fill, stroke, colors, and SVG metadata never become laser operations.
+
+Static `<text>` elements must explicitly use `font-family="emberdeck-stick-v1"`
+and a unitless `font-size` from 1 through 100 SVG user units. `x` and `y` are
+optional unitless coordinates defaulting to zero; `y` is the SVG text baseline.
+Text becomes open editable strokes using the same hand-authored 5-by-7 monoline
+font as native designer text. Content is limited to 32 ASCII letters, digits,
+spaces, and `. , : ; ! ? + - / _ ( )`. Other fonts, font-size units, nested
+`<tspan>` elements, styles, text anchoring, and spacing attributes are rejected.
+Only `x`, `y`, `font-family`, `font-size`, `id`, and `transform` are accepted on
+`<text>`; the normal SVG transform subset applies.
+
+Elliptical arcs (A/a), CSS/style, animation, DTD/entities, external references,
+and active content are rejected. Fill, stroke, colors, and SVG metadata never
+become laser operations.
 Imported geometry starts unassigned; assign each object to an explicit operation
 layer before generating a job.
 

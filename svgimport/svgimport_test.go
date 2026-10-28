@@ -70,6 +70,99 @@ func TestParseComposesNestedGroupAndElementTransforms(t *testing.T) {
 	}
 }
 
+func TestParseImportsBoundedMonolineSVGTextAsEditableStrokes(t *testing.T) {
+	source := []byte(`<svg width="40mm" height="20mm" viewBox="0 0 40 20"><text x="2" y="10" font-family="emberdeck-stick-v1" font-size="7">A</text></svg>`)
+	got, err := svgimport.Parse(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Objects) != 1 || len(got.Objects[0].Subpaths) != 3 {
+		t.Fatalf("parsed SVG text objects = %#v", got.Objects)
+	}
+	wants := [][]svgimport.Point{
+		{{XMM: 2, YMM: 10}, {XMM: 4.5, YMM: 17}},
+		{{XMM: 4.5, YMM: 17}, {XMM: 7, YMM: 10}},
+		{{XMM: 3, YMM: 13}, {XMM: 6, YMM: 13}},
+	}
+	for pathIndex, want := range wants {
+		path := got.Objects[0].Subpaths[pathIndex]
+		if path.Closed || len(path.Points) != len(want) {
+			t.Fatalf("text stroke %d = %#v", pathIndex, path)
+		}
+		for pointIndex := range want {
+			if path.Points[pointIndex] != want[pointIndex] {
+				t.Fatalf("text stroke %d point %d = %#v, want %#v", pathIndex, pointIndex, path.Points[pointIndex], want[pointIndex])
+			}
+		}
+	}
+}
+
+func TestParseRejectsUnsupportedSVGTextFeatures(t *testing.T) {
+	tooLong := strings.Repeat("A", 33)
+	cases := []struct {
+		name     string
+		text     string
+		contains string
+	}{
+		{"missing font family", `<text font-size="7">A</text>`, "font-family"},
+		{"external font family", `<text font-family="Remote Font" font-size="7">A</text>`, "font-family"},
+		{"font-size unit", `<text font-family="emberdeck-stick-v1" font-size="7px">A</text>`, "unitless"},
+		{"font-size out of range", `<text font-family="emberdeck-stick-v1" font-size="101">A</text>`, "from 1 to 100"},
+		{"empty x", `<text x="" font-family="emberdeck-stick-v1" font-size="7">A</text>`, "text x"},
+		{"empty y", `<text y="" font-family="emberdeck-stick-v1" font-size="7">A</text>`, "text y"},
+		{"unsupported glyph", `<text font-family="emberdeck-stick-v1" font-size="7">A@</text>`, "supports ASCII"},
+		{"too many characters", `<text font-family="emberdeck-stick-v1" font-size="7">` + tooLong + `</text>`, "1 to 32"},
+		{"unsupported style", `<text font-family="emberdeck-stick-v1" font-size="7" style="font-weight:bold">A</text>`, "attribute"},
+		{"nested tspan", `<text font-family="emberdeck-stick-v1" font-size="7"><tspan>A</tspan></text>`, "nested SVG text element"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			source := `<svg width="40mm" height="20mm" viewBox="0 0 40 20">` + test.text + `</svg>`
+			if _, err := svgimport.Parse([]byte(source)); err == nil || !strings.Contains(err.Error(), test.contains) {
+				t.Fatalf("Parse error = %v, want an error containing %q", err, test.contains)
+			}
+		})
+	}
+}
+
+func TestParseAcceptsSVGTextAtFontAndLengthLimits(t *testing.T) {
+	content := strings.Repeat("A", 32)
+	source := []byte(`<svg width="400mm" height="200mm" viewBox="0 0 400 200"><text x="0" y="100" font-family="emberdeck-stick-v1" font-size="100">` + content + `</text></svg>`)
+	got, err := svgimport.Parse(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Objects) != 1 || len(got.Objects[0].Subpaths) != 96 {
+		t.Fatalf("32-character max-size SVG text = %#v", got.Objects)
+	}
+}
+
+func TestParseAppliesGroupAndElementTransformsToSVGTextStrokes(t *testing.T) {
+	source := []byte(`<svg width="40mm" height="20mm" viewBox="0 0 40 20"><g transform="translate(3,2)"><text x="2" y="10" font-family="emberdeck-stick-v1" font-size="7" transform="translate(1,1)">A</text></g></svg>`)
+	got, err := svgimport.Parse(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := got.Objects[0].Subpaths[0]
+	want := []svgimport.Point{{XMM: 6, YMM: 7}, {XMM: 8.5, YMM: 14}}
+	if path.Closed || len(path.Points) != len(want) {
+		t.Fatalf("transformed SVG text stroke = %#v", path)
+	}
+	for index := range want {
+		if path.Points[index] != want[index] {
+			t.Fatalf("transformed text point %d = %#v, want %#v", index, path.Points[index], want[index])
+		}
+	}
+}
+
+func TestParseAcceptsMaximumNestedGroupDepth(t *testing.T) {
+	maxDepth := strings.Repeat(`<g>`, 16) + `<line x1="0" y1="0" x2="1" y2="1"/>` + strings.Repeat(`</g>`, 16)
+	source := []byte(`<svg width="40mm" height="20mm" viewBox="0 0 40 20">` + maxDepth + `</svg>`)
+	if _, err := svgimport.Parse(source); err != nil {
+		t.Fatalf("16-level group nesting was rejected: %v", err)
+	}
+}
+
 func TestParseRejectsMalformedOrUnsupportedGroups(t *testing.T) {
 	deepGroups := strings.Repeat(`<g>`, 17) + `<line x1="0" y1="0" x2="1" y2="1"/>` + strings.Repeat(`</g>`, 17)
 	for name, content := range map[string]string{

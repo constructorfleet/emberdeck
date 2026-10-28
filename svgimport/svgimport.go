@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/ConstructorFleet/emberdeck/internal/monoline"
 )
 
 const MaxBytes = 1 << 20
@@ -48,10 +50,11 @@ type Document struct {
 	Objects  []Object `json:"objects"`
 }
 
-// Parse accepts an SVG with a physical viewport, bounded nested groups, and
-// supported static shapes. It maps SVG coordinates to lower-left-origin
-// millimetres. Styling and machine operation settings are never imported, and
-// external or active content is rejected.
+// Parse accepts an SVG with a physical viewport, bounded nested groups, supported static shapes,
+// and static text using the emberdeck-stick-v1 font. Text has an explicit unitless font-size from
+// 1 to 100 user units and accepts at most 32 supported ASCII characters. It becomes open editable
+// strokes. Styling, unsupported text features, machine settings, and active or external content are
+// rejected.
 func Parse(source []byte) (Document, error) {
 	if len(source) == 0 || len(source) > MaxBytes {
 		return Document{}, errors.New("SVG must contain 1 byte to 1 MiB")
@@ -148,8 +151,24 @@ func Parse(source []byte) (Document, error) {
 			var coords []float64
 			var transformSpec string
 			var subpaths []Subpath
+			consumedElement := false
 			closed := false
 			switch item.Name.Local {
+			case "text":
+				values, err := attributes(item, map[string]bool{"x": true, "y": true, "font-family": true, "font-size": true, "id": true, "transform": true})
+				if err != nil {
+					return Document{}, err
+				}
+				content, err := readTextElement(decoder, item)
+				if err != nil {
+					return Document{}, err
+				}
+				subpaths, err = monolineSubpaths(values, content)
+				if err != nil {
+					return Document{}, err
+				}
+				transformSpec = values["transform"]
+				consumedElement = true
 			case "path":
 				values, err := attributes(item, map[string]bool{"d": true, "id": true, "transform": true})
 				if err != nil {
@@ -318,7 +337,9 @@ func Parse(source []byte) (Document, error) {
 				path.Points = points
 			}
 			doc.Objects = append(doc.Objects, Object{Subpaths: subpaths})
-			depth++
+			if !consumedElement {
+				depth++
+			}
 		case xml.EndElement:
 			if item.Name.Local == "g" {
 				if len(groupDepths) == 0 || groupDepths[len(groupDepths)-1] != depth {
@@ -348,6 +369,66 @@ func Parse(source []byte) (Document, error) {
 		return Document{}, errors.New("SVG contains no supported paths")
 	}
 	return doc, nil
+}
+
+func readTextElement(decoder *xml.Decoder, start xml.StartElement) (string, error) {
+	var content strings.Builder
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			return "", fmt.Errorf("read SVG text: %w", err)
+		}
+		switch item := token.(type) {
+		case xml.CharData:
+			content.Write(item)
+		case xml.StartElement:
+			return "", fmt.Errorf("nested SVG text element <%s> is not supported", item.Name.Local)
+		case xml.EndElement:
+			if item.Name != start.Name {
+				return "", errors.New("SVG text has an unexpected closing tag")
+			}
+			return content.String(), nil
+		case xml.Directive, xml.ProcInst:
+			return "", errors.New("SVG text entities and processing instructions are not supported")
+		}
+	}
+}
+
+func monolineSubpaths(attributes map[string]string, content string) ([]Subpath, error) {
+	if attributes["font-family"] != monoline.FontID {
+		return nil, fmt.Errorf("SVG text font-family must be %q", monoline.FontID)
+	}
+	fontSize, err := finiteNumber(attributes["font-size"])
+	if err != nil || fontSize < 1 || fontSize > 100 {
+		return nil, errors.New("SVG text font-size must be a unitless number from 1 to 100")
+	}
+	x, y := 0.0, 0.0
+	if value, present := attributes["x"]; present {
+		x, err = finiteNumber(value)
+		if err != nil {
+			return nil, errors.New("SVG text x must be a finite unitless number")
+		}
+	}
+	if value, present := attributes["y"]; present {
+		y, err = finiteNumber(value)
+		if err != nil {
+			return nil, errors.New("SVG text y must be a finite unitless number")
+		}
+	}
+	strokes, err := monoline.Outline(content)
+	if err != nil {
+		return nil, err
+	}
+	unit := fontSize / 7
+	paths := make([]Subpath, 0, len(strokes))
+	for _, stroke := range strokes {
+		points := make([]Point, len(stroke))
+		for pointIndex, point := range stroke {
+			points[pointIndex] = Point{XMM: x + point.X*unit, YMM: y - point.Y*unit}
+		}
+		paths = append(paths, Subpath{Points: points})
+	}
+	return paths, nil
 }
 
 func attributes(element xml.StartElement, allowed map[string]bool) (map[string]string, error) {
