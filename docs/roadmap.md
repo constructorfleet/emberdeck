@@ -42,6 +42,14 @@ Simulator and software checks do not qualify a physical machine. See
 - Multi-user permissions, camera monitoring, and advanced job-history
   filtering/pagination.
 
+## Feature request planning
+
+Review the current open GitHub feature requests and their acceptance criteria
+before choosing the next work slice. Issues [#3](https://github.com/constructorfleet/emberdeck/issues/3)
+and [#4](https://github.com/constructorfleet/emberdeck/issues/4) remain part of
+the active product goal: #3's feasibility investigation is complete, while its
+firmware path remains unimplemented and unqualified; #4 remains open until the
+designer's remaining capabilities are delivered.
 
 - [x] [#3: ESP32 driver firmware and ESPHome feasibility](https://github.com/constructorfleet/emberdeck/issues/3).
   Compare standalone firmware, an ESPHome component, and existing bridges;
