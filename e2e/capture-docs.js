@@ -401,9 +401,11 @@ async function main() {
     await page.locator('#operator-confirmation').check();
     await row.getByRole('button', { name: /^Resume / }).click();
     await expect(page.locator('#operator-confirmation')).not.toBeChecked();
-    await expect(row).toContainText(/completed/i, { timeout: 120000 });
+    await expect(row.locator('.job-info > span').first()).toContainText(/^completed\b/i, { timeout: 120000 });
     await row.getByRole('button', { name: /^View / }).click();
-    await captureElement(page, '#job-list .job-item', 'operator-console-completed.png');
+    // Job polling rebuilds each row every two seconds. Capture the persistent
+    // list container so a refresh cannot detach the screenshot target.
+    await captureElement(page, '#job-list', 'operator-console-completed.png');
     const history = page.getByRole('list', { name: 'Job event history' });
     // A short run can finish before a Run report, recording resuming → completed.
     await expect(history.getByRole('listitem').last().locator('.job-history-states')).toHaveText(/^(running|resuming) → completed$/, { timeout: 10000 });
