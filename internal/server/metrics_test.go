@@ -89,6 +89,8 @@ func TestMetricsScrapeContractAndJobLifecycle(t *testing.T) {
 	var assignment struct {
 		Lease string `json:"lease"`
 	}
+	// Workers learn the lease from their assignment poll, never from the operator API.
+	w = request(t, s, "POST", "/api/v1/drivers/bench/poll", `{"session":"session-a","capabilities":["pause_resume"]}`, "test-key")
 	if err := json.Unmarshal(w.Body.Bytes(), &assignment); err != nil {
 		t.Fatal(err)
 	}
@@ -146,6 +148,8 @@ func TestMetricsScrapeContractAndJobLifecycle(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("start second: %d %s", w.Code, w.Body.String())
 	}
+	// Workers learn the lease from their assignment poll, never from the operator API.
+	w = request(t, s, "POST", "/api/v1/drivers/bench/poll", `{"session":"session-a","capabilities":["pause_resume"]}`, "test-key")
 	if err := json.Unmarshal(w.Body.Bytes(), &assignment); err != nil {
 		t.Fatal(err)
 	}

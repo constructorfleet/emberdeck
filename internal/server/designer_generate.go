@@ -31,7 +31,12 @@ func (s *Server) generateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlocked := false
+	defer func() {
+		if !unlocked {
+			s.mu.Unlock()
+		}
+	}()
 	project, ok := s.projects[r.PathValue("id")]
 	if !ok {
 		fail(w, 404, "project not found")
@@ -70,12 +75,14 @@ func (s *Server) generateProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "could not allocate job ID")
 		return
 	}
-	job := Job{ID: id, Name: project.Name + ".gcode", Gcode: program, State: "queued", Created: time.Now().UTC(), Total: count,
+	job := Job{ID: id, Name: project.Name + ".gcode", State: "queued", Created: time.Now().UTC(), Total: count,
 		Provenance: &JobProvenance{GeneratorVersion: generatorVersion, Project: project, Profile: profile}}
-	jobs := s.copyJobs()
-	jobs[id] = job
-	if err := s.save(jobs); err != nil {
-		fail(w, 500, "could not persist generated job")
+	// Release the designer mutex while the program file is written durably;
+	// the job's provenance snapshots were captured above.
+	s.mu.Unlock()
+	unlocked = true
+	job, ok = s.addJob(w, job, program)
+	if !ok {
 		return
 	}
 	w.Header().Set("Location", "/api/v1/jobs/"+id)

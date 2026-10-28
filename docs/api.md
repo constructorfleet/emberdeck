@@ -20,24 +20,69 @@ JSON except successful deletion (204). Errors return
 ## Job library
 
 `POST /jobs` accepts `{"name":"square.gcode","gcode":"G21\nG90\nM5","profile_id":"optional-profile-id"}` and
-returns 201, the job, and its Location. The full JSON upload is limited to 4 MiB;
+returns 201, the job metadata, and its Location. The full JSON upload is limited to 4 MiB;
 names are 1–200 bytes. Control bytes other than tabs and line endings are rejected.
 Driver line validation runs at upload; an invalid line returns 422 with its line
 number. An optional `profile_id` binds a declared profile revision for the
 program bounds review. Uploading stores a program; it does not execute it or
 certify its machine safety.
 
-`GET /jobs` returns jobs in creation order. `GET /jobs/{id}` returns the uploaded
-program, current state, optional live `execution` telemetry, and optional
-`program_review` summary. `GET /jobs/{id}/review` returns the selected profile's
+`GET /jobs` returns one page of job metadata, newest first:
+
+```json
+{"jobs":[{"id":"…","name":"square.gcode","state":"queued","size":10,"acked":0,"total":0,"created":"…"}],
+ "total":1,"offset":0,"limit":50}
+```
+
+Query parameters are optional and combine with AND:
+
+| Parameter | Meaning |
+| --- | --- |
+| `limit` | Page size, 1–200 (default 50). |
+| `offset` | Number of matching jobs to skip (default 0). |
+| `state` | Exact job state; repeat or comma-separate for several, for example `state=failed,interrupted`. |
+| `name` | Case-insensitive substring of the job name. |
+| `driver` | Exact assigned `driver_id`. |
+
+`total` counts every job that matches the filters. Invalid values, including
+unknown states, return 400. List entries never include program bytes (`gcode`)
+or a worker `lease`; `size` is the stored program length in bytes. `GET
+/jobs/{id}` returns the same metadata plus the exact uploaded or generated
+program as `gcode`. Both include optional live `execution` telemetry and, for
+uploaded jobs, an optional `program_review` summary. No operator endpoint
+returns a lease. `GET /jobs/{id}/review` returns the selected profile's
 revision, program bounds, profile envelope, bounds status (`in_bounds`,
 `out_of_bounds`, or `unknown`), warnings, and derived path. A partial path can
 show known bounds while its status remains `unknown`. A changed/deleted profile
 also makes the status unknown. `GET /jobs/{id}/toolpath` returns a derived 2D
-path for visualization; it does not change or validate the uploaded source.
-`DELETE /jobs/{id}` removes a queued or terminal job;
+path for visualization; it does not change or validate the uploaded source. `DELETE /jobs/{id}` removes a queued or terminal job;
 a running or canceling job must first stop. These operations persist to the
 private data directory. Run one server per directory; file locking enforces it.
+
+### Job storage
+
+The data directory holds job metadata in `jobs.json` (format version 2) and
+each program in its own `programs/<id>.gcode` file. Metadata records each
+program's size and SHA-256 digest. Startup fails closed if a listed program is
+missing or has the wrong size. Reading a program whose bytes do not match the
+digest returns 500. Program files no job names are removed at startup. Upload program reviews are stored with
+the metadata; uploaded jobs without one (such as migrated jobs) are reviewed
+once at startup from their program files.
+
+State changes (upload, start, pause, resume, cancel, delete, and terminal
+worker receipts) are written and synced before the request is acknowledged.
+Progress-only worker reports (acknowledged lines, controller state, and
+execution telemetry while the job state is unchanged) update memory only. A
+graceful shutdown saves them. After a crash, restart marks active work
+interrupted anyway, so the latest progress before the crash may be lost.
+
+Libraries written by earlier releases embed programs in `jobs.json`. On startup
+the server validates every entry, writes and syncs each program file, then
+replaces `jobs.json` with the version 2 metadata in one atomic rename. If any
+entry is invalid or any write fails, the server refuses to start and leaves the
+original `jobs.json` unchanged. An interrupted migration simply runs again.
+Earlier releases cannot read a migrated library and refuse to start, so keep a
+backup of the data directory before upgrading if you might roll back.
 
 The derived path supports up to 10,000 linear XY segments and a 4 MiB source.
 It interprets G0/G1, G20/G21, G90/G91, G17/G40/G49/G80/G94, and M3/M4/M5.
@@ -121,6 +166,9 @@ An idle poll is `{"session":"random-session-id"}`. The response is either
 `{"command":"idle","protocol":"1"}` or an assignment with `command:"run"`,
 `lease`, and `job` (including `id` and `gcode`). Treat a lease as single execution
 authority. Never execute a completed lease again after lost responses.
+A poll that reports progress for its assigned job receives the same assignment
+shape without `gcode`. The program is sent only when a poll does not already
+report that job, such as at pickup.
 
 Workers supporting confirmed control include `capabilities:["pause_resume"]`
 in polls. While assigned, poll each second with `session`, `job_id`, `lease`,
