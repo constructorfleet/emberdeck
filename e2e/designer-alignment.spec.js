@@ -24,7 +24,7 @@ test('keyboard multi-selection aligns transformed shapes and persists the new pl
   await page.locator('#profile-max-feed').fill('6000');
   await page.locator('#profile-max-power').fill('100');
   await page.getByRole('button', { name: 'Save profile' }).click();
-  await expect(page.locator('#designer-status')).toContainText('Profile saved');
+  await expect(page.locator('#notice .notice-message')).toContainText('Profile saved');
 
   await page.getByRole('button', { name: 'New vector project' }).click();
   await page.locator('#vector-name').fill(projectName);
@@ -79,7 +79,7 @@ test('keyboard multi-selection aligns transformed shapes and persists the new pl
   await expect(page.getByLabel('Translate X (mm)')).toHaveValue('-10');
 
   await page.getByRole('button', { name: 'Save vector project' }).click();
-  await expect(page.locator('#designer-status')).toContainText('Vector project saved');
+  await expect(page.locator('#notice .notice-message')).toContainText('Vector project saved');
   expect(savedPayload.objects[0].transform).toBeUndefined();
   expect(savedPayload.objects[1].transform.translate_x_mm).toBe(-10);
   expect(savedPayload.objects[1].transform.rotation_deg).toBe(90);

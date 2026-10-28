@@ -111,7 +111,7 @@ async function main() {
     await page.getByLabel('Maximum feed (mm/min)').fill('6000');
     await page.getByLabel('Maximum commanded power (%)').fill('100');
     await page.getByRole('button', { name: 'Save profile' }).click();
-    await expect(page.locator('#designer-status')).toContainText('Profile saved');
+    await expect(page.locator('#notice .notice-message')).toContainText('Profile saved');
     await page.getByRole('button', { name: 'Edit profile' }).click();
     await page.locator('#profile-name').evaluate((input) => input.blur());
     await captureElement(page, '#designer-panel', 'designer-profile.png');
@@ -127,7 +127,7 @@ async function main() {
     await page.locator('#operation-power').fill('25');
     await expect(page.locator('#project-validation')).toBeHidden();
     await page.getByRole('button', { name: 'Save project' }).click();
-    await expect(page.locator('#designer-status')).toContainText('Project saved');
+    await expect(page.locator('#notice .notice-message')).toContainText('Project saved');
     await captureElement(page, '#project-form', 'designer-project.png');
     await page.locator('#rect-width').fill('400');
     await expect(page.locator('#project-validation')).toContainText(/outside the declared workspace/i);
@@ -135,7 +135,7 @@ async function main() {
     await captureElement(page, '#project-form', 'designer-project-out-of-bounds.png');
     await page.locator('#rect-width').fill('30');
     await page.getByRole('button', { name: 'Save project' }).click();
-    await expect(page.locator('#designer-status')).toContainText('Project saved');
+    await expect(page.locator('#notice .notice-message')).toContainText('Project saved');
     await page.getByRole('button', { name: 'Close editor' }).click();
     await expect(page.getByRole('button', { name: 'Reopen Panel outline' })).toBeVisible();
     await capture(page, 'designer-console-overview.png');
@@ -185,7 +185,7 @@ async function main() {
     await expect(page.locator('#vector-align-status')).toContainText('2 shapes aligned left');
     await captureElement(page, '#vector-form', 'designer-vector-alignment.png');
     await page.getByRole('button', { name: 'Save vector project' }).click();
-    await expect(page.locator('#designer-status')).toContainText('Vector project saved');
+    await expect(page.locator('#notice .notice-message')).toContainText('Vector project saved');
     await captureElement(page, '#vector-form', 'designer-vector-project.png');
     await page.locator('#generate-vector-project').click();
     const vectorRow = page.locator('#job-list li').filter({ hasText: 'Three shapes, two operations.gcode' });
@@ -207,7 +207,7 @@ async function main() {
     await page.locator('#vector-name').fill('Imported SVG paths');
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="90mm" height="55mm" viewBox="0 0 90 55"><path d="M10 45 L35 45 L35 25 L10 25 Z"/><path d="M50 45 C58 25 72 25 80 45"/></svg>`;
     await page.locator('#vector-svg-file').setInputFiles({ name: 'imported-shapes.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(svg) });
-    await expect(page.locator('#designer-status')).toContainText('Imported 2 editable SVG paths');
+    await expect(page.locator('#notice .notice-message')).toContainText('Imported 2 editable SVG paths');
     await expect(page.locator('#vector-object-list li')).toHaveCount(2);
     await captureElement(page, '#vector-form', 'designer-svg-import.png');
     await page.setViewportSize({ width: 390, height: 844 });

@@ -96,7 +96,7 @@ test('job list shows run times and the job view shows the event history', async 
     return list.jobs[0].id;
   }, { key: apiKey, jobName: name });
   await row.getByRole('button', { name: `Delete ${name}` }).click();
-  await expect(page.locator('#notice')).toHaveText('Program deleted.');
+  await expect(page.locator('#notice .notice-message')).toHaveText('Program deleted.');
   const deleted = await page.evaluate(async ({ key, jobID }) => {
     const response = await fetch(`/api/v1/jobs/${jobID}/events`, { headers: { Authorization: `Bearer ${key}` } });
     return (await response.json()).events.map((event) => event.to);

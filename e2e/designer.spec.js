@@ -28,7 +28,7 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
   await page.getByLabel('Maximum feed (mm/min)').fill('6000');
   await page.getByLabel('Maximum commanded power (%)').fill('100');
   await page.getByRole('button', { name: 'Save profile' }).click();
-  await expect(page.locator('#designer-status')).toContainText('Profile saved');
+  await expect(page.locator('#notice .notice-message')).toContainText('Profile saved');
 
   await page.getByRole('button', { name: 'New rectangle project' }).click();
   await page.locator('#project-name').fill(projectName);
@@ -46,7 +46,7 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
   await expect(page.getByRole('button', { name: 'Generate queued job' })).toBeDisabled();
   await page.locator('#rect-width').fill('30');
   await page.getByRole('button', { name: 'Save project' }).click();
-  await expect(page.locator('#designer-status')).toContainText('Project saved');
+  await expect(page.locator('#notice .notice-message')).toContainText('Project saved');
 
   await page.reload();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
@@ -56,18 +56,18 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
   await expect(page.getByRole('button', { name: 'Generate queued job' })).toBeDisabled();
   await expect(page.locator('#project-save-hint')).toBeVisible();
   await page.getByRole('button', { name: 'Save project' }).click();
-  await expect(page.locator('#designer-status')).toContainText('Project saved');
+  await expect(page.locator('#notice .notice-message')).toContainText('Project saved');
 
   await page.getByRole('button', { name: 'Edit profile' }).click();
   await expect(page.getByRole('button', { name: 'Generate queued job' })).toBeDisabled();
   await expect(page.locator('#profile-save-hint')).toBeVisible();
   await page.getByLabel('Work area width (mm)').fill('290');
   await page.getByRole('button', { name: 'Save profile' }).click();
-  await expect(page.locator('#designer-status')).toContainText('Profile saved');
+  await expect(page.locator('#notice .notice-message')).toContainText('Profile saved');
   await expect(page.locator('#stale-profile-warning')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Generate queued job' })).toBeDisabled();
   await page.getByRole('button', { name: 'Save project' }).click();
-  await expect(page.locator('#designer-status')).toContainText('Project saved');
+  await expect(page.locator('#notice .notice-message')).toContainText('Project saved');
   await expect(page.locator('#stale-profile-warning')).toBeHidden();
   await expect(page.getByRole('button', { name: 'Generate queued job' })).toBeEnabled();
   await page.getByRole('button', { name: 'Edit profile' }).click();
@@ -109,7 +109,7 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
 
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Delete profile' }).click();
-  await expect(page.locator('#designer-status')).toContainText('Profile deleted');
+  await expect(page.locator('#notice .notice-message')).toContainText('Profile deleted');
   await expect(row).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -130,7 +130,7 @@ test('rectangle bounds accept exact three-decimal millimetre edges', async ({ pa
   await page.locator('#profile-max-feed').fill('6000');
   await page.locator('#profile-max-power').fill('100');
   await page.getByRole('button', { name: 'Save profile' }).click();
-  await expect(page.locator('#designer-status')).toContainText('Profile saved');
+  await expect(page.locator('#notice .notice-message')).toContainText('Profile saved');
 
   await page.getByRole('button', { name: 'New rectangle project' }).click();
   await page.locator('#project-name').fill('Decimal edge rectangle');
@@ -168,7 +168,7 @@ test('multi-path vector project saves, reopens, generates mixed operations, and 
   await page.locator('#profile-max-feed').fill('6000');
   await page.locator('#profile-max-power').fill('100');
   await page.getByRole('button', { name: 'Save profile' }).click();
-  await expect(page.locator('#designer-status')).toContainText('Profile saved');
+  await expect(page.locator('#notice .notice-message')).toContainText('Profile saved');
 
   await page.getByRole('button', { name: 'New vector project' }).click();
   await page.locator('#vector-name').fill(projectName);
@@ -189,7 +189,7 @@ test('multi-path vector project saves, reopens, generates mixed operations, and 
   await expect(page.locator('#vector-preview-content .vector-path')).toHaveCount(3);
   await expect(page.locator('#generate-vector-project')).toBeDisabled();
   await page.getByRole('button', { name: 'Save vector project' }).click();
-  await expect(page.locator('#designer-status')).toContainText('Vector project saved');
+  await expect(page.locator('#notice .notice-message')).toContainText('Vector project saved');
 
   await page.reload();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
@@ -260,7 +260,7 @@ test('multi-path vector project saves, reopens, generates mixed operations, and 
     if (request.method() === 'PUT' && new URL(request.url()).pathname.endsWith(`/projects/${imported.id}`)) updatedPathPayload = request.postDataJSON();
   });
   await page.getByRole('button', { name: 'Save vector project' }).click();
-  await expect(page.locator('#designer-status')).toContainText('Vector project saved');
+  await expect(page.locator('#notice .notice-message')).toContainText('Vector project saved');
   expect(updatedPathPayload.objects[0].kind).toBe('path');
   expect(updatedPathPayload.objects[0].subpaths).toHaveLength(2);
   expect(updatedPathPayload.objects[0].subpaths[0].points).toEqual([
@@ -283,7 +283,7 @@ test('open profile and rectangle editors fit tablet and phone viewports', async 
   await page.locator('#profile-max-feed').fill('6000');
   await page.locator('#profile-max-power').fill('100');
   await page.getByRole('button', { name: 'Save profile' }).click();
-  await expect(page.locator('#designer-status')).toContainText('Profile saved');
+  await expect(page.locator('#notice .notice-message')).toContainText('Profile saved');
   await page.getByRole('button', { name: 'New rectangle project' }).click();
   await page.locator('#project-name').fill('Viewport rectangle');
   await page.getByRole('button', { name: 'Edit profile' }).click();
@@ -319,13 +319,13 @@ test('operator imports static SVG paths into an editable project and assigns the
   await page.locator('#profile-max-feed').fill('6000');
   await page.locator('#profile-max-power').fill('100');
   await page.getByRole('button', { name: 'Save profile' }).click();
-  await expect(page.locator('#designer-status')).toContainText('Profile saved');
+  await expect(page.locator('#notice .notice-message')).toContainText('Profile saved');
 
   await page.getByRole('button', { name: 'New vector project' }).click();
   await page.locator('#vector-name').fill(projectName);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300mm" height="200mm" viewBox="0 0 300 200"><path d="M10 190 L40 190 L40 160 L10 160 Z"/><path d="M60 190 Q80 150 100 190"/></svg>`;
   await page.locator('#vector-svg-file').setInputFiles({ name: 'panel.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(svg) });
-  await expect(page.locator('#designer-status')).toContainText('Imported 2 editable SVG paths');
+  await expect(page.locator('#notice .notice-message')).toContainText('Imported 2 editable SVG paths');
   await expect(page.locator('#vector-object-list li')).toHaveCount(2);
   await expect(page.locator('#vector-object-list')).toContainText('Unassigned');
   await expect(page.locator('#vector-preview-content .vector-path')).toHaveCount(2);
@@ -349,7 +349,7 @@ test('operator imports static SVG paths into an editable project and assigns the
   await page.locator('#vector-object-operation').selectOption({ label: '1. engrave' });
   await expect(page.locator('#vector-validation')).toBeHidden();
   await page.getByRole('button', { name: 'Save vector project' }).click();
-  await expect(page.locator('#designer-status')).toContainText('Vector project saved');
+  await expect(page.locator('#notice .notice-message')).toContainText('Vector project saved');
   await page.reload();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
   await page.getByRole('button', { name: `Reopen vector ${projectName}` }).click();

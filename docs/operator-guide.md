@@ -37,6 +37,12 @@ different key, or **Disconnect** to forget the session key and stop polling. In
 either case the library controls are disabled until you connect again. Once
 connected, choose the driver assigned to the machine you prepared.
 
+Action feedback appears in one dismissible notice: informational, warning, and
+successful messages use a polite status announcement; errors use an alert.
+Errors stay until dismissed or replaced, and successes remain for at least five
+seconds. Profile/project counts are separate from action feedback, so refreshes
+do not replace it.
+
 ![Connected operator console with a queued program, driver selector, and safety check](assets/screenshots/operator-console-library.png)
 
 ## Find the main controls
@@ -113,6 +119,12 @@ interrupted, Canceled) to narrow the list. When more programs match than fit
 on one page, use **Older →** and **← Newer** below the list; the range between
 them shows which programs are on screen. Program text is loaded only when you
 select **View**, so a large library stays quick to refresh.
+
+The library shows when it was last updated. If a refresh fails, it labels the
+displayed programs as stale and disables server-dependent actions such as
+**View**, **Start**, and **Delete** until a refresh succeeds. The header dot
+shows disconnected, connected, or error state; a recovered refresh clears the
+connection error notice.
 
 ## Controller settings check
 

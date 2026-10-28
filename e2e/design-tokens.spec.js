@@ -41,7 +41,7 @@ test('console text meets measured contrast and minimum type sizes', async ({ pag
   await page.locator('#profile-max-feed').fill('6000');
   await page.locator('#profile-max-power').fill('100');
   await page.getByRole('button', { name: 'Save profile' }).click();
-  await expect(page.locator('#designer-status')).toContainText('Profile saved');
+  await expect(page.locator('#notice .notice-message')).toContainText('Profile saved');
   await page.getByRole('button', { name: 'New rectangle project' }).click();
   await expect(page.locator('#preview-legend')).toBeVisible();
   await page.getByRole('button', { name: 'Edit profile' }).click();
@@ -64,13 +64,17 @@ test('console text meets measured contrast and minimum type sizes', async ({ pag
     // Use stable sample nodes rather than live status regions that the 2 s
     // library poll can replace between injection and measurement.
     const designer = document.querySelector('#designer-panel');
-    add(designer, 'p', 'notice', 'Example error notice');
-    add(designer, 'p', 'designer-status error', 'Example designer error');
-    add(designer, 'p', 'designer-warning', 'Example validation warning');
+    add(designer, 'p', 'notice notice-info', 'Example info notice');
+    add(designer, 'p', 'notice notice-success', 'Example success notice');
+    add(designer, 'p', 'notice notice-warning', 'Example warning notice');
+    add(designer, 'p', 'notice notice-error', 'Example error variant');
+    add(designer, 'p', 'form-validation', 'Example validation error');
+    add(designer, 'p', 'form-validation warning', 'Example stale warning');
     add(designer, 'span', 'job-error', 'Example job error');
     add(designer, 'span', 'toolpath-caveat bounds-status-out_of_bounds', 'Out of bounds');
     add(designer, 'span', 'toolpath-caveat bounds-status-unknown', 'Bounds unknown');
     add(designer, 'span', 'bounds-status-in_bounds', 'In bounds');
+    add(designer, 'p', 'library-freshness stale', 'Stale library data · Last updated today.');
   });
 
   const samples = await page.evaluate(() => {
@@ -83,6 +87,7 @@ test('console text meets measured contrast and minimum type sizes', async ({ pag
       ['metadata', '.eyebrow span'],
       ['metadata', '.job-info > span'],
       ['metadata', '.driver-status'],
+      ['functional', '.library-freshness.stale'],
       ['functional', '#preview-legend'],
       ['functional', '.button-small'],
       ['functional', '.button-small.button-danger'],
@@ -93,8 +98,12 @@ test('console text meets measured contrast and minimum type sizes', async ({ pag
       ['functional', '#profile-select'],
       ['functional', '.button-primary'],
       ['functional', '.notice'],
-      ['functional', '.designer-status.error'],
-      ['functional', '.designer-warning'],
+      ['functional', '.notice-info'],
+      ['functional', '.notice-success'],
+      ['functional', '.notice-warning'],
+      ['functional', '.notice-error'],
+      ['functional', '.form-validation:not(.warning)'],
+      ['functional', '.form-validation.warning'],
       ['functional', '.job-error'],
       ['functional', '.bounds-status-out_of_bounds'],
       ['functional', '.bounds-status-unknown'],
