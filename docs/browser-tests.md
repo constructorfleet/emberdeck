@@ -35,6 +35,13 @@ keeps it editable and unassigned, assigns its operation, saves/reopens the
 project, and generates a job without dispatch until explicit confirmation.
 Tests use the rendered UI and real HTTP API rather than mocking storage.
 
+`e2e/keyboard-focus.spec.js` checks that opening profile, rectangle, and vector
+editors or reopening saved projects focuses their first field and that closing
+returns focus to the invoking control. It covers the unsaved-change prompt when
+Escape closes each editor, focus entry and Escape return for the program view,
+the shared visible ring on navigation and upload controls, and immediate
+scrolling with no hover lift under reduced-motion settings.
+
 The controller-settings spec checks that the console shows the simulator's
 `$$` settings for the selected driver. It generates a job from a profile whose
 `max_s` differs from the simulator's `$30`, verifies the row lists the
