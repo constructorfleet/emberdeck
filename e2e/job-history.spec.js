@@ -61,6 +61,31 @@ test('job list shows run times and the job view shows the event history', async 
   await expect(entries.nth(2)).toContainText('running → completed');
   await expect(entries.nth(2)).toContainText('worker');
 
+  // History styles follow the console token system: no colour literals,
+  // text at least 12 px, and WCAG AA contrast against the painted background.
+  const css = await page.evaluate(async () => (await fetch('/job-history.css')).text());
+  expect([...css.matchAll(/#[\da-f]{3,8}\b|\b(?:rgb|hsl)a?\s*\(/gi)].map(([literal]) => literal)).toEqual([]);
+  const failures = await page.evaluate(() => {
+    const parse = (value) => (value.match(/[\d.]+/g) || [0, 0, 0, 0]).map(Number);
+    const luminance = ([r, g, b]) => [r, g, b].map((v) => v / 255).map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+    const background = (node) => {
+      for (let current = node; current; current = current.parentElement) {
+        const channels = parse(getComputedStyle(current).backgroundColor);
+        if (channels.length === 3 || channels[3] > 0) return channels;
+      }
+      return parse(getComputedStyle(document.body).backgroundColor);
+    };
+    const nodes = [...document.querySelectorAll('#program-history *, .job-times, .job-times *')].filter((node) => [...node.childNodes].some((child) => child.nodeType === 3 && child.textContent.trim()));
+    return nodes.flatMap((node) => {
+      const style = getComputedStyle(node);
+      const [light, dark] = [luminance(parse(style.color)), luminance(background(node))].sort((x, y) => y - x);
+      const contrast = (light + 0.05) / (dark + 0.05);
+      const size = parseFloat(style.fontSize);
+      return contrast < 4.5 || size < 12 ? [`${node.className || node.tagName}: ${contrast.toFixed(2)}:1 at ${size}px`] : [];
+    });
+  });
+  expect(failures).toEqual([]);
+
   // The view shows short opaque references, never a 64-hex lease token.
   await expect(page.locator('#program-history')).not.toContainText(/[0-9a-f]{64}/);
 

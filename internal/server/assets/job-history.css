@@ -1,12 +1,14 @@
-.job-times{color:#aab3a7}
-.job-times time{color:var(--text)}
-.job-history{margin:0 0 14px;border:1px solid var(--line);background:#121713;padding:12px 14px}
+/* Job run times and event history. Colours and sizes come only from the
+   semantic tokens defined in style.css :root. */
+.job-times{color:var(--text-muted);font-size:var(--type-xs)}
+.job-times time{color:var(--text-secondary)}
+.job-history{margin:0 0 var(--space-4);border:1px solid var(--border);background:var(--surface-inset);padding:var(--space-3) var(--space-4)}
 .job-history[hidden]{display:none}
-.job-history-title{margin:0 0 10px;font-size:13px;font-weight:500;letter-spacing:.02em}
-.job-history-empty{margin:0;color:var(--muted);font-size:12px}
-.job-history-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
-.job-history-event{border-left:2px solid var(--green-dark);padding:4px 0 4px 10px;min-width:0}
-.job-history-head{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;font-size:13px}
-.job-history-states{font-family:var(--mono);font-size:11px;color:var(--green)}
-.job-history-meta{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:3px;overflow-wrap:anywhere}
-.job-history-detail{margin:4px 0 0;color:var(--red);font-size:12px;overflow-wrap:anywhere}
+.job-history-title{margin:0 0 var(--space-3);font-size:var(--type-sm);font-weight:500;color:var(--text-primary)}
+.job-history-empty{margin:0;color:var(--text-muted);font-size:var(--type-xs)}
+.job-history-list{list-style:none;margin:0;padding:0;display:grid;gap:var(--space-2)}
+.job-history-event{border-left:2px solid var(--accent);padding:var(--space-1) 0 var(--space-1) var(--space-3);min-width:0}
+.job-history-head{display:flex;flex-wrap:wrap;gap:var(--space-1) var(--space-3);align-items:baseline;font-size:var(--type-sm);color:var(--text-primary)}
+.job-history-states{font-family:var(--mono);font-size:var(--type-xs);color:var(--accent)}
+.job-history-meta{font-family:var(--mono);font-size:var(--type-xs);color:var(--text-muted);margin-top:var(--space-1);overflow-wrap:anywhere}
+.job-history-detail{margin:var(--space-1) 0 0;color:var(--danger);font-size:var(--type-xs);overflow-wrap:anywhere}
