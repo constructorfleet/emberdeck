@@ -96,7 +96,7 @@ func generateVectorProgram(project DesignerProject, profile MachineProfile) stri
 			if object.OperationID != operation.ID {
 				continue
 			}
-			for _, path := range object.Subpaths {
+			for _, path := range transformedVectorSubpaths(object) {
 				points := path.Points
 				first := points[0]
 				lines = append(lines, "G0 X"+formatMilli(milli(first.XMM))+" Y"+formatMilli(milli(first.YMM)))

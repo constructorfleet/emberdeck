@@ -458,9 +458,15 @@ types are not supported by version 1.
 
 Version 2 geometry is an ordered list of objects, each with an ID, a `kind`
 (`rectangle`, `ellipse`, `line`, or generic `path`), and one or more subpaths.
-A subpath is a list of `{x_mm,y_mm}` points plus a `closed` boolean. Paths are
-already in absolute work coordinates; SVG element transforms are applied at
-import time, while styling and machine operation settings are not inferred.
+A subpath is a list of `{x_mm,y_mm}` points plus a `closed` boolean. An optional
+`transform` stores `translate_x_mm`, `translate_y_mm`, `scale_x`, `scale_y`, and
+`rotation_deg`. Scale and rotation are applied around the source geometry's
+bounding-box center, then the millimetre translation is applied. Omitted
+transforms use identity values. Scales range from 0.01 to 100, rotation from
+−360 to 360 degrees, and transform values use at most three decimal places.
+Transformed points are rounded to 0.001 mm and must fit the profile workspace.
+SVG element transforms are applied at import time, while styling and machine
+operation settings are not inferred.
 Operations are ordered independently from the objects. Each object names its
 operation with `operation_id`; imported or newly drawn unassigned paths may be
 saved while they are reviewed, but generation requires every path to be
@@ -474,8 +480,8 @@ and enclose nonzero area.
 The `operations` array defines execution order; paths within an operation keep
 their object and subpath order. IDs are 1–64 ASCII letters, digits, `_`, or `-`.
 Version 2 accepts at most 500 objects, 100 operations, and 4,000 points across
-all subpaths. Points must be finite, nonnegative, within 10,000 mm, use at most
-three decimal places, and fit the declared workspace. Operation feed/power
+all subpaths. Source points must be finite, within 0–10,000 mm, and use at most
+three decimal places; transformed points must also fit the declared workspace. Operation feed/power
 limits are checked against the profile. All requests remain strict JSON with a
 64 KiB body limit.
 

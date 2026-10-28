@@ -227,6 +227,89 @@ func TestVectorProjectRejectsOpenCutAndOutOfEnvelopePoints(t *testing.T) {
 	}
 }
 
+func TestVectorProjectTransformIsSavedValidatedAndUsedForGeneration(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	profileID := createTestProfile(t, s)
+	project := `{"schema_version":2,"name":"Transformed rectangle","units":"mm","profile_id":"` + profileID + `","profile_revision":1,"objects":[{"kind":"rectangle","id":"panel","operation_id":"engrave","transform":{"translate_x_mm":5,"translate_y_mm":5,"scale_x":2,"scale_y":1,"rotation_deg":90},"subpaths":[{"points":[{"x_mm":10,"y_mm":10},{"x_mm":20,"y_mm":10},{"x_mm":20,"y_mm":20},{"x_mm":10,"y_mm":20}],"closed":true}]}],"operations":[{"id":"engrave","type":"vector-engrave","feed_mm_min":600,"power_percent":25}]}`
+	w := request(t, s, "POST", "/api/v1/projects", project, "test-key")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create transformed vector project: %d %s", w.Code, w.Body.String())
+	}
+	var saved struct {
+		ID      string `json:"id"`
+		Objects []struct {
+			Transform struct {
+				TranslateX float64 `json:"translate_x_mm"`
+				TranslateY float64 `json:"translate_y_mm"`
+				ScaleX     float64 `json:"scale_x"`
+				ScaleY     float64 `json:"scale_y"`
+				Rotation   float64 `json:"rotation_deg"`
+			} `json:"transform"`
+		} `json:"objects"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.Objects) != 1 || saved.Objects[0].Transform.TranslateX != 5 || saved.Objects[0].Transform.TranslateY != 5 || saved.Objects[0].Transform.ScaleX != 2 || saved.Objects[0].Transform.ScaleY != 1 || saved.Objects[0].Transform.Rotation != 90 {
+		t.Fatalf("transform was not persisted: %+v", saved)
+	}
+	w = request(t, s, "GET", "/api/v1/projects/"+saved.ID, "", "test-key")
+	if w.Code != http.StatusOK {
+		t.Fatalf("get saved transformed project: %d %s", w.Code, w.Body.String())
+	}
+	var reopened struct {
+		Objects []struct {
+			Transform struct {
+				ScaleX   float64 `json:"scale_x"`
+				Rotation float64 `json:"rotation_deg"`
+			} `json:"transform"`
+		} `json:"objects"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &reopened); err != nil || len(reopened.Objects) != 1 || reopened.Objects[0].Transform.ScaleX != 2 || reopened.Objects[0].Transform.Rotation != 90 {
+		t.Fatalf("saved transform did not survive project read: %+v err=%v body=%s", reopened, err, w.Body.String())
+	}
+	w = request(t, s, "POST", "/api/v1/projects/"+saved.ID+"/generate", `{"revision":1}`, "test-key")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("generate transformed vector project: %d %s", w.Code, w.Body.String())
+	}
+	w = request(t, s, "GET", w.Header().Get("Location"), "", "test-key")
+	var job struct {
+		Gcode string `json:"gcode"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	const expected = "M5\nG21\nG90\nG94\nG0 X25 Y10\nM4 S0\nG1 X25 Y30 F600 S250\nG1 X15 Y30\nG1 X15 Y10\nG1 X25 Y10\nM5\n"
+	if job.Gcode != expected {
+		t.Fatalf("transform was not applied to generated toolpath: got %q want %q", job.Gcode, expected)
+	}
+}
+
+func TestVectorProjectRejectsInvalidOrOutOfWorkspaceTransforms(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	profileID := createTestProfile(t, s)
+	base := `{"schema_version":2,"name":"Invalid transform","units":"mm","profile_id":"` + profileID + `","profile_revision":1,"objects":[{"kind":"line","id":"line","operation_id":"engrave","transform":%s,"subpaths":[{"points":[{"x_mm":10,"y_mm":10},{"x_mm":20,"y_mm":20}],"closed":false}]}],"operations":[{"id":"engrave","type":"vector-engrave","feed_mm_min":600,"power_percent":25}]}`
+	for _, transform := range []string{
+		`{"scale_x":0,"scale_y":1}`,
+		`{"scale_x":101,"scale_y":1}`,
+		`{"scale_x":1,"scale_y":1,"rotation_deg":90.0001}`,
+		`{"translate_x_mm":290,"translate_y_mm":0,"scale_x":2,"scale_y":1}`,
+	} {
+		body := fmt.Sprintf(base, transform)
+		if w := request(t, s, "POST", "/api/v1/projects", body, "test-key"); w.Code != http.StatusBadRequest {
+			t.Errorf("accepted invalid transform %s: %d %s", transform, w.Code, w.Body.String())
+		}
+	}
+}
+
 func TestVectorProjectCanSaveUnassignedGeometryButCannotGenerateIt(t *testing.T) {
 	s, err := server.Open(t.TempDir(), "test-key")
 	if err != nil {

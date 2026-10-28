@@ -126,9 +126,12 @@ systems and a Docker smoke test. Physical qualification remains separate.
 Version 1 designer projects store one rectangle and one vector-engraving
 operation. Version 2 stores multiple editable line paths, each assignable to an
 ordered vector-engraving or vector-cut layer. The browser creates and edits
-rectangle, ellipse, and line paths with numeric position and size controls;
-saved unassigned paths remain editable, but cannot generate a job until an
-operator assigns them. Cutting paths must be closed and enclose nonzero area.
+rectangle, ellipse, and line paths with numeric position, size, translation,
+scale, and rotation controls. Per-object transforms stay in the saved source;
+preview, profile bounds validation, and job generation apply the same transform
+around the source geometry's bounding-box center. Saved unassigned paths remain
+editable, but cannot generate a job until an operator assigns them. Cutting
+paths must be closed and enclose nonzero area after transformation.
 
 A selected GRBL 1.1 profile declares a millimetre work area with a lower-left
 origin, feed and commanded-power limits, and controller settings. These values
