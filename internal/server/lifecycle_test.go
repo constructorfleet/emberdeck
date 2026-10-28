@@ -136,3 +136,36 @@ func TestInvalidMachineProgramIsRejectedBeforeAssignment(t *testing.T) {
 		t.Fatalf("unsafe program assigned: %d %s", w.Code, w.Body.String())
 	}
 }
+
+func TestPhysicalCompletionWinsRaceWithCancellation(t *testing.T) {
+	s := openServer(t)
+	w := request(t, s, "POST", "/api/v1/jobs", `{"name":"test","gcode":"M5"}`, "test-key")
+	var job struct{ ID string }
+	if err := json.Unmarshal(w.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	request(t, s, "POST", "/api/v1/drivers/bench/poll", `{"session":"owner"}`, "test-key")
+	w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true}`, "test-key")
+	var assignment struct{ Lease string }
+	if err := json.Unmarshal(w.Body.Bytes(), &assignment); err != nil {
+		t.Fatal(err)
+	}
+	request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/cancel", `{}`, "test-key")
+	body := `{"session":"owner","job_id":"` + job.ID + `","lease":"` + assignment.Lease + `","state":"completed","acked":1,"total":1}`
+	w = request(t, s, "POST", "/api/v1/drivers/bench/poll", body, "test-key")
+	if w.Code != 200 {
+		t.Fatalf("Idle completion lost cancellation race: %d %s", w.Code, w.Body.String())
+	}
+	w = request(t, s, "GET", "/api/v1/jobs/"+job.ID, "", "test-key")
+	var result struct{ State string }
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.State != "completed" {
+		t.Fatalf("job remains active: %s", w.Body.String())
+	}
+	w = request(t, s, "GET", "/api/v1/drivers", "", "test-key")
+	if strings.Contains(w.Body.String(), `"busy":true`) {
+		t.Fatal("finished worker remains busy")
+	}
+}

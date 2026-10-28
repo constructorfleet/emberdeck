@@ -39,7 +39,7 @@ func (s *Server) recoverInterrupted() error {
 	jobs := s.copyJobs()
 	changed := false
 	for id, j := range jobs {
-		if j.State == "running" || j.State == "canceling" {
+		if j.State == "running" {
 			j.State = "interrupted"
 			j.Error = "server restarted; inspect machine before creating a new job"
 			j.Lease = ""
@@ -234,8 +234,8 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 			switch in.State {
 			case "running":
 			case "completed":
-				if in.Total == 0 || in.Acked != in.Total || j.State == "canceling" {
-					fail(w, 409, "completion requires all lines and no cancellation")
+				if in.Total == 0 || in.Acked != in.Total {
+					fail(w, 409, "completion requires all lines acknowledged and controller Idle")
 					return
 				}
 				j.State = "completed"

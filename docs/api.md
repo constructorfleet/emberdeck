@@ -59,8 +59,9 @@ authority. Never execute a completed lease again after lost responses.
 While running, poll each second with `session`, `job_id`, `lease`, `state`,
 `acked`, `total`, and optional `error`. A `cancel` command requires immediate
 best-effort stop. Terminal states are `completed`, `failed`, and `canceled`.
-Completed requires all lines acknowledged, Idle verified by the worker, and no
-pending cancellation. Identical terminal receipts are idempotent. Invalid leases,
+Completed requires all lines acknowledged and Idle verified by the worker.
+If physical completion races a cancellation request, verified completion wins
+and releases the worker instead of leaving the job stuck canceling. Identical terminal receipts are idempotent. Invalid leases,
 regressing progress, and duplicate sessions are rejected. Lost communication
 stops the worker; restart it only after inspecting the machine.
 
