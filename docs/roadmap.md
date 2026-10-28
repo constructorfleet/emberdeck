@@ -58,7 +58,7 @@ Review the current open GitHub feature requests and their acceptance criteria
 before choosing the next work slice. Issues [#3](https://github.com/constructorfleet/emberdeck/issues/3)
 and [#4](https://github.com/constructorfleet/emberdeck/issues/4) are required
 parts of the active product goal. Both are closed against their stated scope:
-#3's feasibility investigation is complete, while its firmware path remains
+The #3 feasibility investigation is complete, while its firmware path remains
 unimplemented and unqualified; #4's designer workflow and illustrated-guide
 acceptance criteria are complete. Raster engraving remains a separate,
 unsupported milestone.
