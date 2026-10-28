@@ -115,7 +115,10 @@ ed_result ed_stage_verify(const ed_manifest *manifest, ed_range_fetch fetch,
         storage->reset == NULL || storage->write == NULL || storage->read == NULL ||
         storage->seal == NULL || storage->unseal == NULL)
         return ED_ERR_ARGUMENT;
-    if (manifest->size > ED_MAX_PROGRAM_BYTES) return ED_ERR_TOO_LARGE;
+    if (manifest->size > ED_MAX_PROGRAM_BYTES) {
+        if (storage->reset(storage->context, 0) != 0) return ED_ERR_STORAGE;
+        return ED_ERR_TOO_LARGE;
+    }
     if (storage->reset(storage->context, manifest->size) != 0) return ED_ERR_STORAGE;
 
     while (offset < manifest->size) {
