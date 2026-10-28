@@ -89,11 +89,12 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
   await expect(page.locator('#program-provenance')).toContainText(projectName);
   await expect(page.locator('#program-provenance')).toContainText('commanded power 25%');
   await expect(page.locator('#operator-confirmation')).not.toBeChecked();
-  await expect(row.getByRole('button', { name: 'Start' })).toBeDisabled();
+  await expect(row.getByRole('button', { name: /^Start / })).toBeDisabled();
   expect(startRequests).toHaveLength(0);
   await page.locator('#operator-confirmation').check();
-  await row.getByRole('button', { name: 'Start' }).click();
-  expect(startRequests).toHaveLength(1);
+  await row.getByRole('button', { name: /^Start / }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Start on simulator' }).click();
+  await expect.poll(() => startRequests.length).toBe(1);
   await expect(row).toContainText(/completed/i, { timeout: 30000 });
 
   const generatedCode = await page.locator('#program-code').textContent();
@@ -102,7 +103,7 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
   await projectRow.getByRole('button', { name: `Delete project ${projectName}` }).click();
   await expect(projectRow).toHaveCount(0);
   await expect(row).toBeVisible();
-  await row.getByRole('button', { name: 'View', exact: true }).click();
+  await row.getByRole('button', { name: /^View / }).click();
   await expect(page.locator('#program-code')).toHaveText(generatedCode);
   await expect(page.locator('#program-provenance')).toContainText(projectName);
 
@@ -219,13 +220,14 @@ test('multi-path vector project saves, reopens, generates mixed operations, and 
   await expect(page.locator('#program-provenance')).toContainText('Geometry snapshot: 3 objects · 3 paths');
   await expect(page.locator('#program-provenance')).toContainText('1. Engrave · 2 objects · feed 600 mm/min · commanded power 25%');
   await expect(page.locator('#program-provenance')).toContainText('2. Cut · 1 object · feed 300 mm/min · commanded power 50%');
-  await expect(row.getByRole('button', { name: 'Start' })).toBeDisabled();
+  await expect(row.getByRole('button', { name: /^Start / })).toBeDisabled();
   expect(startRequests).toHaveLength(0);
 
   await page.locator('#operator-confirmation').check();
   await expect(page.locator('#driver-select')).toHaveValue('simulator');
-  await row.getByRole('button', { name: 'Start' }).click();
-  expect(startRequests).toHaveLength(1);
+  await row.getByRole('button', { name: /^Start / }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Start on simulator' }).click();
+  await expect.poll(() => startRequests.length).toBe(1);
   await expect(row).toContainText(/completed/i, { timeout: 30000 });
 
   const pathName = `E2E imported path ${attempt}`;
@@ -361,7 +363,8 @@ test('operator imports static SVG paths into an editable project and assigns the
   await expect(page.locator('#operator-confirmation')).not.toBeChecked();
   await expect(page.locator('#driver-select')).toHaveValue('simulator');
   await page.locator('#operator-confirmation').check();
-  await row.getByRole('button', { name: 'Start' }).click();
-  expect(startRequests).toHaveLength(1);
+  await row.getByRole('button', { name: /^Start / }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Start on simulator' }).click();
+  await expect.poll(() => startRequests.length).toBe(1);
   await expect(row).toContainText(/completed/i, { timeout: 30000 });
 });

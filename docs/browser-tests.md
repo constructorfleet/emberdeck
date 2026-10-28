@@ -2,7 +2,9 @@
 
 The Playwright suite runs the embedded console against a real EmberDeck HTTP
 server with its GRBL simulator. It covers API key connection, G-code upload,
-the safety confirmation gate, live progress, program viewing, completion,
+the safety confirmation gate, Start and Cancel confirmation dialogs that name
+the job and driver, focusable unavailable-Start reasons, job-named row action
+labels, live progress, program viewing, completion,
 controller acknowledged pause and resume, cancellation while paused, and deletion.
 The pause test observes the simulator's `Hold:0` acknowledgement across repeated
 job polls and confirms progress stays fixed while held. After the explicit

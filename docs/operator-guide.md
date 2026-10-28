@@ -41,7 +41,7 @@ select **Reopen** to continue editing.
 | Machine profiles | **New profile**, **Edit profile**, **Delete profile** | Store the declared GRBL work area and limits used by the rectangle editor. |
 | Design projects | **New rectangle project** or **New vector project**, **Reopen**, **Save**, **Generate queued job**, **Delete** | Edit a v1 rectangle engraving source or a v2 multi-path design with ordered engraving/cutting layers, preview its declared envelope, or create a separate queued program. |
 | Add a program | File chooser, display name, profile selector, **Add to library** | Upload plain-text G-code (up to 4 MiB), validate line limits, and review its known path against the selected profile. |
-| Stored programs | Driver selector, readiness checkbox, bounds override, **Name** and **State** filters, **View**, **Start**, **Pause**, **Resume**, **Cancel**, **Delete**, **← Newer** / **Older →** | Find, inspect, and manage jobs through explicit bounds override and readiness confirmation. Available controls depend on job state and driver capabilities. |
+| Stored programs | Driver selector, readiness checkbox, bounds override, **Name** and **State** filters, **View**, **Start**, **Pause**, **Resume**, **Cancel**, **Delete**, **← Newer** / **Older →** | Find, inspect, and manage jobs through explicit bounds override, readiness confirmation, and Start and Cancel confirmation dialogs. Available controls depend on job state and driver capabilities. |
 
 The profile and project lists remain separate from generated jobs: deleting a
 source project does not delete a generated program, and editing a source does
@@ -62,6 +62,35 @@ An **in bounds** review does not replace checking the program and machine. For
 the per-job override checkbox must be selected before **Start** is enabled.
 Then verify the machine's interlocks and check the supervision box. Both
 confirmations are explicit and the bounds override is cleared after dispatch.
+
+## Start a program
+
+**Start** never dispatches on its own. Selecting it opens a confirmation that
+names the job, the selected driver, the bounds review result, and the
+generating profile when the job came from a design project. Focus starts on
+**Go back**. Select **Start on _driver_** to send the program to that driver, or
+**Go back** (or press Escape) to close the dialog without starting anything.
+Focus then returns to the row's **Start** button. The driver shown in the
+dialog is the one the request uses, even if the driver selector changes while
+the dialog is open, and the server still refuses a driver that is not
+connected or ready.
+
+When **Start** is unavailable, it stays in the keyboard Tab order and reads as
+dimmed. The reason appears beneath the row's buttons and is announced as the
+button's description. Only one reason shows at a time, in this order:
+
+| Reason | What to do |
+| --- | --- |
+| Needs a connected driver. | Start a driver worker or choose a connected driver. |
+| Driver _name_ is busy with another job. | Wait for the active job to finish or cancel it. |
+| Needs the bounds override above. | Inspect the review, then select the row's override checkbox. |
+| Needs the safety check above the list. | Check the program, setup, and interlocks, then select the supervision checkbox. |
+
+Selecting an unavailable **Start** does nothing. Every row button's accessible
+name includes the job name, for example **Start panel.gcode** or
+**Cancel panel.gcode**, so screen readers can tell the rows apart.
+
+![Start confirmation naming the job, driver, and bounds review](assets/screenshots/operator-console-start-confirm.png)
 
 ![Uploaded G-code with an out-of-bounds profile review, path bounds, and explicit override control](assets/screenshots/operator-console-uploaded-bounds-review.png)
 
@@ -187,8 +216,10 @@ A held status reports motion, not laser output. Follow the controller's
 [laser-mode requirements](https://github.com/gnea/grbl/wiki/Grbl-v1.1-Laser-Mode)
 and keep physical interlocks and emergency stops independent of software hold.
 
-Select **Pause** while a capable assigned driver is running the program. The
-console displays **Pausing…** while it waits for the driver and controller; that
+Select **Pause** while a capable assigned driver is running the program. Pause
+is not confirmed so the hold request is sent immediately. It is reversible:
+the job keeps its place and **Resume** continues it, and the row says so
+beside the button. The console displays **Pausing…** while it waits for the driver and controller; that
 status does not mean the machine is held. The row changes to **paused** only
 after the controller reports a stable hold. The controller status is shown
 separately as the last status received, for example `Hold:0`. It is a report
@@ -196,16 +227,25 @@ from the driver, not a live physical sensor.
 
 ![Program paused after the controller reports Hold:0](assets/screenshots/operator-console-paused.png)
 
-To continue, check the safety confirmation again and select **Resume**. The
-confirmation is cleared after the request. The console shows the pending
+To continue, check the safety confirmation again and select **Resume**. Until
+the box is checked, **Resume** stays focusable but unavailable and shows
+"Needs the safety check above the list to resume." The confirmation is cleared
+after the request. The console shows the pending
 `resuming` state until the driver reports that the controller is running again.
 
 ## Cancel and remove jobs
 
 **Cancel** remains available while a job is running, pausing, paused, or
-resuming. Active jobs cannot be deleted. Completed, failed, canceled, and
+resuming. Selecting it opens a confirmation that names the job, its driver,
+state, and acknowledged progress. **Cancel job** stops streaming and asks the
+driver to halt the controller. A canceled job cannot be resumed or restarted.
+**Keep running** (or **Keep paused**) and Escape close the dialog without
+canceling and return focus to the row's **Cancel** button. Keep physical
+emergency stops independent of this control. Active jobs cannot be deleted. Completed, failed, canceled, and
 interrupted jobs can be removed with **Delete** after confirming the browser
 prompt.
+
+![Cancel confirmation naming the paused job, driver, and acknowledged progress](assets/screenshots/operator-console-cancel-confirm.png)
 
 ![Completed program with its final acknowledged line count and delete control](assets/screenshots/operator-console-completed.png)
 

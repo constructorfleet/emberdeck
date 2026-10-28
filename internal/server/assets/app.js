@@ -17,6 +17,8 @@
   const programPanel = $("#program-panel");
   const driverSelect = $("#driver-select");
   const confirmation = $("#operator-confirmation");
+  const actionDialog = $("#action-dialog");
+  let pendingAction = null;
   let token = "";
   let connected = false;
   let jobs = [];
@@ -103,6 +105,8 @@
     openProject = null;
     openVectorProject = null;
     shownJobID = "";
+    pendingAction = null;
+    if (actionDialog.open) actionDialog.close();
     programPanel.hidden = true;
     $("#profile-form").hidden = true;
     $("#project-form").hidden = true;
@@ -136,7 +140,11 @@
     element.className = className;
     element.textContent = label;
     if (ariaLabel) element.setAttribute("aria-label", ariaLabel);
-    element.addEventListener("click", action);
+    // aria-disabled keeps an unavailable control focusable, so its click must do nothing.
+    element.addEventListener("click", (event) => {
+      if (element.getAttribute("aria-disabled") === "true") { event.preventDefault(); return; }
+      action(event);
+    });
     return element;
   }
 
@@ -897,13 +905,118 @@
     $("#driver-status").textContent = selected ? (selected.busy ? "Driver has an active job." : `Last seen ${new Date(selected.last_seen).toLocaleTimeString()}`) : "Selected driver is disconnected.";
   }
 
-  async function startJob(id, boundsOverride) {
+  // Row controls carry their job and action so focus can follow a control across list re-renders.
+  function rowControl(target) {
+    if (!target) return null;
+    const controls = [...list.querySelectorAll("[data-job-action]")].filter((control) => control.dataset.jobId === target.jobID);
+    return controls.find((control) => control.dataset.jobAction === target.action) || (target.fallback ? controls[0] : null) || null;
+  }
+
+  function rowButton(job, action, label, className, handler) {
+    const element = button(label, className, handler, `${label} ${job.name}`);
+    element.dataset.jobId = job.id;
+    element.dataset.jobAction = action;
+    return element;
+  }
+
+  function markUnavailable(control, reason, container) {
+    control.setAttribute("aria-disabled", "true");
+    if (!reason) return;
+    const note = document.createElement("span");
+    note.className = "action-reason";
+    note.id = `${control.dataset.jobAction}-reason-${control.dataset.jobId}`;
+    note.textContent = reason;
+    control.setAttribute("aria-describedby", note.id);
+    container.append(note);
+  }
+
+  function startBlocker(job, needsBoundsOverride) {
+    const driver = drivers.find((candidate) => candidate.id === selectedDriver);
+    if (!selectedDriver || !drivers.length) return "Needs a connected driver.";
+    if (!driver) return `Needs a connected driver; ${selectedDriver} is disconnected.`;
+    if (driver.busy) return `Driver ${driver.id} is busy with another job.`;
+    if (needsBoundsOverride && !boundsOverrides.has(job.id)) return "Needs the bounds override above.";
+    if (!confirmation.checked) return "Needs the safety check above the list.";
+    return "";
+  }
+
+  function openActionDialog({ eyebrow, title, details, body, confirmLabel, confirmClass, dismissLabel, onConfirm, returnFocus }) {
+    if (actionDialog.open) return;
+    $("#action-dialog-eyebrow").textContent = eyebrow;
+    $("#action-dialog-title").textContent = title;
+    const detailList = $("#action-dialog-details");
+    detailList.replaceChildren();
+    for (const [term, value] of details) {
+      const dt = document.createElement("dt");
+      dt.textContent = term;
+      const dd = document.createElement("dd");
+      dd.textContent = value;
+      detailList.append(dt, dd);
+    }
+    $("#action-dialog-body").textContent = body;
+    const confirm = $("#action-dialog-confirm");
+    confirm.textContent = confirmLabel;
+    confirm.className = `button ${confirmClass}`;
+    $("#action-dialog-dismiss").textContent = dismissLabel;
+    pendingAction = { onConfirm, returnFocus };
+    actionDialog.returnValue = "";
+    actionDialog.showModal();
+    $("#action-dialog-dismiss").focus();
+  }
+
+  actionDialog.addEventListener("close", async () => {
+    const action = pendingAction;
+    pendingAction = null;
+    if (!action) return;
+    rowControl(action.returnFocus)?.focus();
+    if (actionDialog.returnValue !== "confirm") return;
+    await action.onConfirm();
+    rowControl({ ...action.returnFocus, fallback: true })?.focus();
+  });
+
+  function confirmStart(job, needsBoundsOverride) {
+    if (startBlocker(job, needsBoundsOverride)) return;
+    const driverID = selectedDriver;
+    const review = job.program_review;
+    const details = [["Job", job.name], ["Driver", driverID]];
+    if (job.provenance?.profile?.name) details.push(["Profile", job.provenance.profile.name]);
+    details.push(["Bounds review", needsBoundsOverride ? `${review?.bounds_status || "unknown"} · override selected` : (review?.bounds_status || "in_bounds").replace("_", " ")]);
+    openActionDialog({
+      eyebrow: "CONFIRM DISPATCH",
+      title: `Start ${job.name}?`,
+      details,
+      body: `EmberDeck will send this program to ${driverID} as soon as you confirm. Check that this driver controls the machine you prepared, the work origin is set, and you are supervising the cut.`,
+      confirmLabel: `Start on ${driverID}`,
+      confirmClass: "button-primary",
+      dismissLabel: "Go back",
+      onConfirm: () => startJob(job.id, needsBoundsOverride, driverID),
+      returnFocus: { jobID: job.id, action: "start" },
+    });
+  }
+
+  function confirmCancel(job) {
+    const details = [["Job", job.name], ["Driver", job.driver_id || "unassigned"], ["State", job.state]];
+    if (job.total > 0) details.push(["Progress", `${job.acked || 0} / ${job.total} lines acknowledged`]);
+    openActionDialog({
+      eyebrow: "CONFIRM CANCELLATION",
+      title: `Cancel ${job.name}?`,
+      details,
+      body: "Cancel stops streaming and asks the driver to halt the controller. A canceled job cannot be resumed or restarted; its program stays in the library until you delete it. Keep physical emergency stops independent of this control.",
+      confirmLabel: "Cancel job",
+      confirmClass: "button-danger",
+      dismissLabel: job.state === "paused" ? "Keep paused" : "Keep running",
+      onConfirm: () => cancelJob(job.id),
+      returnFocus: { jobID: job.id, action: "cancel" },
+    });
+  }
+
+  async function startJob(id, boundsOverride, driverID) {
     if (!confirmation.checked) { message("Confirm the safety check before starting a program."); confirmation.focus(); return; }
-    if (!selectedDriver) { message("Select a connected driver first."); driverSelect.focus(); return; }
+    if (!driverID) { message("Select a connected driver first."); driverSelect.focus(); return; }
     try {
       await api(`/api/v1/jobs/${encodeURIComponent(id)}/start`, {
         method: "POST",
-        body: JSON.stringify({ driver_id: selectedDriver, confirmed: true, bounds_override: Boolean(boundsOverride) }),
+        body: JSON.stringify({ driver_id: driverID, confirmed: true, bounds_override: Boolean(boundsOverride) }),
       });
       boundsOverrides.delete(id);
       confirmation.checked = false;
@@ -923,7 +1036,7 @@
   async function pauseJob(id) {
     try {
       await api(`/api/v1/jobs/${encodeURIComponent(id)}/pause`, { method: "POST", body: "{}" });
-      message("Pause requested. Wait for the controller to confirm it is held.");
+      message("Pause requested. Wait for the controller to confirm it is held; Resume continues the job after the safety check.");
       await refresh();
     } catch (error) { message(error.message); }
   }
@@ -940,6 +1053,8 @@
 
   function renderJobs() {
     const checked = confirmation.checked;
+    const focused = document.activeElement;
+    const keepFocus = focused && list.contains(focused) && focused.dataset.jobAction ? { jobID: focused.dataset.jobId, action: focused.dataset.jobAction, fallback: true } : null;
     list.replaceChildren();
     const filtered = Boolean(jobFilterName.value.trim() || jobFilterState.value);
     $("#job-count").textContent = hasLoadedJobs ? String(jobTotal).padStart(2, "0") : "—";
@@ -980,6 +1095,8 @@
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
         checkbox.checked = boundsOverrides.has(job.id);
+        checkbox.dataset.jobId = job.id;
+        checkbox.dataset.jobAction = "bounds-override";
         checkbox.setAttribute("aria-label", `Override ${review?.bounds_status || "unknown"} bounds review for ${job.name}`);
         checkbox.addEventListener("change", () => {
           if (checkbox.checked) boundsOverrides.add(job.id);
@@ -1013,42 +1130,59 @@
         failure.textContent = job.error;
         info.append(failure);
       }
+      const controls = document.createElement("div");
+      controls.className = "job-controls";
       const actions = document.createElement("div");
       actions.className = "job-actions";
-      actions.append(button("View", "button button-small", () => showProgram(job.id)));
+      // Reasons and hints sit beside the buttons they describe.
+      const notes = document.createElement("div");
+      notes.className = "job-action-notes";
+      actions.append(rowButton(job, "view", "View", "button button-small", () => showProgram(job.id)));
       if (job.state === "queued") {
-        const start = button("Start", "button button-small button-start", () => startJob(job.id, needsBoundsOverride));
-        start.disabled = !checked || (needsBoundsOverride && !boundsOverrides.has(job.id)) || !selectedDriver || !drivers.some((driver) => driver.id === selectedDriver && !driver.busy);
+        const start = rowButton(job, "start", "Start", "button button-small button-start", () => confirmStart(job, needsBoundsOverride));
+        const blocker = startBlocker(job, needsBoundsOverride);
+        if (blocker) markUnavailable(start, blocker, notes);
         actions.append(start);
       }
       if (job.state === "running") {
         const assignedDriver = drivers.find((driver) => driver.id === job.driver_id);
         if (assignedDriver && Array.isArray(assignedDriver.capabilities) && assignedDriver.capabilities.includes("pause_resume")) {
-          actions.append(button("Pause", "button button-small", () => pauseJob(job.id)));
+          // Pause is not confirmed: holding should be immediate, and Resume reverses it.
+          const pause = rowButton(job, "pause", "Pause", "button button-small", () => pauseJob(job.id));
+          const hint = document.createElement("span");
+          hint.className = "action-hint";
+          hint.id = `pause-hint-${job.id}`;
+          hint.textContent = "Pause holds the job without canceling it; Resume continues it after the safety check.";
+          pause.setAttribute("aria-describedby", hint.id);
+          notes.append(hint);
+          actions.append(pause);
         }
       }
       if (job.state === "pausing") {
-        const pause = button("Pausing…", "button button-small", () => {});
-        pause.disabled = true;
+        const pause = rowButton(job, "pause", "Pausing…", "button button-small", () => {});
+        markUnavailable(pause, "", notes);
         actions.append(pause);
       }
       if (job.state === "paused") {
-        const resume = button("Resume", "button button-small button-start", () => resumeJob(job.id));
-        resume.disabled = !checked;
+        const resume = rowButton(job, "resume", "Resume", "button button-small button-start", () => resumeJob(job.id));
+        if (!checked) markUnavailable(resume, "Needs the safety check above the list to resume.", notes);
         actions.append(resume);
       }
       if (active) {
-        const cancel = button(job.state === "canceling" ? "Canceling…" : "Cancel", "button button-small button-danger", () => cancelJob(job.id));
-        cancel.disabled = job.state === "canceling";
+        const cancel = rowButton(job, "cancel", job.state === "canceling" ? "Canceling…" : "Cancel", "button button-small button-danger", () => confirmCancel(job));
+        if (job.state === "canceling") markUnavailable(cancel, "", notes);
         actions.append(cancel);
       }
       if (["queued", "failed", "completed", "canceled", "interrupted"].includes(job.state)) {
-        actions.append(button("Delete", "button button-small button-danger", () => deleteJob(job.id, job.name), `Delete ${job.name}`));
+        actions.append(rowButton(job, "delete", "Delete", "button button-small button-danger", () => deleteJob(job.id, job.name)));
       }
-      item.append(info, actions);
+      controls.append(actions);
+      if (notes.childElementCount) controls.append(notes);
+      item.append(info, controls);
       list.append(item);
     }
     confirmation.checked = checked;
+    if (keepFocus) rowControl(keepFocus)?.focus();
   }
 
   function coordinate(value) {
