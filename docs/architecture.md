@@ -16,6 +16,11 @@ Browser → HTTP server → durable job library (single-owner file lock)
 Server dispatch → versioned preflight plugins → allow / veto
 ```
 
+An optional, separately bound Prometheus listener reports server-observed job
+states and driver heartbeats. It is disabled by default and does not aggregate
+metrics from independent worker processes; distributed workers report their
+state to the central server. See [metrics and monitoring](metrics.md).
+
 ## Storage and ownership
 
 Library mutations write and sync a temporary file before replacing jobs.json,

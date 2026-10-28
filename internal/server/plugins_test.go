@@ -2,9 +2,11 @@ package server_test
 
 import (
 	"encoding/json"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/ConstructorFleet/emberdeck/internal/server"
@@ -67,5 +69,10 @@ func TestConfiguredPreflightPluginCanVetoDispatch(t *testing.T) {
 	}
 	if result.State != "queued" {
 		t.Fatalf("vetoed job dispatched: %s", w.Body.String())
+	}
+	metrics := httptest.NewRecorder()
+	s.MetricsHandler("").ServeHTTP(metrics, httptest.NewRequest("GET", "/metrics", nil))
+	if metrics.Code != 200 || !strings.Contains(metrics.Body.String(), `emberdeck_plugin_invocations_total{outcome="rejected"} 1`) || !strings.Contains(metrics.Body.String(), `emberdeck_plugin_invocation_duration_seconds_count{outcome="rejected"} 1`) {
+		t.Fatalf("plugin metrics missing rejected invocation: %d %s", metrics.Code, metrics.Body.String())
 	}
 }
