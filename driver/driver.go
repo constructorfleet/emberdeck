@@ -234,7 +234,7 @@ func StreamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 			controllerTouched = true
 			ackDeadline = time.Now().Add(responseTimeout)
 		}
-		if pending && time.Now().After(ackDeadline) {
+		if pending && !gate && time.Now().After(ackDeadline) {
 			return fmt.Errorf("driver: response timeout")
 		}
 		if (gate || phase == "initial" || phase == "final") && time.Since(lastStatus) > responseTimeout {
@@ -274,13 +274,11 @@ func StreamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 				return fmt.Errorf("driver: status response timeout")
 			} else if !queryOutstanding {
 				role := "normal"
-				if phase == "initial" {
-					role = "initial"
-				}
 				if nextQueryRole != "" {
 					role, nextQueryRole = nextQueryRole, ""
-				}
-				if phase == "final" {
+				} else if phase == "initial" {
+					role = "initial"
+				} else if phase == "final" {
 					role = "final"
 				}
 				if err := sendQuery(role); err != nil {
@@ -336,12 +334,12 @@ func StreamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 							nextQueryRole = "pause"
 						case phase == "initial":
 							// The readiness response completes the initial handshake.
-						case phase == "final":
-							nextQueryRole = "final"
 						case pauseSent && !pauseConfirmed:
 							nextQueryRole = "pause"
 						case resuming:
 							nextQueryRole = "resume"
+						case phase == "final":
+							nextQueryRole = "final"
 						default:
 							nextQueryRole = "normal"
 						}
@@ -410,8 +408,11 @@ func StreamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 						gate, pauseSent, pauseConfirmed, resumeRequested, resuming = false, false, false, false, false
 						externalHold = false
 						controlDeadline = time.Time{}
+						if pending {
+							ackDeadline = time.Now().Add(responseTimeout)
+						}
 					}
-					if phase == "final" && fresh && responseRole == "final" {
+					if phase == "final" && !gate && !resuming && fresh && responseRole == "final" {
 						return nil
 					}
 				} else if state == "Run" {
@@ -419,6 +420,9 @@ func StreamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 						gate, pauseSent, pauseConfirmed, resumeRequested, resuming = false, false, false, false, false
 						externalHold = false
 						controlDeadline = time.Time{}
+						if pending {
+							ackDeadline = time.Now().Add(responseTimeout)
+						}
 					} else if fresh && gate && (pauseConfirmed || externalHold) {
 						return fmt.Errorf("driver: controller resumed without explicit Resume command")
 					}
