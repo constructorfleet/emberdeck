@@ -1,5 +1,75 @@
 # Deployment
 
+## Download a release
+
+Install the published executable from
+[GitHub Releases](https://github.com/ConstructorFleet/emberdeck/releases) before
+building from source. Each release attaches the following native binaries and
+checksum file:
+
+| Platform | Release asset |
+| --- | --- |
+| macOS Intel (amd64) | `emberdeck-darwin-amd64` |
+| macOS Apple silicon (arm64) | `emberdeck-darwin-arm64` |
+| Linux x86-64 (amd64) | `emberdeck-linux-amd64` |
+| Linux 32-bit ARM, ARMv7 (arm) | `emberdeck-linux-arm` |
+| Linux 64-bit ARM (arm64) | `emberdeck-linux-arm64` |
+| Windows x86-64 (amd64) | `emberdeck-windows-amd64.exe` |
+| Checksums | `SHA256SUMS` |
+| Linux container (amd64, arm64, arm/v7) | `ghcr.io/constructorfleet/emberdeck:vX.Y.Z` |
+
+Download all six binary assets and `SHA256SUMS` into one directory and verify
+them before execution. On Linux, run `sha256sum -c SHA256SUMS`; macOS has the
+equivalent `shasum -a 256 -c SHA256SUMS`. Windows users can run `sha256sum` from
+Git Bash or WSL.
+
+For example, on Linux amd64:
+
+```sh
+sha256sum -c SHA256SUMS
+chmod +x emberdeck-linux-amd64
+./emberdeck-linux-amd64 -version
+export EMBERDECK_API_KEY="$(openssl rand -hex 32)"
+printf 'API key (keep private): %s\n' "$EMBERDECK_API_KEY"
+./emberdeck-linux-amd64 serve -listen 127.0.0.1:8080 -data ./data
+```
+
+Use the binary name for your platform. On macOS, Gatekeeper may quarantine a
+downloaded executable. If it blocks execution, verify the checksum, remove the
+quarantine attribute from the selected binary, then make it executable. For
+Apple silicon:
+
+```sh
+xattr -d com.apple.quarantine ./emberdeck-darwin-arm64
+chmod +x ./emberdeck-darwin-arm64
+./emberdeck-darwin-arm64 -version
+```
+
+The server requires a private `EMBERDECK_API_KEY`. Keep the displayed key
+private. The native listener defaults to loopback; bind to all interfaces only
+on a trusted network or behind a TLS reverse proxy. Remote workers should use
+HTTPS or a trusted TLS tunnel. A raw TCP controller connection is separate from
+the worker's authenticated HTTP connection.
+
+## Build from source
+
+The release binary is the recommended path. To compile it yourself, install Go
+1.27 and clone the repository:
+
+```sh
+git clone https://github.com/ConstructorFleet/emberdeck.git
+cd emberdeck
+go build -o emberdeck ./cmd/emberdeck
+export EMBERDECK_API_KEY="$(openssl rand -hex 32)"
+printf 'API key (keep private): %s\n' "$EMBERDECK_API_KEY"
+./emberdeck -version
+./emberdeck serve -simulate -data ./data
+```
+
+This starts the explicitly software-only simulator. Continue with the
+[Operator Guide](operator-guide.md), and read
+[Safety & Limitations](safety.md) before connecting a machine.
+
 Prometheus metrics are disabled by default and use a separate listener. See
 [metrics and monitoring](metrics.md) for native, systemd, Docker, and distributed
 worker configuration, authentication, scrape setup, and alerts. Do not expose
@@ -11,7 +81,7 @@ selection and enumeration. No particular cutter, controller, enclosure, or emerg
 setup has been qualified. The simulator is software only and must be selected
 explicitly.
 
-For a first-run route, start with [Install](install.md), then read the
+For a first-run route, see [Install](install.md), then read the
 [Operator Guide](operator-guide.md). Keep the [Troubleshooting](troubleshooting.md),
 [Glossary](glossary.md), and [Safety & Limitations](safety.md) pages nearby.
 
@@ -43,7 +113,8 @@ rotation, revocation, and recovery.
 
 ## Docker Compose
 
-Requires Docker with Compose v2. From the repository root:
+Requires Docker with Compose v2 and a source checkout (see
+[Build from source](#build-from-source)). From the repository root:
 
 ```sh
 export EMBERDECK_API_KEY='replace-with-a-long-random-secret'
@@ -53,8 +124,8 @@ docker compose up --build -d
 The service listens on port 8080 and stores jobs in the named
 `emberdeck-data` volume mounted at `/data`. The image runs as the distroless
 non-root user. No source tree is mounted into the container, and no simulated
-driver starts by default. Open `http://localhost:8080/` and enter the same API
-key in the browser.
+driver starts by default. Open `http://localhost:8080/` (type it into your
+browser) and enter the same API key in the browser.
 
 The optional listener is not published in the default Compose configuration.
 For a private monitoring setup, add `-metrics-listen 0.0.0.0:9090` to the
@@ -68,8 +139,14 @@ To run an explicitly software-only demo with an in-process simulator:
 docker compose --profile demo up --build demo
 ```
 
-That service uses a separate `emberdeck-demo-data` volume. Remove either data
-volume only when you intend to delete its saved jobs (`docker volume rm ...`).
+That service uses a separate `emberdeck-demo-data` volume. Remove a volume only
+when you intend to delete its saved jobs. For example, the regular service uses
+`emberdeck-data` and the demo uses `emberdeck-demo-data`:
+
+```sh
+docker volume rm emberdeck-data
+docker volume rm emberdeck-demo-data
+```
 
 Build an image for the current platform with `docker build -t emberdeck:local .`.
 For a multi-architecture image, use Buildx, for example:
@@ -97,25 +174,61 @@ platform installation qualification remain separate from these software checks.
 
 ## Linux server or Raspberry Pi
 
-Build for the target architecture with a Go 1.27 toolchain, or copy a matching
-release binary to `/usr/local/bin/emberdeck`. For a 64-bit ARM Pi, build with
-`GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o emberdeck ./cmd/emberdeck`.
-For 32-bit ARM, use the appropriate `GOARCH=arm` and `GOARM` for the installed
-OS; 64-bit Raspberry Pi OS is the simpler deployment target. Then:
+Download the matching Linux binary (`amd64`, `arm`, or `arm64`) from the release
+table above. A 64-bit Raspberry Pi OS can use `emberdeck-linux-arm64`; 32-bit
+ARMv7 uses `emberdeck-linux-arm`. Install the binary and systemd service as the
+`emberdeck` user:
 
 ```sh
 sudo useradd --system --home /var/lib/emberdeck --create-home emberdeck
-sudo install -o root -g root -m 0755 emberdeck /usr/local/bin/emberdeck
-sudo install -d -o root -g root -m 0755 /etc/emberdeck
+sudo install -o root -g root -m 0755 ./emberdeck-linux-arm64 /usr/local/bin/emberdeck
+sudo install -d -o root -g root -m 0750 /etc/emberdeck
 sudo sh -c 'umask 077; printf "%s\n" "EMBERDECK_API_KEY=replace-with-a-long-random-secret" > /etc/emberdeck/emberdeck.env'
-sudo install -o root -g root -m 0644 deploy/emberdeck.service /etc/systemd/system/emberdeck.service
+```
+
+The service requires `/etc/emberdeck/emberdeck.env` to exist and contain a
+long, unique `EMBERDECK_API_KEY`. It must be owned by `root:root` and mode
+`0600`: it contains a secret, and systemd's system manager reads it before
+starting the unprivileged service. A missing environment file or key prevents
+startup.
+
+Install the unit directly from this guide; no source checkout is needed:
+
+```sh
+sudo tee /etc/systemd/system/emberdeck.service >/dev/null <<'UNIT'
+[Unit]
+Description=EmberDeck laser job manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=emberdeck
+Group=emberdeck
+EnvironmentFile=/etc/emberdeck/emberdeck.env
+ExecStart=/usr/local/bin/emberdeck serve -listen 0.0.0.0:8080 -data /var/lib/emberdeck
+Restart=on-failure
+RestartSec=3
+StateDirectory=emberdeck
+StateDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/emberdeck
+
+[Install]
+WantedBy=multi-user.target
+UNIT
 sudo systemctl daemon-reload
 sudo systemctl enable --now emberdeck
 ```
 
-The unit uses systemd's `StateDirectory` to keep durable jobs under
-`/var/lib/emberdeck` and runs without root privileges. View logs with
-`journalctl -u emberdeck -f`. Its default configuration has no simulator.
+The unit uses systemd's `StateDirectory` for durable jobs under
+`/var/lib/emberdeck` and runs without root privileges. It has no simulator. The
+`0.0.0.0:8080` bind exposes the service on the host's interfaces; restrict it to
+a trusted network or put it behind a TLS reverse proxy. View logs with
+`journalctl -u emberdeck -f`.
 
 An LXC container can use the same systemd unit and binary installation steps
 inside a supported Linux guest. Allocate persistent storage for
@@ -126,30 +239,42 @@ by the host administrator before a worker can open a device.
 
 ## macOS native CLI
 
-Install Go 1.27, then build and run the server from a terminal:
+Download the matching macOS asset (`emberdeck-darwin-arm64` for Apple silicon or
+`emberdeck-darwin-amd64` for Intel) and verify its checksum as described above.
+If Gatekeeper blocks execution, remove the quarantine attribute after checksum
+verification. Example for Apple silicon:
 
 ```sh
-go build -o emberdeck ./cmd/emberdeck
-export EMBERDECK_API_KEY='replace-with-a-long-random-secret'
-./emberdeck serve -listen 127.0.0.1:8080 -data "$HOME/Library/Application Support/EmberDeck"
+xattr -d com.apple.quarantine ./emberdeck-darwin-arm64
+chmod +x ./emberdeck-darwin-arm64
+./emberdeck-darwin-arm64 -version
+export EMBERDECK_API_KEY="$(openssl rand -hex 32)"
+printf 'API key (keep private): %s\n' "$EMBERDECK_API_KEY"
+./emberdeck-darwin-arm64 serve -listen 127.0.0.1:8080 -data "$HOME/Library/Application Support/EmberDeck"
 ```
 
-Open `http://localhost:8080/`. Add `-simulate` to `serve` only for a
-software-only demo. Stop with Ctrl+C.
+Open `http://localhost:8080/` (type it into your browser). Add `-simulate` to
+`serve` only for a software-only demo. Stop with Ctrl+C.
 
 ## Windows PowerShell native CLI
 
-Install Go 1.27 and run in PowerShell from the repository root:
+Download `emberdeck-windows-amd64.exe` and verify the checksum with Git Bash or
+WSL as described above. Run in PowerShell:
 
 ```powershell
-go build -o emberdeck.exe ./cmd/emberdeck
-$env:EMBERDECK_API_KEY = 'replace-with-a-long-random-secret'
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$bytes = New-Object byte[] 32
+$rng.GetBytes($bytes)
+$env:EMBERDECK_API_KEY = [Convert]::ToBase64String($bytes)
+$rng.Dispose()
+Write-Host "API key (keep private): $env:EMBERDECK_API_KEY"
 New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\EmberDeck" | Out-Null
-./emberdeck.exe serve -listen 127.0.0.1:8080 -data "$env:LOCALAPPDATA\EmberDeck"
+.\emberdeck-windows-amd64.exe -version
+.\emberdeck-windows-amd64.exe serve -listen 127.0.0.1:8080 -data "$env:LOCALAPPDATA\EmberDeck"
 ```
 
-Open `http://localhost:8080/`. Add `-simulate` only to run the software-only
-demo. Stop with Ctrl+C.
+Open `http://localhost:8080/` (type it into your browser). Add `-simulate` only
+to run the software-only demo. Stop with Ctrl+C.
 
 ## Distributed worker
 

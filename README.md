@@ -10,11 +10,88 @@ GRBL 1.1 is the first protocol. Proprietary DSP controllers (including Ruida) ar
 not supported. EmberDeck is not a safety controller: supervise cutting and use
 hardware interlocks and an emergency stop.
 
-Start with [Install](docs/install.md) to build a local software-only demo, then
-follow the [illustrated Operator Guide](docs/operator-guide.md) to use the console.
-For deployment choices, see [Deployment](docs/deployment.md). Review
+Start with a prebuilt release below, then follow the
+[illustrated Operator Guide](docs/operator-guide.md) to use the console. For
+service setup, see [Deployment](docs/deployment.md). Review
 [Troubleshooting](docs/troubleshooting.md), the [Glossary](docs/glossary.md), and
 [Safety & Limitations](docs/safety.md) before connecting a machine.
+
+## Download a release
+
+Choose your operating system and architecture from the
+[GitHub Releases](https://github.com/ConstructorFleet/emberdeck/releases) page.
+The release also includes a multi-architecture Linux image at
+`ghcr.io/constructorfleet/emberdeck:vX.Y.Z` (amd64, arm64, and arm/v7); the
+`:latest` tag points to the latest published release.
+
+| Platform | Release asset |
+| --- | --- |
+| macOS Intel (amd64) | `emberdeck-darwin-amd64` |
+| macOS Apple silicon (arm64) | `emberdeck-darwin-arm64` |
+| Linux x86-64 (amd64) | `emberdeck-linux-amd64` |
+| Linux 32-bit ARM, ARMv7 (arm) | `emberdeck-linux-arm` |
+| Linux 64-bit ARM (arm64) | `emberdeck-linux-arm64` |
+| Windows x86-64 (amd64) | `emberdeck-windows-amd64.exe` |
+| Checksums | `SHA256SUMS` |
+| Linux container (amd64, arm64, arm/v7) | `ghcr.io/constructorfleet/emberdeck:vX.Y.Z` |
+
+Download all six binary assets and `SHA256SUMS` into the same directory, then
+verify the files on Linux with `sha256sum -c SHA256SUMS`. macOS includes the
+equivalent `shasum -a 256 -c SHA256SUMS`; on Windows, use Git Bash or WSL with
+`sha256sum`. For example, after downloading the Linux amd64 binary:
+
+```sh
+sha256sum -c SHA256SUMS
+chmod +x emberdeck-linux-amd64
+./emberdeck-linux-amd64 -version
+```
+
+On macOS, use the asset matching the Mac. If Gatekeeper blocks the binary after
+checksum verification, remove its quarantine attribute, for example:
+
+```sh
+xattr -d com.apple.quarantine ./emberdeck-darwin-arm64
+chmod +x ./emberdeck-darwin-arm64
+./emberdeck-darwin-arm64 -version
+```
+
+The command `-version` prints the release version. To run a software-only local
+demo on Linux or macOS, generate and display an API key in your terminal, keep it
+private, and start the server with the matching binary:
+
+```sh
+export EMBERDECK_API_KEY="$(openssl rand -hex 32)"
+printf 'API key (keep private): %s\n' "$EMBERDECK_API_KEY"
+./emberdeck-linux-amd64 serve -simulate -data ./data
+```
+
+Replace the binary name with the asset you downloaded. On first start, the
+server migrates the key into its initial `bootstrap-admin` credential. After initial
+access, rotate to named credentials; see the
+[HTTP API and worker contract](docs/api.md) for the credential contract. Open
+`http://127.0.0.1:8080` (type this address in your browser) and enter the
+displayed key. `-simulate` runs software only and sends no commands to a cutter.
+For Windows PowerShell, follow the
+[native CLI steps](docs/deployment.md#windows-powershell-native-cli) after
+downloading `emberdeck-windows-amd64.exe`.
+
+## Build from source
+
+To build instead of downloading a release, install Go 1.27 and clone the source:
+
+```sh
+git clone https://github.com/ConstructorFleet/emberdeck.git
+cd emberdeck
+go build -o emberdeck ./cmd/emberdeck
+export EMBERDECK_API_KEY="$(openssl rand -hex 32)"
+printf 'API key (keep private): %s\n' "$EMBERDECK_API_KEY"
+./emberdeck serve -simulate -data ./data
+```
+
+The first start creates the `bootstrap-admin` credential from this key. Rotate
+to named credentials after initial access; see the
+[HTTP API and worker contract](docs/api.md). Open
+`http://127.0.0.1:8080` in your browser and enter the displayed key.
 
 ![EmberDeck operator console showing a controller-confirmed paused job](docs/assets/screenshots/operator-console-paused.png)
 

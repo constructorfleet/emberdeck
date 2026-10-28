@@ -10,9 +10,11 @@ authentication error.
 
 ## Connect and choose a driver
 
-Open the EmberDeck console and enter the API key supplied by the server
-operator; the key field is masked. Surrounding whitespace is removed before the
-key is checked. **Connect**
+Open the EmberDeck console and enter the private API key supplied by the server
+operator; the key field is masked. The first-start key is migrated into the
+`bootstrap-admin` credential. After initial access, rotate to named credentials;
+see the [HTTP API and worker contract](api.md) for the credential contract.
+Surrounding whitespace is removed before the key is checked. **Connect**
 validates the key with the server before saving it in this browser session or
 starting library refreshes. While that check is in progress, the button reads
 **Connecting…** and is disabled. A rejected key is not saved or retried; the
