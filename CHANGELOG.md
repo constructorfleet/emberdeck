@@ -1,0 +1,8 @@
+# Changelog
+
+## 0.1.0 (2026-10-28)
+
+
+### Features
+
+* launch EmberDeck job management and distributed GRBL foundation ([#1](https://github.com/constructorfleet/emberdeck/issues/1)) ([ca1a5a5](https://github.com/constructorfleet/emberdeck/commit/ca1a5a5fe2d311d90a436d806b3da494d5675ec6))
