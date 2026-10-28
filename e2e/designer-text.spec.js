@@ -70,3 +70,58 @@ test('editable monoline text saves, reopens, generates engraving geometry, and d
   await expect.poll(() => startRequests.length).toBe(1);
   await expect(row).toContainText(/completed/i, { timeout: 30000 });
 });
+
+test('invalid text stays blocked when another text object is edited', async ({ page }) => {
+  test.setTimeout(30000);
+  const attempt = `${test.info().retry}-${Date.now()}`;
+  await page.goto('/');
+  await page.locator('#api-key').fill(apiKey);
+  await page.getByRole('button', { name: /Connect/ }).click();
+  await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
+  await page.getByRole('button', { name: 'New profile' }).click();
+  await page.locator('#profile-name').fill(`Text validation profile ${attempt}`);
+  await page.locator('#profile-width').fill('300');
+  await page.locator('#profile-height').fill('200');
+  await page.locator('#profile-max-s').fill('1000');
+  await page.locator('#profile-min-feed').fill('1');
+  await page.locator('#profile-max-feed').fill('6000');
+  await page.locator('#profile-max-power').fill('100');
+  await page.getByRole('button', { name: 'Save profile' }).click();
+  await expect(page.locator('#notice .notice-message')).toContainText('Profile saved');
+
+  await page.getByRole('button', { name: 'New vector project' }).click();
+  await page.locator('#vector-name').fill(`Two text validation ${attempt}`);
+  await page.getByRole('button', { name: 'Add text' }).click();
+  await page.locator('#vector-text-content').fill('unsupported 🙂');
+  await expect(page.locator('#vector-text-error')).toContainText('Use A–Z');
+  await expect(page.getByRole('button', { name: 'Save vector project' })).toBeDisabled();
+
+  await page.getByRole('button', { name: 'Add text' }).click();
+  await expect(page.locator('#vector-text-content')).toHaveValue('EMBER');
+  await expect(page.locator('#vector-text-error')).toBeHidden();
+  await expect(page.locator('#vector-validation')).toContainText('Use A–Z');
+  await expect(page.getByRole('button', { name: 'Save vector project' })).toBeDisabled();
+
+  await page.getByRole('button', { name: '1. text' }).click();
+  await expect(page.locator('#vector-text-error')).toContainText('Use A–Z');
+  await page.locator('#vector-text-content').fill('ALPHA');
+  await expect(page.locator('#vector-text-error')).toBeHidden();
+  await expect(page.locator('#vector-validation')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Save vector project' })).toBeEnabled();
+
+  await page.route('**/api/v1/designer/text-geometry', async (route) => {
+    if (route.request().postDataJSON().content === 'ALPHA') await new Promise((resolve) => setTimeout(resolve, 1000));
+    await route.continue();
+  });
+  const alphaResponse = page.waitForResponse((response) => response.request().postDataJSON()?.content === 'ALPHA');
+  await page.locator('#vector-text-content').fill('ALPHA');
+  await page.getByRole('button', { name: '2. text' }).click();
+  const bravoResponse = page.waitForResponse((response) => response.request().postDataJSON()?.content === 'BRAVO');
+  await page.locator('#vector-text-content').fill('BRAVO');
+  await bravoResponse;
+  await expect(page.locator('#vector-validation')).toContainText('Text stroke geometry is still being generated.');
+  await expect(page.getByRole('button', { name: 'Save vector project' })).toBeDisabled();
+  await alphaResponse;
+  await expect(page.locator('#vector-validation')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Save vector project' })).toBeEnabled();
+});

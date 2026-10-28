@@ -54,9 +54,6 @@
   let selectedVectorObject = "";
   let selectedVectorObjects = new Set();
   let vectorIDSequence = 0;
-  let textGeometryPending = false;
-  let textGeometryError = "";
-  let textGeometryRequest = 0;
   const toolpathCache = new Map();
   const toolpathViewports = new Map();
   const boundsOverrides = new Set();
@@ -624,6 +621,13 @@
 
   function objectKind(object) { return object.kind || "path"; }
 
+  function newTextGeometryState() { return { pending: false, error: "", requestID: 0 }; }
+
+  function textGeometryState(object) {
+    object.textGeometry ||= newTextGeometryState();
+    return object.textGeometry;
+  }
+
   function boundsFor(object) {
     const points = object.subpaths.flatMap((path) => path.points);
     return {
@@ -753,8 +757,9 @@
       if (textObject) field.setAttribute("aria-describedby", "vector-text-error");
       else field.removeAttribute("aria-describedby");
     });
-    $("#vector-text-error").textContent = textGeometryError;
-    $("#vector-text-error").hidden = !textGeometryError;
+    const textState = textObject ? textGeometryState(object) : null;
+    $("#vector-text-error").textContent = textState?.error || "";
+    $("#vector-text-error").hidden = !textState?.error;
     $("#vector-x-label").firstChild.textContent = textObject ? "Origin X (mm)" : "X (mm)";
     $("#vector-y-label").firstChild.textContent = textObject ? "Origin Y (mm)" : "Y (mm)";
     const displayedX = textObject ? object.text.x_mm : bounds.x;
@@ -884,8 +889,14 @@
     if (!profile) return "Select or create a declared profile first.";
     if (!$("#vector-name").value.trim()) return "Enter a project name.";
     if (!vectorObjects.length) return "Add at least one shape.";
-    if (textGeometryPending) return "Text stroke geometry is still being generated.";
-    if (textGeometryError) return textGeometryError;
+    for (const object of vectorObjects) {
+      if (objectKind(object) !== "text") continue;
+      const state = textGeometryState(object);
+      if (state.pending) return "Text stroke geometry is still being generated.";
+      if (state.error) return state.error;
+      const sourceError = localTextError(object.text);
+      if (sourceError) return sourceError;
+    }
     if (vectorObjects.length > 500 || vectorOperations.length > 100) return "The project exceeds the supported shape or operation count.";
     if (vectorObjects.some((object) => object.id === selectedVectorObject)) {
       const geometry = ["#vector-x", "#vector-y", "#vector-width", "#vector-height"].map(finiteField);
@@ -933,7 +944,11 @@
   function updateVectorValidation() {
     if ($("#vector-form").hidden) return;
     const selectedObject = vectorObjects.find((candidate) => candidate.id === selectedVectorObject);
-    const textError = selectedObject && objectKind(selectedObject) === "text" ? textGeometryError : "";
+    const isSelectedText = selectedObject && objectKind(selectedObject) === "text";
+    const selectedTextError = isSelectedText ? localTextErrors(selectedObject.text) : {};
+    const textError = isSelectedText ? (textGeometryState(selectedObject).error || Object.values(selectedTextError).find(Boolean) || "") : "";
+    [["#vector-text-content", selectedTextError.content], ["#vector-text-size", selectedTextError.size_mm], ["#vector-x", selectedTextError.x_mm], ["#vector-y", selectedTextError.y_mm]]
+      .forEach(([selector, error]) => $(selector).setAttribute("aria-invalid", error ? "true" : "false"));
     $("#vector-text-error").textContent = textError;
     $("#vector-text-error").hidden = !textError;
     const profile = selectedProfile();
@@ -962,8 +977,9 @@
   function fillVectorProject(project = null) {
     openVectorProject = project;
     vectorObjects = project ? project.objects.map((object) => ({ ...object, text: object.text ? { ...object.text } : undefined, kind: objectKind(object), transform: object.transform ? { ...object.transform } : undefined, subpaths: object.subpaths.map((path) => ({ ...path, points: path.points.map((point) => ({ ...point })) })) })) : [];
-    textGeometryError = "";
-    textGeometryPending = false;
+    vectorObjects.forEach((object) => {
+      if (objectKind(object) === "text") object.textGeometry = newTextGeometryState();
+    });
     vectorOperations = project ? project.operations.map((operation) => ({ ...operation })) : [{ id: vectorID("operation"), type: "vector-engrave", feed_mm_min: 600, power_percent: 25 }];
     selectedVectorObject = vectorObjects[0]?.id || "";
     selectedVectorObjects = new Set(selectedVectorObject ? [selectedVectorObject] : []);
@@ -986,6 +1002,7 @@
       ? { id: vectorID("text"), kind: "text", text: { content: "EMBER", font: "emberdeck-stick-v1", size_mm: 10, x_mm: x, y_mm: y }, subpaths: [] }
       : { id: vectorID("shape"), kind: type, subpaths: [{ points: shapePoints(type, x, y, width, height), closed }] };
     if (vectorOperations[0]) object.operation_id = vectorOperations[0].id;
+    if (type === "text") object.textGeometry = newTextGeometryState();
     vectorObjects.push(object);
     selectedVectorObject = object.id;
     selectedVectorObjects = new Set([object.id]);
@@ -993,8 +1010,8 @@
     renderVectorEditor();
   }
 
-  function localTextError(text) {
-    const errors = {
+  function localTextErrors(text) {
+    return {
       content: !text.content.trim() ? "Enter text to engrave."
         : [...text.content].length > 32 ? "Text is limited to 32 characters."
           : !/^[A-Za-z0-9 .,;:!?+\-/_()]+$/.test(text.content) ? "Use A–Z, 0–9, spaces, and . , : ; ! ? + - / _ ( )." : "",
@@ -1002,18 +1019,18 @@
       x_mm: !Number.isFinite(text.x_mm) || !decimalPlacesAtMostThree(String(text.x_mm)) || text.x_mm < 0 || text.x_mm > 10000 ? "Text X position must be from 0 to 10,000 mm with at most three decimals." : "",
       y_mm: !Number.isFinite(text.y_mm) || !decimalPlacesAtMostThree(String(text.y_mm)) || text.y_mm < 0 || text.y_mm > 10000 ? "Text Y position must be from 0 to 10,000 mm with at most three decimals." : "",
     };
-    [["#vector-text-content", errors.content], ["#vector-text-size", errors.size_mm], ["#vector-x", errors.x_mm], ["#vector-y", errors.y_mm]]
-      .forEach(([selector, error]) => $(selector).setAttribute("aria-invalid", error ? "true" : "false"));
-    return Object.values(errors).find(Boolean) || "";
   }
+
+  function localTextError(text) { return Object.values(localTextErrors(text)).find(Boolean) || ""; }
 
   async function requestTextGeometry(object) {
     const text = object.text;
-    textGeometryError = localTextError(text);
-    if (textGeometryError) { textGeometryPending = false; return updateVectorValidation(); }
-    const requestID = ++textGeometryRequest;
-    textGeometryPending = true;
-    textGeometryError = "";
+    const state = textGeometryState(object);
+    const requestID = ++state.requestID;
+    state.pending = false;
+    state.error = localTextError(text);
+    if (state.error) return updateVectorValidation();
+    state.pending = true;
     updateVectorValidation();
     try {
       const response = await fetch("/api/v1/designer/text-geometry", {
@@ -1024,12 +1041,15 @@
       const result = await response.json();
       if (response.status === 401 && token) forgetSession({ focus: true, clearInput: false });
       if (!response.ok) throw new Error(result.error || `Text geometry failed (${response.status})`);
-      if (requestID !== textGeometryRequest || !vectorObjects.some((candidate) => candidate.id === object.id)) return;
+      if (requestID !== state.requestID || !vectorObjects.some((candidate) => candidate === object)) return;
       object.subpaths = result.subpaths;
     } catch (error) {
-      if (requestID === textGeometryRequest) textGeometryError = error.message;
+      if (requestID === state.requestID && vectorObjects.some((candidate) => candidate === object)) state.error = error.message;
     } finally {
-      if (requestID === textGeometryRequest) { textGeometryPending = false; renderVectorEditor(); }
+      if (requestID === state.requestID && vectorObjects.some((candidate) => candidate === object)) {
+        state.pending = false;
+        renderVectorEditor();
+      }
     }
   }
 
