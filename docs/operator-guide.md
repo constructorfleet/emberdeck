@@ -45,7 +45,7 @@ do not replace it.
 
 Select a screenshot to open the full-size image.
 
-![Stored program library filters for narrowing jobs by name and state](assets/screenshots/operator-console-library.png)
+![Stored job row shows its creation time, byte size, and uploaded source](assets/screenshots/operator-console-library.png)
 
 ## Open the designer
 
@@ -230,6 +230,8 @@ profile edits first; after saving a changed profile, review and save the project
 against its new revision before generating.
 
 ![Saved project blocked from generation until it is reviewed against the changed profile](assets/screenshots/designer-stale-profile.png)
+
+![Saved project row shows its profile name, original revision, and Needs review badge](assets/screenshots/designer-project-needs-review.png)
 
 **Generate queued job** creates a normal library program. It does not dispatch
 the job, and it clears any earlier supervision confirmation. Use **View** to

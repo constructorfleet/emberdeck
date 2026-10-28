@@ -215,6 +215,11 @@ async function main() {
     await page.getByLabel('Work area width (mm)').fill('290');
     await page.getByRole('button', { name: 'Save profile' }).click();
     await expect(page.locator('#stale-profile-warning')).toBeVisible();
+    const staleProjectRow = page.locator('#project-list li').filter({ hasText: 'Panel outline' });
+    await expect(staleProjectRow).toContainText('Documented GRBL');
+    await expect(staleProjectRow).toContainText('r1');
+    await expect(staleProjectRow).toContainText('Needs review');
+    await captureElement(page, '#project-list li', 'designer-project-needs-review.png');
     await expect(page.getByRole('button', { name: 'Generate queued job' })).toBeDisabled();
     await captureElement(page, '#project-form', 'designer-stale-profile.png');
     await page.getByRole('button', { name: 'Save project' }).click();
@@ -364,7 +369,10 @@ async function main() {
     await expect(row.locator('.toolpath-profile-bounds')).toHaveCount(1);
     await expect(row.getByRole('checkbox', { name: /Override out_of_bounds bounds review/ })).toBeVisible();
     await captureElement(page, '#job-list .job-item', 'operator-console-uploaded-bounds-review.png');
-    await captureElement(page, '.job-filters', 'operator-console-library.png');
+    await expect(row).toContainText(/created/i);
+    await expect(row).toContainText(/bytes/i);
+    await expect(row).toContainText('Uploaded');
+    await captureElement(page, '#job-list .job-item', 'operator-console-library.png');
 
     await page.locator('#operator-confirmation').check();
     const boundsOverride = row.getByRole('checkbox', { name: /Override .* bounds review/ });
