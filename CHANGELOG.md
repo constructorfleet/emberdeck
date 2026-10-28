@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/constructorfleet/emberdeck/compare/v0.3.0...v0.4.0) (2026-10-28)
+
+
+### Features
+
+* add saved profiles and rectangle engraving workflow ([#17](https://github.com/constructorfleet/emberdeck/issues/17)) ([9637f63](https://github.com/constructorfleet/emberdeck/commit/9637f63967bccf317912bc6ad34c817db8f0313a))
+
 ## [0.3.0](https://github.com/constructorfleet/emberdeck/compare/v0.2.2...v0.3.0) (2026-10-28)
 
 
