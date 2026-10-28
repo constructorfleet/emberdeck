@@ -603,6 +603,7 @@
       checkbox.type = "checkbox";
       checkbox.className = "vector-alignment-select";
       checkbox.checked = selectedVectorObjects.has(object.id);
+      checkbox.dataset.vectorObjectId = object.id;
       checkbox.setAttribute("aria-label", `Select shape ${index + 1} ${objectKind(object)} for alignment`);
       checkbox.addEventListener("change", () => {
         if (checkbox.checked) {
@@ -613,6 +614,9 @@
           if (selectedVectorObject === object.id) selectedVectorObject = [...selectedVectorObjects][0] || vectorObjects[0]?.id || "";
         }
         renderVectorEditor();
+        const nextCheckbox = [...document.querySelectorAll(".vector-alignment-select")]
+          .find((candidate) => candidate.dataset.vectorObjectId === object.id);
+        nextCheckbox?.focus({ preventScroll: true });
       });
       const select = button(`${index + 1}. ${objectKind(object)}`, "vector-select", () => {
         selectedVectorObject = object.id;

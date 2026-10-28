@@ -940,6 +940,11 @@ footer {
   accent-color: var(--accent);
 }
 
+.vector-alignment-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
 .vector-align-controls {
   margin-top: var(--space-3);
   padding: var(--space-3);
