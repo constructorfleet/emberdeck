@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ConstructorFleet/emberdeck/driver"
+	"github.com/ConstructorFleet/emberdeck/toolpath"
 )
 
 const (
@@ -37,13 +38,14 @@ type assignment struct {
 	} `json:"job"`
 }
 type progress struct {
-	JobID           string `json:"job_id"`
-	Lease           string `json:"lease"`
-	State           string `json:"state"`
-	Acked           int    `json:"acked"`
-	Total           int    `json:"total"`
-	Error           string `json:"error,omitempty"`
-	ControllerState string `json:"controller_state,omitempty"`
+	JobID           string              `json:"job_id"`
+	Lease           string              `json:"lease"`
+	State           string              `json:"state"`
+	Acked           int                 `json:"acked"`
+	Total           int                 `json:"total"`
+	Error           string              `json:"error,omitempty"`
+	ControllerState string              `json:"controller_state,omitempty"`
+	Execution       *toolpath.Execution `json:"execution,omitempty"`
 }
 type pollRequest struct {
 	Session      string   `json:"session"`
@@ -61,6 +63,15 @@ type liveState struct {
 	resumeApplied bool
 	resumeSeq     uint64
 	externalHold  bool
+	execution     toolpath.Execution
+	tracker       *toolpath.Tracker
+}
+
+func newLiveState(state, gcode string) *liveState {
+	parsed := toolpath.Parse(gcode)
+	return &liveState{desired: state, tracker: toolpath.NewTracker(parsed), execution: toolpath.Execution{
+		Progress: toolpath.Progress{Total: len(parsed.Segments), Confidence: "unknown"},
+	}}
 }
 
 func (s *liveState) observed(state string) {
@@ -98,6 +109,54 @@ func (s *liveState) applied(command driver.Command) {
 	}
 }
 
+func (s *liveState) observedStatus(report driver.StatusReport) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if report.MachinePosition != nil {
+		position := pathPosition(*report.MachinePosition)
+		s.execution.MachinePosition = &position
+	}
+	if report.WorkPosition != nil {
+		position := pathPosition(*report.WorkPosition)
+		s.execution.WorkPosition = &position
+		s.execution.PositionUnits = "assumed-mm"
+	} else if report.MachinePosition != nil {
+		s.execution.PositionUnits = "controller"
+	}
+	if report.WorkOffset != nil {
+		offset := pathPosition(*report.WorkOffset)
+		s.execution.WorkOffset = &offset
+	}
+	if report.LineNumber != nil {
+		line := *report.LineNumber
+		s.execution.LineNumber = &line
+		s.execution.Progress = s.tracker.UpdateLineNumber(line)
+	} else if report.WorkPosition != nil {
+		s.execution.Progress = s.tracker.Update(toolpath.Point{X: report.WorkPosition.X, Y: report.WorkPosition.Y})
+	} else {
+		s.execution.Progress = s.tracker.Unknown()
+	}
+	if report.WorkPosition != nil || report.MachinePosition != nil || report.LineNumber != nil {
+		s.execution.PositionReportedAt = time.Now().UTC()
+	}
+}
+
+func pathPosition(position driver.Vector) toolpath.Position {
+	return toolpath.Position{X: position.X, Y: position.Y, Z: position.Z, A: position.A}
+}
+
+func (s *liveState) uncertain() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.execution.Progress = s.tracker.Unknown()
+}
+
+func (s *liveState) finished() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.execution.Progress = s.tracker.Finish()
+}
+
 func (s *liveState) reported(acked, total int) progress {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -115,7 +174,31 @@ func (s *liveState) reported(acked, total int) progress {
 			s.externalHold = false
 		}
 	}
-	return progress{State: state, Acked: acked, Total: total, ControllerState: s.controller}
+	execution := cloneExecution(s.execution)
+	return progress{State: state, Acked: acked, Total: total, ControllerState: s.controller, Execution: &execution}
+}
+
+func cloneExecution(source toolpath.Execution) toolpath.Execution {
+	copyPosition := func(source *toolpath.Position) *toolpath.Position {
+		if source == nil {
+			return nil
+		}
+		position := *source
+		return &position
+	}
+	result := source
+	result.MachinePosition = copyPosition(source.MachinePosition)
+	result.WorkPosition = copyPosition(source.WorkPosition)
+	result.WorkOffset = copyPosition(source.WorkOffset)
+	if source.LineNumber != nil {
+		line := *source.LineNumber
+		result.LineNumber = &line
+	}
+	if source.Progress.Active != nil {
+		active := *source.Progress.Active
+		result.Progress.Active = &active
+	}
+	return result
 }
 
 // Run polls the server using one unique session per process. It returns on
@@ -206,13 +289,13 @@ func runJob(ctx context.Context, client *http.Client, endpoint, key, session str
 		commands <- driver.Pause
 		state = "pausing"
 	}
-	live := &liveState{desired: state}
+	live := newLiveState(state, a.Job.GCode)
 	var acked atomic.Int64
 	var totalCount atomic.Int64
 	totalCount.Store(int64(total))
 	streamDone := make(chan error, 1)
 	go func() {
-		streamDone <- driver.StreamControlled(streamCtx, conn, a.Job.GCode, commands, func(x, n int) { totalCount.Store(int64(n)); acked.Store(int64(x)) }, live.observed, live.applied)
+		streamDone <- driver.StreamObserved(streamCtx, conn, a.Job.GCode, commands, func(x, n int) { totalCount.Store(int64(n)); acked.Store(int64(x)) }, live.observed, live.observedStatus, live.applied)
 	}()
 	ticker := time.NewTicker(reportInterval)
 	defer ticker.Stop()
@@ -221,11 +304,14 @@ func runJob(ctx context.Context, client *http.Client, endpoint, key, session str
 		case streamErr := <-streamDone:
 			state := "completed"
 			if streamErr != nil {
+				live.uncertain()
 				if ctx.Err() != nil {
 					state = "canceled"
 				} else {
 					state = "failed"
 				}
+			} else {
+				live.finished()
 			}
 			p := live.reported(int(acked.Load()), int(totalCount.Load()))
 			p.JobID, p.Lease, p.State = a.Job.ID, a.Lease, state
@@ -236,6 +322,7 @@ func runJob(ctx context.Context, client *http.Client, endpoint, key, session str
 		case <-ctx.Done():
 			cancel()
 			<-streamDone
+			live.uncertain()
 			p := live.reported(int(acked.Load()), int(totalCount.Load()))
 			p.JobID, p.Lease, p.State = a.Job.ID, a.Lease, "canceled"
 			return p, nil
@@ -259,7 +346,10 @@ func runJob(ctx context.Context, client *http.Client, endpoint, key, session str
 				case "cancel":
 					cancel()
 					<-streamDone
-					return progress{JobID: a.Job.ID, Lease: a.Lease, State: "canceled", Acked: int(acked.Load()), Total: int(totalCount.Load()), ControllerState: live.reported(int(acked.Load()), int(totalCount.Load())).ControllerState}, nil
+					live.uncertain()
+					p := live.reported(int(acked.Load()), int(totalCount.Load()))
+					p.JobID, p.Lease, p.State = a.Job.ID, a.Lease, "canceled"
+					return p, nil
 				case "pause":
 					sendPause := false
 					live.mu.Lock()

@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -85,6 +86,98 @@ func TestRunFailsClosedOnPollError(t *testing.T) {
 	err := Run(context.Background(), server.URL, "key", "laser", func(context.Context) (io.ReadWriteCloser, error) { called = true; return driver.NewSimulator(), nil })
 	if err == nil || called {
 		t.Fatalf("err=%v connector called=%v", err, called)
+	}
+}
+
+func TestRunReportsPositionCorrelatedPathProgressIndependentOfAckCount(t *testing.T) {
+	positionReported := make(chan struct{}, 1)
+	terminalReported := make(chan map[string]any, 1)
+	var once sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			return
+		}
+		if body["state"] == "completed" {
+			terminalReported <- body
+			io.WriteString(w, `{"command":"idle"}`)
+			return
+		}
+		if execution, ok := body["execution"].(map[string]any); ok {
+			path, _ := execution["path_progress"].(map[string]any)
+			position, _ := execution["work_position"].(map[string]any)
+			if body["acked"] == float64(4) && position["x"] == float64(5) && path["completed"] == float64(0) && path["active"] == float64(0) && path["confidence"] == "estimated" {
+				once.Do(func() { positionReported <- struct{}{} })
+			}
+		}
+		if body["job_id"] == nil {
+			io.WriteString(w, `{"command":"run","lease":"lease-path","job":{"id":"job-path","gcode":"G21 G90\nG0 X0 Y0\nM4 S100\nG1 X10 Y0 F300"}}`)
+			return
+		}
+		io.WriteString(w, `{"command":"run","lease":"lease-path","job":{"id":"job-path"}}`)
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	var phase atomic.Int32
+	err := Run(ctx, server.URL, "key", "laser", func(context.Context) (io.ReadWriteCloser, error) {
+		client, controller := net.Pipe()
+		go func() {
+			defer controller.Close()
+			reader := bufio.NewReader(controller)
+			var line []byte
+			for {
+				b, err := reader.ReadByte()
+				if err != nil {
+					return
+				}
+				if b == '?' {
+					if phase.Load() == 0 {
+						io.WriteString(controller, "<Idle|MPos:0,0,0|WCO:0,0,0>\r\n")
+					} else if phase.Load() == 1 {
+						io.WriteString(controller, "<Run|MPos:5,0,0>\r\n")
+						select {
+						case <-positionReported:
+							phase.Store(2)
+						default:
+						}
+					} else {
+						io.WriteString(controller, "<Idle|MPos:10,0,0>\r\n")
+					}
+					continue
+				}
+				if b == 0x18 {
+					return
+				}
+				if b != '\n' {
+					line = append(line, b)
+					continue
+				}
+				command := string(append(line, b))
+				line = nil
+				if strings.HasPrefix(command, "G1 X10") {
+					phase.Store(1)
+				}
+				if _, err := io.WriteString(controller, "ok\r\n"); err != nil {
+					return
+				}
+			}
+		}()
+		return client, nil
+	})
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	select {
+	case report := <-terminalReported:
+		execution, _ := report["execution"].(map[string]any)
+		path, _ := execution["path_progress"].(map[string]any)
+		if path["confidence"] != "controller_idle" || path["completed"] != float64(1) {
+			t.Fatalf("terminal execution = %#v", report)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("worker did not report terminal completion")
 	}
 }
 

@@ -68,6 +68,11 @@ their implementation status and evidence:
   bounds with an accessible legend. Label estimated, ambiguous, repeated-path,
   interrupted, or unknown execution honestly. Verify wire correlation through
   pause/resume/disconnect and the browser workflow, then regenerate guide images.
+  The initial implementation now parses bounded linear XY G-code, renders a
+  camera-free completed/active/remaining view, and correlates GRBL work position
+  separately from acknowledged lines. The issue remains open for broader motion
+  coverage, machine-bound visualization, and additional interruption/controller
+  validation.
 - [x] [#8: Categorized documentation navigation and UX cleanup](https://github.com/constructorfleet/emberdeck/issues/8).
   Review the deployed documentation and record a content grouping; implement
   categorized navigation and presentation improvements across the site while

@@ -55,7 +55,7 @@ func (s *Simulator) serve() {
 			stateMu.Lock()
 			current := state
 			stateMu.Unlock()
-			if !write(fmt.Sprintf("<%s|MPos:0.000,0.000,0.000|FS:0,0>\r\n", current)) {
+			if !write(fmt.Sprintf("<%s|MPos:0.000,0.000,0.000|FS:0,0|WCO:0.000,0.000,0.000>\r\n", current)) {
 				return
 			}
 		case '!':

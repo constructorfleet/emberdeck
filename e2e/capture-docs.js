@@ -201,15 +201,15 @@ async function main() {
     await designerRow.getByRole('button', { name: /Delete Panel outline\.gcode/ }).click();
     await expect(designerRow).toHaveCount(0);
 
-    const lines = 4000;
+    const lines = 1000;
     const name = 'documented-controller-demo.gcode';
-    const program = `${Array.from({ length: lines }, (_, i) => `G1 X${i % 100} F100`).join('\n')}\n`;
+    const program = `G21\nG90\nG0 X0 Y0\nM4 S100\n${Array.from({ length: lines }, (_, i) => `G1 X${i + 1} Y${Math.floor(i / 50)} F300`).join('\n')}\nM5\n`;
     await page.locator('#job-file').setInputFiles({ name, mimeType: 'text/plain', buffer: Buffer.from(program) });
     await page.locator('#job-name').fill(name);
     await page.getByRole('button', { name: /Add to library/ }).click();
     const row = page.locator('#job-list li').filter({ hasText: name });
     await expect(row).toContainText(/queued/i);
-    await row.getByRole('button', { name: 'View' }).click();
+    await row.getByRole('button', { name: 'View', exact: true }).click();
     await page.locator('#close-program').click();
     await capture(page, 'operator-console-library.png');
 
@@ -217,8 +217,10 @@ async function main() {
     await row.getByRole('button', { name: 'Start' }).click();
     const progress = row.locator('progress');
     await expect.poll(() => progress.evaluate((node) => node.value), { timeout: 15000 }).toBeGreaterThan(0);
-    await row.getByRole('button', { name: 'View' }).click();
+    await row.getByRole('button', { name: 'View', exact: true }).click();
     await expect(page.locator('#program-panel')).toBeVisible();
+    await expect(row.locator('.toolpath-live')).toBeVisible();
+    await expect(row.locator('.toolpath-summary')).toContainText(/estimated/i);
     await capture(page, 'operator-console-running-view.png');
 
     await row.getByRole('button', { name: 'Pause' }).click();
@@ -234,7 +236,7 @@ async function main() {
       if (job) holdReports.push(job.controller_state);
       return holdReports.filter((state) => state === 'Hold:0').length;
     }, { timeout: 5000, intervals: [250] }).toBeGreaterThanOrEqual(2);
-    await row.getByRole('button', { name: 'View' }).click();
+    await row.getByRole('button', { name: 'View', exact: true }).click();
     await capture(page, 'operator-console-paused.png');
 
     await page.setViewportSize({ width: 390, height: 844 });
@@ -245,7 +247,7 @@ async function main() {
     await row.getByRole('button', { name: 'Resume' }).click();
     await expect(page.locator('#operator-confirmation')).not.toBeChecked();
     await expect(row).toContainText(/completed/i, { timeout: 120000 });
-    await row.getByRole('button', { name: 'View' }).click();
+    await row.getByRole('button', { name: 'View', exact: true }).click();
     await capture(page, 'operator-console-completed.png');
 
     page.once('dialog', (dialog) => dialog.accept());

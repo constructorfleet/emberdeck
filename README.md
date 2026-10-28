@@ -21,7 +21,9 @@ bin/emberdeck serve -simulate -data ./data
 ```
 
 Open <http://127.0.0.1:8080>, enter the key, and upload a `.gcode` file. Select the
-simulator, confirm readiness, and start a job. Progress counts acknowledged lines;
+simulator, confirm readiness, and start a job. The console separates acknowledged
+lines from spatial path progress and shows a camera-free preview for supported
+linear XY moves. Position correlation is estimated and assumes GRBL `$13=0`;
 completion requires the controller to report Idle. Cancel is a best-effort
 software stop, not a physical emergency stop.
 
@@ -56,15 +58,15 @@ control and job state.
 ## Available now
 
 - Durable upload, list, program view, deletion, explicit start, confirmed
-  pause/resume, cancellation,
-  line progress, controller completion, and failure reporting.
+  pause/resume, cancellation, separate line and spatial path progress,
+  controller completion, and failure reporting.
 - Live controller status distinguishes pause requests, deceleration, confirmed
   holds, and resumed execution. The same connection and lease span a pause.
 - Declared GRBL profiles, saved rectangle projects, and schema-v2 multi-path
   vector projects with editable rectangle/ellipse/line paths, ordered engraving
   and cutting layers, bounded profile preview, and separate generated jobs for
   review and explicit dispatch. SVG/text import, transforms, raster engraving,
-  live toolpath execution tracking, and driver-adapter configuration remain
+  and driver-adapter configuration remain
   future work; the [operator guide](docs/operator-guide.md) illustrates the
   available controls and calls out the missing UI surfaces.
 - One active job per online driver; assignment leases and unique worker sessions.

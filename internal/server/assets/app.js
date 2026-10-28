@@ -29,6 +29,8 @@
   let vectorOperations = [];
   let selectedVectorObject = "";
   let vectorIDSequence = 0;
+  const toolpathCache = new Map();
+  const toolpathViewports = new Map();
 
   function message(text) {
     notice.textContent = text;
@@ -842,6 +844,14 @@
         progress.setAttribute("aria-label", `${job.acked || 0} of ${job.total || 0} lines acknowledged`);
         info.append(progress);
       }
+      if (active || job.execution) {
+        const toolpathView = document.createElement("section");
+        toolpathView.className = "toolpath-live";
+        toolpathView.dataset.toolpathJob = job.id;
+        toolpathView.setAttribute("aria-label", `Live toolpath for ${job.name}`);
+        toolpathView.textContent = "Loading controller path feedback…";
+        info.append(toolpathView);
+      }
       if (job.error) {
         const failure = document.createElement("span");
         failure.className = "job-error";
@@ -886,6 +896,126 @@
     confirmation.checked = checked;
   }
 
+  function coordinate(value) {
+    if (!Number.isFinite(value)) return "?";
+    return Number(value.toFixed(3)).toString();
+  }
+
+  function renderToolpathView(host, job, path) {
+    host.replaceChildren();
+    const execution = job.execution || {};
+    const progress = execution.path_progress || { completed: 0, total: path.segments.length, confidence: "unknown" };
+    const summary = document.createElement("p");
+    summary.className = "toolpath-summary";
+    summary.textContent = `Path progress: ${progress.completed || 0} of ${progress.total || 0} segments · ${progress.confidence || "unknown"}`;
+    host.append(summary);
+    if (execution.position_units === "assumed-mm") {
+      const assumption = document.createElement("p");
+      assumption.className = "toolpath-caveat";
+      assumption.textContent = "Position match assumes GRBL $13=0 (millimetre reports). Verify this setting. A path estimate does not prove laser output or material processing.";
+      host.append(assumption);
+    } else if (execution.machine_position) {
+      const machine = execution.machine_position;
+      const position = document.createElement("p");
+      position.className = "toolpath-caveat";
+      position.textContent = `Machine position in controller units: X${coordinate(machine.x)} Y${coordinate(machine.y)}. Work-position units or offset are not known, so the head marker is not aligned to this path.`;
+      host.append(position);
+    }
+    if (path.warnings && path.warnings.length) {
+      const warning = document.createElement("p");
+      warning.className = "toolpath-caveat";
+      warning.textContent = `Partial path preview: ${path.warnings.join("; ")}`;
+      host.append(warning);
+    }
+    if (!path.segments.length) {
+      const emptyPath = document.createElement("p");
+      emptyPath.className = "toolpath-caveat";
+      emptyPath.textContent = "No supported 2D linear segments are available to preview. Execution progress is unknown.";
+      host.append(emptyPath);
+      return;
+    }
+
+    const points = path.segments.flatMap((segment) => [segment.start, segment.end]);
+    const workPosition = execution.position_units === "assumed-mm" ? execution.work_position : null;
+    if (workPosition) points.push(workPosition);
+    const xs = points.map((point) => point.x), ys = points.map((point) => point.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+    const span = Math.max(maxX - minX, maxY - minY, 1);
+    const pad = span * 0.08;
+    const fit = { x: minX - pad, y: -maxY - pad, width: maxX - minX + 2 * pad || 1, height: maxY - minY + 2 * pad || 1 };
+    let view = toolpathViewports.get(job.id);
+    if (!view) { view = { ...fit }; toolpathViewports.set(job.id, view); }
+    const controls = document.createElement("div");
+    controls.className = "toolpath-controls";
+    const svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.width} ${view.height}`);
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", `Fitted XY toolpath preview for ${job.name}; completed estimate, active path and remaining paths are shown`);
+    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    svg.classList.add("toolpath-svg");
+    const group = document.createElementNS(svgNS, "g");
+    group.setAttribute("transform", "scale(1 -1)");
+    const activeIndex = Number.isInteger(progress.active) ? progress.active : -1;
+    for (let index = 0; index < path.segments.length; index++) {
+      const segment = path.segments[index];
+      const line = document.createElementNS(svgNS, "line");
+      const stateClass = index < (progress.completed || 0) ? "path-completed" : index === activeIndex ? "path-active" : "path-remaining";
+      line.setAttribute("class", `toolpath-segment ${stateClass} ${segment.rapid ? "path-travel" : "path-motion"} ${segment.laser_on ? "path-laser-on" : "path-laser-off"}`);
+      line.setAttribute("x1", segment.start.x); line.setAttribute("y1", segment.start.y);
+      line.setAttribute("x2", segment.end.x); line.setAttribute("y2", segment.end.y);
+      group.append(line);
+    }
+    if (workPosition) {
+      const head = document.createElementNS(svgNS, "circle");
+      head.setAttribute("class", "toolpath-head");
+      head.setAttribute("cx", workPosition.x); head.setAttribute("cy", workPosition.y);
+      head.setAttribute("r", String(span * 0.012));
+      group.append(head);
+    }
+    svg.append(group);
+    const setView = () => svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.width} ${view.height}`);
+    const zoom = (factor) => {
+      const width = view.width * factor, height = view.height * factor;
+      view.x += (view.width - width) / 2; view.y += (view.height - height) / 2;
+      view.width = width; view.height = height; setView();
+    };
+    controls.append(button("−", "button button-small", () => zoom(1.25), "Zoom out toolpath"));
+    controls.append(button("+", "button button-small", () => zoom(0.8), "Zoom in toolpath"));
+    controls.append(button("Fit", "button button-small", () => { Object.assign(view, fit); setView(); }, "Fit toolpath to view"));
+    let drag = null;
+    svg.addEventListener("pointerdown", (event) => {
+      drag = { x: event.clientX, y: event.clientY };
+      svg.setPointerCapture(event.pointerId);
+    });
+    svg.addEventListener("pointermove", (event) => {
+      if (!drag) return;
+      const rect = svg.getBoundingClientRect();
+      view.x -= (event.clientX - drag.x) * view.width / Math.max(rect.width, 1);
+      view.y -= (event.clientY - drag.y) * view.height / Math.max(rect.height, 1);
+      drag = { x: event.clientX, y: event.clientY }; setView();
+    });
+    svg.addEventListener("pointerup", () => { drag = null; });
+    svg.addEventListener("pointercancel", () => { drag = null; });
+    const legend = document.createElement("p");
+    legend.className = "toolpath-legend";
+    legend.textContent = "Completed estimate · active segment · remaining path · laser-on solid · laser-off travel dashed · head marker where work coordinates are available. Fit uses path bounds; the declared machine envelope is not known for uploaded jobs.";
+    host.append(controls, svg, legend);
+  }
+
+  async function refreshToolpathViews() {
+    for (const job of jobs) {
+      if (!(job.execution || ["running", "pausing", "paused", "resuming", "canceling"].includes(job.state))) continue;
+      const host = Array.from(list.querySelectorAll(".toolpath-live")).find((node) => node.dataset.toolpathJob === job.id);
+      if (!host) continue;
+      try {
+        if (!toolpathCache.has(job.id)) toolpathCache.set(job.id, await api(`/api/v1/jobs/${encodeURIComponent(job.id)}/toolpath`));
+        renderToolpathView(host, job, toolpathCache.get(job.id));
+      } catch (error) {
+        host.textContent = `Toolpath preview unavailable: ${error.message}`;
+      }
+    }
+  }
+
   async function refresh() {
     if (!token || polling) return;
     polling = true;
@@ -897,6 +1027,7 @@
       $("#connection-state").classList.add("connected");
       renderDrivers();
       renderJobs();
+      await refreshToolpathViews();
       await refreshDesigner();
     } catch (error) {
       $("#connection-state").textContent = "Connection failed";

@@ -19,9 +19,21 @@ names are 1–200 bytes. Control bytes other than tabs and line endings are reje
 Uploading stores a program; it does not execute it or certify its machine safety.
 
 `GET /jobs` returns jobs in creation order. `GET /jobs/{id}` returns the uploaded
-program and current state. `DELETE /jobs/{id}` removes a queued or terminal job;
+program, current state, and optional live `execution` telemetry. `GET
+/jobs/{id}/toolpath` returns a derived 2D path for visualization; it does not
+change or validate the uploaded source. `DELETE /jobs/{id}` removes a queued or terminal job;
 a running or canceling job must first stop. These operations persist to the
 private data directory. Run one server per directory; file locking enforces it.
+
+The derived path supports up to 10,000 linear XY segments and a 4 MiB source.
+It interprets G0/G1, G20/G21, G90/G91, G17/G40/G49/G80/G94, and M3/M4/M5.
+Arcs, machine-coordinate moves, work-coordinate-system changes (G54-G59),
+coordinate-offset mutations, unmodeled M-codes, other axes, and unknown motion
+modes are not approximated. The response sets
+`supported:false` for unmodeled motion and includes warnings when a move is
+omitted, such as an initial move whose start position is unknown. This parser
+is a visualization aid; the normal GRBL validator and operator review remain
+separate.
 
 ## Dispatch and monitoring
 
@@ -50,10 +62,31 @@ ready. All pause states retain the same lease and keep the assigned driver busy.
 running, pausing, paused, or resuming work becomes canceling until the worker reports its best-effort stop.
 Network or software cancellation cannot guarantee that a laser has stopped.
 
-Job fields include `state`, `driver_id`, `acked`, `total`, `controller_state`, and
-`error`. Controller state is the last observed GRBL status, not a hardware
-safety guarantee. Progress is
-controller acknowledgment, not a percentage of physical work or a time estimate.
+Job fields include `state`, `driver_id`, `acked`, `total`, `controller_state`,
+optional `execution`, and `error`. Acknowledged-line progress is kept separate
+from path progress; an `ok` receipt never advances the completed-path count.
+`execution` can contain raw machine/work positions, the last work offset,
+position-report time, units, and `path_progress` with completed lower bound,
+active segment, total, and confidence. Confidence is `reported` when an optional
+GRBL `Ln` marker maps uniquely to an N-numbered segment, `estimated` when work
+position matches one parsed segment, `ambiguous` for repeated/overlapping
+matches, and `unknown` when correlation is unavailable. `controller_idle` means
+the worker received fresh final Idle after the full stream and laser-off
+cleanup; it is not proof of laser output or material processing.
+
+Position-based correlation assumes GRBL reports in millimetres (`$13=0`), and
+the UI displays that assumption. The worker does not read or change `$13` or
+other controller settings. If only MPos is reported without a current/cached
+WCO, the UI shows its raw controller-unit position and leaves work-path
+correlation unknown. GRBL may emit WCO intermittently; the worker retains the
+last reported offset. GRBL `Ln` is optional at compile time, and only applies
+when the source contains matching N words. The line marker, when available,
+describes the executing line; it is not inferred from acknowledged commands.
+See the [GRBL status report fields](https://github.com/gnea/grbl/blob/master/doc/markdown/interface.md#real-time-status-reports)
+for its coordinate and line-number limits.
+
+A controller `Idle` receipt drains the planned motion, but none of these values
+prove the beam fired, the material was processed, or a physical machine is safe.
 The worker reports completed only after all lines are accepted and GRBL is Idle.
 A ten second heartbeat expiration or server restart marks active jobs—including paused work—interrupted.
 Interrupted/failed/completed/canceled jobs are terminal; inspect the machine and

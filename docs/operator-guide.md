@@ -123,12 +123,17 @@ existing readiness confirmation and **Start** control to dispatch.
 
 ## Monitor a running program
 
-The job row shows controller-acknowledged lines and a progress bar. This is
-streaming progress; it does not show completed, active, or remaining spatial
-toolpaths, and it does not identify the physical head position. **View** keeps
-the program available while job and driver status continue to refresh.
+The job row shows controller-acknowledged lines separately from the spatial
+toolpath. Open **View** during a supported run to see completed, active, and
+remaining XY segments, laser-off travel, and the latest available work position.
+Use **+**, **−**, **Fit**, or drag the plot to inspect it. The plot fits the
+program geometry; it does not know the physical machine bounds. An estimated
+head position assumes GRBL reports millimetres (`$13=0`), and the UI labels that
+assumption. A repeated or overlapping path can make correlation ambiguous;
+missing coordinates, disconnects, pauses, and restarts can leave progress
+unknown. Acknowledged lines are never treated as proof of completed motion.
 
-![Running program with acknowledged-line progress and its G-code source open; no spatial toolpath is displayed](assets/screenshots/operator-console-running-view.png)
+![Running program with estimated live toolpath, head marker, legend, and G-code source open](assets/screenshots/operator-console-running-view.png)
 
 ## Pause and resume
 
@@ -175,9 +180,11 @@ Regenerate the screenshots from the current console and simulator with
 ## Requested UI that is not available yet
 
 The current designer does not have multi-selection, rotation/alignment, text or
-SVG import, undo/redo, or raster engraving. The console also does not show live
-completed/remaining toolpaths or head position, and it has no driver-adapter or
-importer-plugin configuration screens. Existing plugins are trusted preflight
+SVG import, undo/redo, or raster engraving. Live path correlation currently
+covers supported linear XY moves; arcs and unsupported coordinate modes are
+reported as warnings, and the view does not show declared machine bounds. The
+console also has no driver-adapter or importer-plugin configuration screens.
+Existing plugins are trusted preflight
 processes; they are not machine drivers or file converters. See the [designer
 plan](research/designer-architecture.md),
 [feature roadmap](roadmap.md#feature-requests), and the open requests for
