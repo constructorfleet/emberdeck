@@ -1,30 +1,67 @@
 # Architecture
 
-## Target design
-
 EmberDeck is one Go executable with server, driver, and all-in-one modes. The
-server owns durable job records, assignments, access control, and browser UI.
-A driver owns exactly one controller connection and reports progress over an
-authenticated, versioned HTTP protocol. Remote drivers must use TLS or a trusted
-TLS tunnel. The simulator uses the same dispatch boundary as physical drivers.
+server owns durable jobs, assignments, authentication, and the embedded browser
+console. A worker owns one controller connection per job and reports progress
+over a versioned HTTP polling protocol. One server can manage multiple workers.
 
-The first physical protocol is GRBL 1.1 send/response: send one line, await an
-acknowledgment, and query controller status before declaring physical completion.
-A controller accepting a line is not proof that motion has finished. Software
-stop is best effort; a physical emergency stop and enclosure interlocks remain
-mandatory. Never automatically resume a job after process or connection failure.
+```text
+Browser → HTTP server → durable job library (single-owner file lock)
+                   ↑
+              HTTP polling
+                   ↑
+         Worker → GRBL wire connection → serial / TCP / simulator
+                   
+Server dispatch → versioned preflight plugins → allow / veto
+```
 
-Plugins are separate processes speaking a versioned JSON protocol, avoiding Go
-shared-library ABI and operating system restrictions. Plugins are trusted code,
-not sandboxed. OctoPrint Python plugins are not directly compatible; protocol
-adapters may be implemented later without implying compatibility today.
+## Storage and ownership
+
+Library mutations write and sync a temporary file before replacing jobs.json.
+On Linux/macOS the containing directory is synced after rename, too. A failed
+write does not publish an in-memory change. A directory-sync failure after
+rename disables the API until restart and inspection, because persistence is
+uncertain. Windows flushes the file but lacks directory-sync support in this
+backend; power-loss recovery there is not guaranteed. Keep backups and inspect
+the machine after any unclean shutdown before starting work. A cross-platform OS lock
+prevents concurrent servers from writing the same directory. Back up the data
+directory with the server stopped. Local filesystem semantics are assumed; NFS
+and multi-server high availability have not been qualified. The whole job library
+is currently rewritten per mutation, so very large libraries need future work.
+
+Each driver ID has one live process session. Each assignment has a random lease.
+A worker executes a lease once, reports terminal results idempotently, and stops
+on network failure. The server treats expired leases and restarts as interrupted
+work and never automatically reassigns it. Inspection is required before retry.
+
+## Controller boundary
+
+GRBL 1.1 send/response sends one line and awaits its acknowledgment. A readiness
+status check precedes motion, and a final Idle check precedes completion. Controller
+acceptance is not proof that physical motion has finished. Cancellation attempts
+feed hold and soft reset, then closes the connection. Physical interlocks and an
+emergency stop remain mandatory. No hardware has been qualified yet.
+
+The simulator uses the same byte-stream interface. Simulator success proves the
+software flow, not machine calibration, optics, work envelope, extraction,
+interlocks, fire protection, or serial electrical behavior.
+
+## Plugins and access
+
+Plugins are separate processes speaking bounded versioned JSON. This avoids Go
+shared-library ABI restrictions across operating systems. Plugins are trusted
+code with the server's OS privileges; this is not a sandbox. OctoPrint Python
+plugins are not directly compatible.
+
+Remote workers must use TLS or a trusted TLS tunnel. Operators and workers share
+one key in the initial implementation. Multi-user permissions, separate worker
+credentials, and camera access controls remain on the roadmap.
 
 ## Verification boundaries
 
-HTTP API tests exercise persistence and lifecycle through requests. Driver tests
-use a controller simulator at the wire boundary. Plugin tests execute a real
-fixture process. Browser checks cover operator flows. None qualifies hardware.
-
-## Current implementation
-
-Repository and delivery scaffolding only. See the roadmap for pending work.
+HTTP tests cover persistence, lifecycle, duplicate ownership, and plugin vetoes.
+The distributed integration test crosses real HTTP, worker dispatch, and the
+GRBL simulator for completion and cancellation. Driver tests use wire peers;
+plugin tests execute real child processes; serial tests inject the OS connector.
+Browser verification covers operator flows. CI exercises three native operating
+systems and a Docker smoke test. Physical qualification remains separate.

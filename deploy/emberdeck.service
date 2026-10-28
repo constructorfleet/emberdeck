@@ -1,0 +1,23 @@
+[Unit]
+Description=EmberDeck laser job manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=emberdeck
+Group=emberdeck
+EnvironmentFile=/etc/emberdeck/emberdeck.env
+ExecStart=/usr/local/bin/emberdeck serve -listen 0.0.0.0:8080 -data /var/lib/emberdeck
+Restart=on-failure
+RestartSec=3
+StateDirectory=emberdeck
+StateDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/emberdeck
+
+[Install]
+WantedBy=multi-user.target

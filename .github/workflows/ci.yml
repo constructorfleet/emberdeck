@@ -1,9 +1,13 @@
 name: CI
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -21,6 +25,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
+      - run: python -m pip install -r docs/requirements.txt
       - run: sh scripts/check.sh
         shell: bash
   conventional:
@@ -35,4 +40,6 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
           TITLE: ${{ github.event.pull_request.title }}
-        run: python3 scripts/check-commits.py
+        run: |
+          python3 scripts/check-commits.py
+          python3 scripts/check-docs.py

@@ -3,3 +3,16 @@
 /dist/
 *.tmp
 .DS_Store
+
+/emberdeck
+/emberdeck.exe
+
+/.verification/
+/.venv/
+
+/node_modules/
+/e2e/test-results/
+/playwright-report/
+/test-results/
+
+**/.verification/
