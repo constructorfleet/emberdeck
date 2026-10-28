@@ -130,6 +130,62 @@ func TestRegisteredAdapterExecutesHTTPAssignedJob(t *testing.T) {
 	}
 }
 
+func TestAdapterConnectingAndCancellingStatusesContinueLeasePolling(t *testing.T) {
+	s := openServer(t)
+	remote := httptest.NewServer(s)
+	defer remote.Close()
+	adapter := &sequencedStatusAdapter{inner: simulator.New(), states: []driveradapter.State{driveradapter.StateConnecting, driveradapter.StateCancelling, driveradapter.StateCompleted}}
+	registry := worker.NewAdapterRegistry()
+	if err := registry.Register("adapter-status-sequence", adapter, "simulator-1", nil); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	workerDone := make(chan error, 1)
+	go func() {
+		workerDone <- worker.RunWithAdapterRegistry(ctx, remote.URL, "test-key", "adapter-status-sequence", registry, worker.Options{})
+	}()
+	defer func() {
+		cancel()
+		select {
+		case <-workerDone:
+		case <-time.After(5 * time.Second):
+			t.Error("adapter worker did not stop")
+		}
+	}()
+	await(t, func() bool {
+		w := request(t, s, "GET", "/api/v1/drivers", "", "test-key")
+		return strings.Contains(w.Body.String(), `"id":"adapter-status-sequence"`)
+	})
+	data, _ := json.Marshal(map[string]string{"name": "adapter-status.gcode", "gcode": "G21\nG90\nG1 X10 F100\nM5"})
+	w := request(t, s, "POST", "/api/v1/jobs", string(data), "test-key")
+	var job struct{ ID string }
+	if err := json.Unmarshal(w.Body.Bytes(), &job); err != nil || w.Code != 201 {
+		t.Fatalf("upload: %d %s", w.Code, w.Body.String())
+	}
+	w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"adapter-status-sequence","confirmed":true,"bounds_override":true}`, "test-key")
+	if w.Code != 200 {
+		t.Fatalf("dispatch: %d %s", w.Code, w.Body.String())
+	}
+	await(t, func() bool {
+		w := request(t, s, "GET", "/api/v1/jobs/"+job.ID, "", "test-key")
+		var receipt struct {
+			State string
+			Acked int
+			Total int
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &receipt); err != nil {
+			t.Fatal(err)
+		}
+		return receipt.State == "completed" && receipt.Acked == 4 && receipt.Total == 4
+	})
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if adapter.statusCalls != len(adapter.states) {
+		t.Fatalf("adapter Status calls = %d, want %d", adapter.statusCalls, len(adapter.states))
+	}
+}
+
 func TestRegisteredAdapterFailuresFailLeaseWithoutReplay(t *testing.T) {
 	for _, failurePoint := range []string{"start", "status"} {
 		t.Run(failurePoint, func(t *testing.T) {
@@ -217,6 +273,47 @@ func (a *failingAdapter) Configure(ctx context.Context, deviceID string, config 
 type failingSession struct {
 	driveradapter.ControllerSession
 	adapter *failingAdapter
+}
+
+type sequencedStatusAdapter struct {
+	inner       *simulator.Adapter
+	states      []driveradapter.State
+	mu          sync.Mutex
+	statusCalls int
+}
+
+func (a *sequencedStatusAdapter) Manifest() driveradapter.Manifest { return a.inner.Manifest() }
+func (a *sequencedStatusAdapter) Discover(ctx context.Context) ([]driveradapter.Device, error) {
+	return a.inner.Discover(ctx)
+}
+func (a *sequencedStatusAdapter) Configure(ctx context.Context, deviceID string, config json.RawMessage) (driveradapter.ControllerSession, error) {
+	session, err := a.inner.Configure(ctx, deviceID, config)
+	if err != nil {
+		return nil, err
+	}
+	return &sequencedStatusSession{ControllerSession: session, adapter: a}, nil
+}
+
+type sequencedStatusSession struct {
+	driveradapter.ControllerSession
+	adapter *sequencedStatusAdapter
+}
+
+func (s *sequencedStatusSession) Status(ctx context.Context) (driveradapter.Status, error) {
+	status, err := s.ControllerSession.Status(ctx)
+	if err != nil {
+		return status, err
+	}
+	s.adapter.mu.Lock()
+	defer s.adapter.mu.Unlock()
+	if s.adapter.statusCalls < len(s.adapter.states) {
+		status.State = s.adapter.states[s.adapter.statusCalls]
+		s.adapter.statusCalls++
+		if status.State != driveradapter.StateCompleted {
+			status.ControllerState = "Run"
+		}
+	}
+	return status, nil
 }
 
 func (s *failingSession) Start(ctx context.Context, assignment driveradapter.Assignment) error {

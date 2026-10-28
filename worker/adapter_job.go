@@ -51,11 +51,16 @@ func runAdapterJob(ctx context.Context, client *http.Client, endpoint, key, sess
 			p.State = "failed"
 			p.Error = "adapter reported " + string(status.State)
 			return p, nil
-		case driveradapter.StateRunning, driveradapter.StatePaused, driveradapter.StateConnecting, driveradapter.StateCancelling:
+		case driveradapter.StateRunning, driveradapter.StateConnecting, driveradapter.StateCancelling:
+			// The HTTP lease API has no connecting/cancelling progress state.
+			// Keep the lease live with running until the adapter reports a
+			// server-supported state or a terminal receipt.
+			p.State = "running"
+		case driveradapter.StatePaused:
+			p.State = "paused"
 		default:
 			return adapterFailure(a, fmt.Sprintf("adapter Status returned invalid execution state %q", status.State), total), nil
 		}
-		p.State = string(status.State)
 		var response assignment
 		err := post(ctx, client, endpoint, key, report.poll(sessionID, &p), &response)
 		if err != nil {
