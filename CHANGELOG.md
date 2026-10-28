@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/constructorfleet/emberdeck/compare/v0.2.0...v0.2.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* preserve pause and resume through final controller drain ([#9](https://github.com/constructorfleet/emberdeck/issues/9)) ([a8ee078](https://github.com/constructorfleet/emberdeck/commit/a8ee0784807d0372208af60bef53adc854c1e711))
+
 ## [0.2.0](https://github.com/constructorfleet/emberdeck/compare/v0.1.0...v0.2.0) (2026-10-28)
 
 
