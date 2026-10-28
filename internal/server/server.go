@@ -22,16 +22,17 @@ import (
 
 // Job is a durable record. Gcode is the exact uploaded machine program.
 type Job struct {
-	DriverID string    `json:"driver_id,omitempty"`
-	Lease    string    `json:"lease,omitempty"`
-	Acked    int       `json:"acked"`
-	Total    int       `json:"total"`
-	Error    string    `json:"error,omitempty"`
-	ID       string    `json:"id"`
-	Name     string    `json:"name"`
-	Gcode    string    `json:"gcode"`
-	State    string    `json:"state"`
-	Created  time.Time `json:"created"`
+	ControllerState string    `json:"controller_state,omitempty"`
+	DriverID        string    `json:"driver_id,omitempty"`
+	Lease           string    `json:"lease,omitempty"`
+	Acked           int       `json:"acked"`
+	Total           int       `json:"total"`
+	Error           string    `json:"error,omitempty"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Gcode           string    `json:"gcode"`
+	State           string    `json:"state"`
+	Created         time.Time `json:"created"`
 }
 
 // Server serializes durable mutations before acknowledging API requests.
@@ -89,6 +90,8 @@ func Open(dir, key string) (*Server, error) {
 	s.mux.HandleFunc("POST /api/v1/drivers/{id}/poll", s.pollDriver)
 	s.mux.HandleFunc("POST /api/v1/jobs/{id}/start", s.startJob)
 	s.mux.HandleFunc("POST /api/v1/jobs/{id}/cancel", s.cancelJob)
+	s.mux.HandleFunc("POST /api/v1/jobs/{id}/pause", s.pauseJob)
+	s.mux.HandleFunc("POST /api/v1/jobs/{id}/resume", s.resumeJob)
 	s.mux.HandleFunc("POST /api/v1/jobs", s.upload)
 	s.mux.HandleFunc("GET /api/v1/jobs", s.list)
 	s.mux.HandleFunc("GET /api/v1/jobs/{id}", s.get)
@@ -252,7 +255,7 @@ func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "job not found")
 		return
 	}
-	if s.jobs[id].State == "running" || s.jobs[id].State == "canceling" {
+	if activeJob(s.jobs[id].State) {
 		fail(w, 409, "cancel active job before deleting")
 		return
 	}

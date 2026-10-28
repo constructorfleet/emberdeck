@@ -16,10 +16,12 @@ var driverName = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
 // Driver describes an online worker. Sessions prevent duplicate worker ownership.
 type Driver struct {
-	ID       string    `json:"id"`
-	LastSeen time.Time `json:"last_seen"`
-	Busy     bool      `json:"busy"`
-	Session  string    `json:"-"`
+	Capabilities    []string  `json:"capabilities,omitempty"`
+	ControllerState string    `json:"controller_state,omitempty"`
+	ID              string    `json:"id"`
+	LastSeen        time.Time `json:"last_seen"`
+	Busy            bool      `json:"busy"`
+	Session         string    `json:"-"`
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -39,7 +41,7 @@ func (s *Server) recoverInterrupted() error {
 	jobs := s.copyJobs()
 	changed := false
 	for id, j := range jobs {
-		if j.State == "running" || j.State == "canceling" {
+		if activeJob(j.State) {
 			j.State = "interrupted"
 			j.Error = "server restarted; inspect machine before creating a new job"
 			j.Lease = ""
@@ -61,7 +63,7 @@ func (s *Server) expire() error {
 	for id, d := range s.drivers {
 		if time.Since(d.LastSeen) > driverTTL {
 			for jid, j := range jobs {
-				if j.DriverID == id && (j.State == "running" || j.State == "canceling") {
+				if j.DriverID == id && activeJob(j.State) {
 					j.State = "interrupted"
 					j.Error = "driver heartbeat expired; inspect machine"
 					j.Lease = ""
@@ -164,7 +166,7 @@ func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
 	switch j.State {
 	case "queued":
 		j.State = "canceled"
-	case "running", "canceling":
+	case "running", "pausing", "paused", "resuming", "canceling":
 		j.State = "canceling"
 	default:
 		fail(w, 409, "job is already terminal")
@@ -185,13 +187,15 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Session string `json:"session"`
-		JobID   string `json:"job_id"`
-		Lease   string `json:"lease"`
-		State   string `json:"state"`
-		Acked   int    `json:"acked"`
-		Total   int    `json:"total"`
-		Error   string `json:"error"`
+		Capabilities    []string `json:"capabilities"`
+		ControllerState string   `json:"controller_state"`
+		Session         string   `json:"session"`
+		JobID           string   `json:"job_id"`
+		Lease           string   `json:"lease"`
+		State           string   `json:"state"`
+		Acked           int      `json:"acked"`
+		Total           int      `json:"total"`
+		Error           string   `json:"error"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -211,6 +215,22 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "driver ID already owned by another session")
 		return
 	}
+	if len(in.Capabilities) > 16 || len(in.ControllerState) > 32 {
+		fail(w, 400, "invalid controller metadata")
+		return
+	}
+	for _, capability := range in.Capabilities {
+		if !driverName.MatchString(capability) {
+			fail(w, 400, "invalid driver capability")
+			return
+		}
+	}
+	if in.Capabilities != nil {
+		d.Capabilities = append([]string(nil), in.Capabilities...)
+	}
+	if in.ControllerState != "" {
+		d.ControllerState = in.ControllerState
+	}
 	d.ID = id
 	d.Session = in.Session
 	d.LastSeen = time.Now().UTC()
@@ -220,7 +240,7 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 			fail(w, 409, "stale or invalid job lease")
 			return
 		}
-		if j.State != "running" && j.State != "canceling" {
+		if !activeJob(j.State) {
 			// Repeated terminal receipts are idempotent after response loss.
 			if j.State != in.State {
 				fail(w, 409, "job is already terminal")
@@ -232,9 +252,25 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			switch in.State {
+			case "pausing", "resuming":
+				if !hasCapability(d, "pause_resume") {
+					fail(w, 400, "worker does not support pause and resume")
+					return
+				}
 			case "running":
+				if j.State == "resuming" && (in.ControllerState == "Run" || in.ControllerState == "Idle") {
+					j.State = "running"
+				}
+			case "paused":
+				if !hasCapability(d, "pause_resume") || (in.ControllerState != "Hold:0" && in.ControllerState != "Idle") {
+					fail(w, 400, "paused requires confirmed controller hold or Idle")
+					return
+				}
+				if j.State != "canceling" && j.State != "resuming" {
+					j.State = "paused"
+				}
 			case "completed":
-				if in.Total == 0 || in.Acked != in.Total {
+				if in.Total == 0 || in.Acked != in.Total || (hasCapability(d, "pause_resume") && in.ControllerState != "Idle") {
 					fail(w, 409, "completion requires all lines acknowledged and controller Idle")
 					return
 				}
@@ -251,6 +287,7 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 				fail(w, 400, "invalid worker state")
 				return
 			}
+			j.ControllerState = in.ControllerState
 			j.Acked = in.Acked
 			j.Total = in.Total
 			j.Error = in.Error
@@ -267,12 +304,17 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 	}
 	d.Busy = false
 	for _, j := range s.jobs {
-		if j.DriverID == id && (j.State == "running" || j.State == "canceling") {
+		if j.DriverID == id && activeJob(j.State) {
 			d.Busy = true
 			s.drivers[id] = d
 			command := "run"
-			if j.State == "canceling" {
+			switch j.State {
+			case "canceling":
 				command = "cancel"
+			case "pausing", "paused":
+				command = "pause"
+			case "resuming":
+				command = "resume"
 			}
 			respond(w, 200, map[string]any{"command": command, "job": j, "lease": j.Lease})
 			return
