@@ -141,11 +141,11 @@ grouped_pages = [name for group in groups.values() for name in group]
 if set(grouped_pages) != set(pages) or len(grouped_pages) != len(pages):
     raise SystemExit(f'Documentation navigation must include every page exactly once: pages={sorted(pages)}, grouped={sorted(grouped_pages)}')
 def make_nav(page_name):
-    result = '<a class="skip-link" href="#main-content">Skip to content</a><nav aria-label="Documentation"><a class="brand" href="index.html">EmberDeck</a><span class="version">v' + escape(version) + '</span>'
+    result = '<a class="skip-link" href="#main-content">Skip to content</a><nav aria-label="Documentation"><div class="nav-inner"><a class="brand" href="index.html">EmberDeck</a><span class="version">v' + escape(version) + '</span><details class="mobile-menu" name="docs-nav-mobile" open><summary>Menu</summary></details><div class="nav-groups">'
     for label, names in groups.items():
         selected_name = next((name for name in names if name == page_name), None)
         current_title = page_title(selected_name) if selected_name else ''
-        result += '<details><summary><span>' + escape(label) + '</span>'
+        result += '<details name="docs-nav"><summary><span>' + escape(label) + '</span>'
         if current_title:
             result += '<span class="sr-only">Current page: </span><span class="current-page">' + escape(current_title) + '</span>'
         result += '</summary><ul>'
@@ -154,8 +154,77 @@ def make_nav(page_name):
             title = page_title(name)
             result += '<li><a href="' + name + '.html"' + current + '>' + escape(title) + '</a></li>'
         result += '</ul></details>'
-    return result + '</nav>'
+    return result + '</div></div></nav>'
 style = '''*{box-sizing:border-box}body{margin:0;background:#10161e;color:#dae3ec;font:16px/1.7 system-ui,-apple-system,sans-serif}a{color:#ffb171;text-underline-offset:.18em}a:hover{color:#ffd0a4}a:focus-visible,summary:focus-visible{outline:3px solid #ffd18f;outline-offset:3px;border-radius:3px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.skip-link{position:absolute;left:1rem;top:-5rem;z-index:10;padding:.65rem 1rem;background:#fff;color:#10161e;border-radius:4px}.skip-link:focus{top:1rem}nav{position:relative;z-index:2;display:flex;flex-wrap:wrap;justify-content:space-between;gap:.75rem;padding:.8rem max(1rem,4vw);background:#1a2532;align-items:center;border-bottom:1px solid #435264}nav .brand{font-weight:800;font-size:1.3rem;text-decoration:none;color:#fff}nav .version{color:#b6c4d2;font-size:.9rem}nav details{position:relative;min-width:0}nav summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:.4rem;cursor:pointer;list-style:none;padding:.5rem .7rem;border-radius:4px;font-weight:650;color:#eef4fa}nav summary::-webkit-details-marker{display:none}nav summary::after{content:"▾";margin-left:.15em;color:#ffb171}.current-page{font-size:.76rem;color:#ffb171;font-weight:500}nav details[open] summary{background:#2a3949}nav ul{position:absolute;top:100%;right:0;min-width:15rem;margin:.3rem 0 0;padding:.4rem;list-style:none;background:#1a2532;border:1px solid #536579;border-radius:6px;box-shadow:0 8px 24px #0008}nav li a{display:block;padding:.45rem .65rem;border-radius:3px;text-decoration:none}nav li a:hover,nav li a[aria-current="page"]{background:#304256;color:#fff}nav li a[aria-current="page"]{box-shadow:inset 3px 0 #ffb171;font-weight:700}main{max-width:78ch;margin:2.5rem auto;padding:0 1.5rem;overflow-wrap:anywhere}h1{font-size:clamp(2rem,4vw,2.7rem);margin-top:0}h2{margin-top:2.5rem}h1,h2,h3{line-height:1.25;color:#fff}p,li{max-width:75ch}pre{overflow:auto;background:#1a2532;padding:1.2rem;border-radius:8px;border:1px solid #435264}code{font-size:.9em;overflow-wrap:anywhere}img{display:block;max-width:100%;height:auto;border:1px solid #536579;border-radius:8px;margin:1.2rem 0}table{display:block;overflow-x:auto;border-collapse:collapse;max-width:100%;width:max-content}td,th{padding:.6rem;border:1px solid #435264;text-align:left}footer{margin:3rem 0;border-top:1px solid #435264;padding-top:1rem;color:#b6c4d2}@media(max-width:740px){nav{display:grid;grid-template-columns:1fr auto;gap:.3rem .4rem;padding:.7rem 1rem}nav .brand{grid-column:1;grid-row:1}nav .version{grid-column:2;grid-row:1;margin:0;text-align:right}nav details{grid-column:1/-1;min-width:0}nav summary{padding:.6rem .45rem;font-size:.92rem;flex-wrap:wrap;gap:0 .35rem}nav details[open]{grid-column:1/-1}nav ul{position:static;min-width:0;margin:.2rem 0 .5rem;box-shadow:none}main{margin:1.75rem auto;padding:0 1rem}pre{padding:.85rem}img{margin:.9rem 0}}'''
+
+nav_style = '''
+nav{display:block;padding:0;background:#1a2532}
+.nav-inner{display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;align-items:center;gap:.25rem 1rem;width:100%;max-width:78ch;margin:0 auto;padding:.55rem 1.5rem}
+nav .brand{grid-column:1;grid-row:1;font-size:1.3rem}
+nav .version{grid-column:2;grid-row:1}
+.mobile-menu{display:contents}.mobile-menu>summary{display:none}
+.nav-groups{grid-column:1/-1;grid-row:2;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.2rem;align-items:start}
+nav summary{align-items:baseline;gap:.2rem .35rem;padding:.4rem .35rem}
+.current-page{max-width:11ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nav-groups>details>ul{position:absolute;z-index:3;top:100%;left:0;right:auto;width:max-content;min-width:min(15rem,calc(100vw - 2rem));max-width:calc(100vw - 2rem)}
+.nav-groups>details:last-child>ul{left:auto;right:0}
+@media(max-width:980px){
+ .nav-inner{grid-template-columns:minmax(0,1fr) auto auto;grid-template-rows:auto;gap:.4rem .65rem;padding:.5rem 1rem}
+ nav .brand{grid-column:1;grid-row:1;font-size:1.2rem}nav .version{grid-column:2;grid-row:1}
+ .mobile-menu{display:contents}.mobile-menu>summary{display:flex;grid-column:3;grid-row:1;align-items:center;padding:.5rem .65rem}
+ .mobile-menu>summary::-webkit-details-marker{display:none}.mobile-menu>summary::after{content:"▾";margin-left:.45rem;color:#ffb171}
+ .nav-groups{display:none;grid-column:1/-1;grid-row:2;grid-template-columns:minmax(0,1fr);gap:.1rem;align-items:stretch}
+  .mobile-menu[open]~.nav-groups{display:grid}
+ .nav-groups>details{position:static;grid-column:auto;width:100%}
+ .nav-groups>details>summary{width:100%;padding:.55rem .5rem}
+ .nav-groups>details>ul{position:static;width:auto;min-width:0;max-width:100%;margin:.15rem 0 .4rem;box-shadow:none}
+ main{margin:1.75rem auto;padding:0 1rem}pre{padding:.85rem}img{margin:.9rem 0}
+}
+'''
+
+nav_script = '''
+(() => {
+  const nav = document.querySelector('nav[aria-label="Documentation"]');
+  if (!nav) return;
+  const groups = [...nav.querySelectorAll('.nav-groups > details')];
+  const mobile = nav.querySelector('.mobile-menu');
+  const navGroups = nav.querySelector('.nav-groups');
+  const compact = window.matchMedia('(max-width: 980px)');
+  const syncMobileDisclosure = () => { mobile.open = !compact.matches; };
+  syncMobileDisclosure();
+  compact.addEventListener('change', syncMobileDisclosure);
+  const closeGroups = (except) => groups.forEach((group) => { if (group !== except) group.open = false; });
+  nav.addEventListener('toggle', (event) => {
+    const group = event.target;
+    if (groups.includes(group) && group.open) closeGroups(group);
+  }, true);
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    const group = groups.find((item) => item.open && item.contains(document.activeElement));
+    if (group) {
+      event.preventDefault();
+      group.open = false;
+      group.querySelector('summary').focus();
+      return;
+    }
+    if (mobile?.open && (mobile.contains(document.activeElement) || navGroups.contains(document.activeElement))) {
+      event.preventDefault();
+      mobile.open = false;
+      mobile.querySelector('summary').focus();
+    }
+  });
+  document.addEventListener('click', (event) => {
+    const open = groups.find((group) => group.open);
+    if (open && !open.contains(event.target)) open.open = false;
+    if (mobile?.open && !mobile.contains(event.target) && !navGroups.contains(event.target)) mobile.open = false;
+  });
+  document.addEventListener('focusin', (event) => {
+    const open = groups.find((group) => group.open);
+    if (open && !open.contains(event.target)) open.open = false;
+    if (mobile?.open && !mobile.contains(event.target) && !navGroups.contains(event.target)) mobile.open = false;
+  });
+})();
+'''
 def render_page(name, body, page_name):
     title = page_title(name) + ' · EmberDeck docs'
     description = page_descriptions[name]
@@ -171,11 +240,11 @@ def render_page(name, body, page_name):
         '<meta property="og:image" content="' + escape(site_base_url + og_image_path) + '">'
         '<link rel="canonical" href="' + escape(canonical) + '">'
         '<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">'
-        '<style>' + style + '</style></head>'
+        '<style>' + style + nav_style + '</style></head>'
     )
     nav = make_nav(page_name)
     footer = '<footer>Documentation for v' + escape(version) + ' · <a href="https://github.com/constructorfleet/emberdeck/tree/' + revision + '">Release source</a> · <a href="LICENSE.txt">AGPL-3.0</a></footer>'
-    return head + '<body>' + nav + '<main id="main-content" tabindex="-1">' + body + footer + '</main></body></html>'
+    return head + '<body>' + nav + '<main id="main-content" tabindex="-1">' + body + footer + '</main><script>' + nav_script + '</script></body></html>'
 
 
 for name, text in pages.items():

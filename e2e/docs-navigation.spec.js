@@ -62,10 +62,10 @@ test('rendered documentation has grouped, current, keyboard accessible navigatio
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', `https://constructorfleet.github.io/emberdeck/${pageName}`);
     await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', 'assets/favicon.svg');
     const currentPageName = await page.locator('nav a[aria-current="page"]').innerText();
-    const currentSummary = page.locator('nav details:has(a[aria-current="page"]) > summary');
+    const currentSummary = page.locator('nav .nav-groups > details:has(a[aria-current="page"]) > summary');
     await expect(currentSummary).toHaveAccessibleName(new RegExp(`Current page: ${currentPageName}`));
     for (const [label, links] of Object.entries(expectedGroups)) {
-      const group = page.locator('nav details').filter({ has: page.getByText(label, { exact: true }) });
+      const group = page.locator('nav .nav-groups > details').filter({ has: page.getByText(label, { exact: true }) });
       await expect(group.locator('summary')).toContainText(label);
       await group.locator('summary').click();
       for (const [link, href] of links) await expect(group.getByRole('link', { name: link, exact: true })).toHaveAttribute('href', href);
@@ -81,9 +81,25 @@ test('rendered documentation has grouped, current, keyboard accessible navigatio
     }
     await expect.poll(() => page.locator('img').evaluateAll((nodes) => nodes.every((image) => image.complete && image.naturalWidth > 0))).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${pageName} fits desktop`).toBe(true);
-    for (const width of [1024, 768, 721, 720, 681, 390]) {
+    for (const width of [1920, 1600, 1440, 1280, 1024, 900, 800, 768, 721, 720, 681, 390, 375, 320]) {
       await page.setViewportSize({ width, height: 900 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${pageName} fits ${width}px`).toBe(true);
+      if (pageName === 'operator-guide.html') {
+        const mobileMenu = page.locator('nav .mobile-menu');
+        if (width <= 980) await mobileMenu.locator('summary').click();
+        for (const group of await page.locator('nav .nav-groups > details').all()) {
+          await group.locator('summary').click();
+          const bounds = await group.locator('ul').evaluate((menu) => {
+            const rect = menu.getBoundingClientRect();
+            return { left: rect.left, right: rect.right, width: rect.width, viewport: innerWidth };
+          });
+          expect(bounds.width, `${pageName} menu is visible at ${width}px`).toBeGreaterThan(0);
+          expect(bounds.left, `${pageName} menu left edge at ${width}px`).toBeGreaterThanOrEqual(0);
+          expect(bounds.right, `${pageName} menu right edge at ${width}px`).toBeLessThanOrEqual(bounds.viewport);
+          await group.locator('summary').click();
+        }
+        if (width <= 980) await mobileMenu.locator('summary').click();
+      }
       if (width === 768) {
         await page.locator('nav').evaluate((nav) => { nav.style.fontSize = '20px'; });
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${pageName} fits 768px with larger navigation text`).toBe(true);
@@ -91,6 +107,18 @@ test('rendered documentation has grouped, current, keyboard accessible navigatio
       }
     }
     await page.setViewportSize({ width: 1440, height: 1000 });
+
+    await page.setViewportSize({ width: 1920, height: 1000 });
+    const contentBounds = await page.locator('main').evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      return { left: rect.left, right: rect.right };
+    });
+    const navBounds = await page.locator('nav .nav-inner').evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      return { left: rect.left, right: rect.right };
+    });
+    expect(Math.abs(navBounds.left - contentBounds.left), `${pageName} nav aligns left at 1920px`).toBeLessThanOrEqual(1);
+    expect(Math.abs(navBounds.right - contentBounds.right), `${pageName} nav aligns right at 1920px`).toBeLessThanOrEqual(1);
 
     await page.close();
   }
@@ -103,23 +131,43 @@ test('rendered documentation has grouped, current, keyboard accessible navigatio
   await keyboard.keyboard.press('Tab');
   await expect(keyboard.getByRole('link', { name: 'EmberDeck' })).toBeFocused();
   await keyboard.keyboard.press('Tab');
-  const menu = keyboard.locator('nav details').first();
+  const menu = keyboard.locator('nav .nav-groups > details').first();
   await expect(menu.locator('summary')).toBeFocused();
   await keyboard.keyboard.press('Enter');
   await expect(menu).toHaveAttribute('open', '');
   expect(await menu.locator('summary').evaluate((node) => getComputedStyle(node).outlineStyle)).not.toBe('none');
+  const secondMenu = keyboard.locator('nav .nav-groups > details').nth(1);
+  await secondMenu.locator('summary').click();
+  await expect(secondMenu).toHaveAttribute('open', '');
+  await expect(menu).not.toHaveAttribute('open', '');
+  await keyboard.keyboard.press('Escape');
+  await expect(secondMenu).not.toHaveAttribute('open', '');
+  await expect(secondMenu.locator('summary')).toBeFocused();
+  await secondMenu.locator('summary').click();
+  await keyboard.locator('footer').click({ position: { x: 5, y: 5 } });
+  await expect(secondMenu).not.toHaveAttribute('open', '');
+  await secondMenu.locator('summary').focus();
+  await keyboard.keyboard.press('Enter');
+  await keyboard.locator('nav .brand').focus();
+  await expect(secondMenu).not.toHaveAttribute('open', '');
   await keyboard.goto(pathToFileURL(path.join(docs, 'operator-guide.html')).href);
   await keyboard.getByRole('link', { name: 'Skip to content' }).focus();
   await keyboard.keyboard.press('Enter');
   await expect(keyboard.locator('#main-content')).toBeFocused();
 
-  const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const mobile = await browser.newPage({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
   await mobile.goto(pathToFileURL(path.join(docs, 'operator-guide.html')).href);
   expect(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await expect(mobile.locator('nav details')).toHaveCount(4);
-  await mobile.locator('nav summary').nth(3).tap();
-  await expect(mobile.locator('nav details').nth(3)).toHaveAttribute('open', '');
-  await expect(mobile.locator('nav details').nth(3).getByRole('link', { name: 'API route index' })).toBeVisible();
+  expect(await mobile.locator('nav').evaluate((nav) => nav.getBoundingClientRect().height), 'closed mobile navigation stays compact').toBeLessThanOrEqual(80);
+  const mobileMenu = mobile.locator('nav .mobile-menu');
+  await expect(mobileMenu.locator('summary')).toHaveText('Menu');
+  await mobileMenu.locator('summary').tap();
+  await expect(mobileMenu).toHaveAttribute('open', '');
+  await expect(mobile.locator('nav .nav-groups > details')).toHaveCount(4);
+  const mobileReference = mobile.locator('nav .nav-groups > details').nth(3);
+  await mobileReference.locator('summary').tap();
+  await expect(mobileReference.getByRole('link', { name: 'API route index' })).toBeVisible();
+  await expect(mobile.locator('nav a[aria-current="page"]')).toHaveCount(1);
   expect(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
