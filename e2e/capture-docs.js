@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { chromium, expect } = require('@playwright/test');
 
 const root = path.resolve(__dirname, '..');
@@ -43,6 +44,30 @@ async function stopServer(child) {
 
 async function capture(page, name) {
   await page.screenshot({ path: path.join(screenshotDir, name), fullPage: true });
+}
+
+async function captureDocumentationNavigation(browser) {
+  const python = process.env.PYTHON || 'python3';
+  const result = spawnSync(python, ['scripts/build-docs.py'], { cwd: root, stdio: 'inherit' });
+  if (result.status !== 0) throw new Error('Could not render documentation for navigation screenshots');
+  const guide = pathToFileURL(path.join(root, 'dist/docs/operator-guide.html')).href;
+
+  for (const [name, width, height, isMobile] of [
+    ['desktop', 1440, 1000, false],
+    ['mobile', 390, 844, true],
+  ]) {
+    const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1, isMobile, hasTouch: isMobile });
+    await page.goto(guide);
+    await expect(page.getByRole('navigation', { name: 'Documentation' })).toBeVisible();
+    await expect(page.locator('nav a[aria-current="page"]')).toHaveAttribute('href', 'operator-guide.html');
+    const firstMenu = page.locator('nav summary').first();
+    if (isMobile) await firstMenu.tap();
+    else await firstMenu.click();
+    await expect(page.locator('nav details').first()).toHaveAttribute('open', '');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: path.join(screenshotDir, `docs-navigation-after-${name}.png`) });
+    await page.close();
+  }
 }
 
 async function main() {
@@ -141,6 +166,7 @@ async function main() {
     await expect(canceledRow.getByRole('button', { name: 'Delete' })).toBeVisible();
     await canceledRow.getByRole('button', { name: 'View' }).click();
     await capture(page, 'operator-console-canceled.png');
+    await captureDocumentationNavigation(browser);
     await context.close();
   } finally {
     if (browser) await browser.close();
