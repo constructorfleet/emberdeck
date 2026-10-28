@@ -12,6 +12,7 @@
 typedef struct {
     char job_id[ED_WORKER_JOB_ID_BYTES];
     char lease[ED_WORKER_LEASE_BYTES];
+    size_t total;
     ed_manifest content;
 } ed_worker_assignment;
 
@@ -29,6 +30,24 @@ typedef struct {
     char controller_state[ED_WORKER_CONTROLLER_STATE_BYTES];
     char error[ED_WORKER_ERROR_BYTES];
 } ed_terminal_receipt;
+
+/* Exact terminal request identity and payload retained until the server
+ * acknowledges it. A platform backend supplies durable storage. */
+typedef struct {
+    char session[ED_WORKER_SESSION_BYTES];
+    char job_id[ED_WORKER_JOB_ID_BYTES];
+    char lease[ED_WORKER_LEASE_BYTES];
+    ed_terminal_receipt receipt;
+} ed_worker_saved_receipt;
+
+typedef struct {
+    void *context;
+    /* load sets present to 0 or 1. save must durably replace the exact record
+     * before returning success; clear must durably remove it. */
+    int (*load)(void *context, ed_worker_saved_receipt *receipt, int *present);
+    int (*save)(void *context, const ed_worker_saved_receipt *receipt);
+    int (*clear)(void *context);
+} ed_worker_receipt_store;
 
 typedef enum { ED_ACTIVE_CONTINUE = 0, ED_ACTIVE_CANCEL = 1 } ed_active_command;
 typedef struct {
@@ -80,6 +99,7 @@ typedef struct {
     ed_http_worker_adapter http;
     ed_controller_adapter controller;
     ed_storage storage;
+    ed_worker_receipt_store receipt_store;
 } ed_worker_adapters;
 
 typedef enum {
@@ -96,9 +116,10 @@ typedef struct {
     size_t total;
 } ed_worker_result;
 
-/* Runs one fresh session and at most one assigned lease. Content is staged and
- * verified before the controller adapter receives the handle. No retry
- * persistence is provided; all exits close the session. */
+/* Retries a saved terminal receipt before polling for work. Once acknowledged,
+ * polling continues on that receipt's session; otherwise this opens a fresh
+ * session. At most one assignment is run. Content is staged and verified
+ * before controller access. All exits close local session state. */
 ed_result ed_worker_run_one(const ed_worker_adapters *adapters,
                             ed_worker_result *result);
 

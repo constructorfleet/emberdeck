@@ -57,6 +57,23 @@ type workerJob struct {
 	Content          *jobtransfer.Manifest `json:"content,omitempty"`
 }
 
+// chunkedWorkerJob is the bounded protocol-2 view consumed by Go workers. Keep
+// editable provenance and operator-facing history out of this response.
+type chunkedWorkerJob struct {
+	ID               string                `json:"id"`
+	Total            int                   `json:"total"`
+	Size             int64                 `json:"size"`
+	ExpectedSettings *driver.Settings      `json:"expected_settings,omitempty"`
+	Content          *jobtransfer.Manifest `json:"content,omitempty"`
+}
+
+type chunkedWorkerAssignment struct {
+	Command  string           `json:"command"`
+	Job      chunkedWorkerJob `json:"job"`
+	Lease    string           `json:"lease"`
+	Protocol int              `json:"protocol"`
+}
+
 // jobRecord is one durable metadata entry in jobs.json (format version 3).
 type jobRecord struct {
 	Job
@@ -71,9 +88,18 @@ type jobRecord struct {
 // jobIndex is jobs.json. EventSeq is the last job event committed with this
 // index; the event log may hold later, uncommitted events after a crash.
 type jobIndex struct {
-	Version  int                  `json:"version"`
-	EventSeq int64                `json:"event_seq"`
-	Jobs     map[string]jobRecord `json:"jobs"`
+	Version          int                                 `json:"version"`
+	EventSeq         int64                               `json:"event_seq"`
+	Jobs             map[string]jobRecord                `json:"jobs"`
+	TerminalReceipts map[string]terminalReceiptTombstone `json:"terminal_receipts,omitempty"`
+}
+
+// terminalReceiptTombstone preserves the idempotency key when an operator
+// deletes a terminal job before a worker receives its acknowledgement.
+type terminalReceiptTombstone struct {
+	DriverID string `json:"driver_id"`
+	Lease    string `json:"lease"`
+	Digest   string `json:"digest"`
 }
 
 // legacyJob is the version 1 jobs.json entry that embedded program bytes.
@@ -85,7 +111,7 @@ type legacyJob struct {
 
 // Version 3 adds the committed event sequence. Version 2 libraries load
 // with no history and are rewritten as version 3 on the next save.
-const jobIndexVersion = 3
+const jobIndexVersion = 4
 
 var (
 	errProgramMissing = errors.New("job program is missing")
@@ -161,6 +187,7 @@ func (s *Server) loadJobs() error {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		s.jobs = make(map[string]jobRecord)
+		s.terminalReceipts = make(map[string]terminalReceiptTombstone)
 		if err := s.loadHistory(0); err != nil {
 			return err
 		}
@@ -183,8 +210,19 @@ func (s *Server) loadJobs() error {
 	if err := json.Unmarshal(data, &index); err != nil {
 		return fmt.Errorf("job library: %w", err)
 	}
-	if (index.Version != jobIndexVersion && index.Version != 2) || index.Jobs == nil || index.EventSeq < 0 || (index.Version == 2 && index.EventSeq != 0) {
+	if (index.Version != jobIndexVersion && index.Version != 3 && index.Version != 2) || index.Jobs == nil || index.EventSeq < 0 || (index.Version == 2 && index.EventSeq != 0) {
 		return fmt.Errorf("unsupported job library version %d", index.Version)
+	}
+	if index.TerminalReceipts == nil {
+		index.TerminalReceipts = make(map[string]terminalReceiptTombstone)
+	}
+	for id, receipt := range index.TerminalReceipts {
+		if !validHexID(id) || !driverName.MatchString(receipt.DriverID) || !validLease(receipt.Lease) || len(receipt.Digest) != 64 {
+			return fmt.Errorf("invalid terminal receipt tombstone %q", id)
+		}
+		if _, err := hex.DecodeString(receipt.Digest); err != nil {
+			return fmt.Errorf("invalid terminal receipt tombstone digest %q", id)
+		}
 	}
 	for id, record := range index.Jobs {
 		if !validHexID(id) || record.ID != id || record.Name == "" || !knownJobState(record.State) || record.Size <= 0 || len(record.SHA256) != 64 {
@@ -199,6 +237,7 @@ func (s *Server) loadJobs() error {
 		return err
 	}
 	s.jobs = index.Jobs
+	s.terminalReceipts = index.TerminalReceipts
 	return s.removeOrphanPrograms()
 }
 
@@ -267,6 +306,10 @@ func (s *Server) removeOrphanPrograms() error {
 // difference: events are appended to the log first, then the index rename
 // commits them together with the new states. Callers hold the server mutex.
 func (s *Server) save(jobs map[string]jobRecord, cause transitionCause) error {
+	return s.saveWithReceipts(jobs, s.terminalReceipts, cause)
+}
+
+func (s *Server) saveWithReceipts(jobs map[string]jobRecord, receipts map[string]terminalReceiptTombstone, cause transitionCause) error {
 	if s.closed {
 		return errors.New("server is closed")
 	}
@@ -279,7 +322,7 @@ func (s *Server) save(jobs map[string]jobRecord, cause transitionCause) error {
 	if len(events) > 0 {
 		eventSeq = events[len(events)-1].Seq
 	}
-	data, err := json.Marshal(jobIndex{Version: jobIndexVersion, EventSeq: eventSeq, Jobs: jobs})
+	data, err := json.Marshal(jobIndex{Version: jobIndexVersion, EventSeq: eventSeq, Jobs: jobs, TerminalReceipts: receipts})
 	if err != nil {
 		return err
 	}
@@ -313,6 +356,7 @@ func (s *Server) save(jobs map[string]jobRecord, cause transitionCause) error {
 	}
 	previous := s.jobs
 	s.jobs = jobs
+	s.terminalReceipts = receipts
 	s.progressDirty = false
 	s.metrics.syncJobStates(jobs)
 	s.commitEvents(events, previous, now)

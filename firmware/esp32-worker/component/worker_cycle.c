@@ -112,26 +112,39 @@ static const char *failure_message(ed_result status) {
 }
 
 static ed_result report_failed_assignment(const ed_http_worker_adapter *http,
+                                         const ed_worker_receipt_store *store,
                                          const char *session,
                                          const ed_worker_assignment *assignment,
                                          ed_result cause) {
     ed_terminal_receipt receipt = {0};
     receipt.state = ED_TERMINAL_FAILED;
+    receipt.total = assignment->total;
     (void)strncpy(receipt.error, failure_message(cause),
                   sizeof(receipt.error) - 1);
-    if (http->report_terminal(http->context, session, assignment->job_id,
-                              assignment->lease, &receipt) != 0)
-        return ED_ERR_REPORT;
+    {
+        ed_worker_saved_receipt saved = {0};
+        memcpy(saved.session, session, strlen(session) + 1);
+        memcpy(saved.job_id, assignment->job_id, strlen(assignment->job_id) + 1);
+        memcpy(saved.lease, assignment->lease, strlen(assignment->lease) + 1);
+        saved.receipt = receipt;
+        if (store->save(store->context, &saved) != 0) return ED_ERR_STORAGE;
+        if (http->report_terminal(http->context, session, assignment->job_id,
+                                  assignment->lease, &receipt) != 0)
+            return ED_ERR_REPORT;
+        if (store->clear(store->context) != 0) return ED_ERR_STORAGE;
+    }
     return cause;
 }
 
 static ed_result report_failed_progress(const ed_http_worker_adapter *http,
+                                        const ed_worker_receipt_store *store,
                                         const char *session,
                                         const ed_worker_assignment *assignment,
                                         ed_result cause,
                                         const active_context *active) {
     ed_terminal_receipt receipt = {0};
     receipt.state = ED_TERMINAL_FAILED;
+    receipt.total = assignment->total;
     if (active != NULL && active->have_progress) {
         receipt.acked = active->acked;
         receipt.total = active->total;
@@ -139,10 +152,49 @@ static ed_result report_failed_progress(const ed_http_worker_adapter *http,
                       sizeof(receipt.controller_state) - 1);
     }
     (void)strncpy(receipt.error, failure_message(cause), sizeof(receipt.error) - 1);
-    if (http->report_terminal(http->context, session, assignment->job_id,
-                              assignment->lease, &receipt) != 0)
-        return ED_ERR_REPORT;
+    {
+        ed_worker_saved_receipt saved = {0};
+        memcpy(saved.session, session, strlen(session) + 1);
+        memcpy(saved.job_id, assignment->job_id, strlen(assignment->job_id) + 1);
+        memcpy(saved.lease, assignment->lease, strlen(assignment->lease) + 1);
+        saved.receipt = receipt;
+        if (store->save(store->context, &saved) != 0) return ED_ERR_STORAGE;
+        if (http->report_terminal(http->context, session, assignment->job_id,
+                                  assignment->lease, &receipt) != 0)
+            return ED_ERR_REPORT;
+        if (store->clear(store->context) != 0) return ED_ERR_STORAGE;
+    }
     return cause;
+}
+
+static int valid_saved_receipt(const ed_worker_saved_receipt *saved) {
+    return terminated(saved->session, sizeof(saved->session)) && saved->session[0] != '\0' &&
+           terminated(saved->job_id, sizeof(saved->job_id)) && saved->job_id[0] != '\0' &&
+           terminated(saved->lease, sizeof(saved->lease)) && saved->lease[0] != '\0' &&
+           terminated(saved->receipt.controller_state,
+                      sizeof(saved->receipt.controller_state)) &&
+           terminated(saved->receipt.error, sizeof(saved->receipt.error)) &&
+           saved->receipt.total != 0 &&
+           saved->receipt.acked <= saved->receipt.total &&
+           (saved->receipt.state == ED_TERMINAL_COMPLETED ||
+            saved->receipt.state == ED_TERMINAL_FAILED ||
+            saved->receipt.state == ED_TERMINAL_CANCELED);
+}
+
+static ed_result save_and_report(const ed_http_worker_adapter *http,
+                                 const ed_worker_receipt_store *store,
+                                 const char *session, const char *job_id,
+                                 const char *lease,
+                                 const ed_terminal_receipt *receipt) {
+    ed_worker_saved_receipt saved = {0};
+    memcpy(saved.session, session, strlen(session) + 1);
+    memcpy(saved.job_id, job_id, strlen(job_id) + 1);
+    memcpy(saved.lease, lease, strlen(lease) + 1);
+    saved.receipt = *receipt;
+    if (store->save(store->context, &saved) != 0) return ED_ERR_STORAGE;
+    if (http->report_terminal(http->context, session, job_id, lease, receipt) != 0)
+        return ED_ERR_REPORT;
+    return store->clear(store->context) == 0 ? ED_OK : ED_ERR_STORAGE;
 }
 
 ed_result ed_worker_run_one(const ed_worker_adapters *adapters,
@@ -157,6 +209,8 @@ ed_result ed_worker_run_one(const ed_worker_adapters *adapters,
     ed_result status;
     int has_assignment = 0;
     int session_open = 0;
+    int has_saved_receipt = 0;
+    ed_worker_saved_receipt saved_receipt = {0};
 
     if (result == NULL) return ED_ERR_ARGUMENT;
     memset(result, 0, sizeof(*result));
@@ -166,6 +220,8 @@ ed_result ed_worker_run_one(const ed_worker_adapters *adapters,
         adapters->http.fetch_range == NULL ||
         adapters->http.report_terminal == NULL ||
         adapters->http.close_session == NULL ||
+        adapters->receipt_store.load == NULL || adapters->receipt_store.save == NULL ||
+        adapters->receipt_store.clear == NULL ||
         adapters->http.poll_active == NULL ||
         adapters->controller.stream_verified == NULL ||
         adapters->storage.reset == NULL || adapters->storage.write == NULL ||
@@ -173,10 +229,30 @@ ed_result ed_worker_run_one(const ed_worker_adapters *adapters,
         adapters->storage.unseal == NULL)
         return ED_ERR_ARGUMENT;
 
-    if (adapters->http.open_fresh_session(adapters->http.context, session,
-                                          sizeof(session)) != 0)
-        return ED_ERR_SESSION;
-    session_open = 1;
+    if (adapters->receipt_store.load(adapters->receipt_store.context,
+                                     &saved_receipt, &has_saved_receipt) != 0 ||
+        (has_saved_receipt != 0 && has_saved_receipt != 1)) return ED_ERR_STORAGE;
+    if (has_saved_receipt) {
+        if (!valid_saved_receipt(&saved_receipt)) return ED_ERR_PROTOCOL;
+        memcpy(session, saved_receipt.session, strlen(saved_receipt.session) + 1);
+        session_open = 1;
+        status = adapters->http.report_terminal(adapters->http.context,
+                                                saved_receipt.session,
+                                                saved_receipt.job_id,
+                                                saved_receipt.lease,
+                                                &saved_receipt.receipt) == 0
+                     ? ED_OK : ED_ERR_REPORT;
+        if (status != ED_OK) goto done;
+        if (adapters->receipt_store.clear(adapters->receipt_store.context) != 0) {
+            status = ED_ERR_STORAGE;
+            goto done;
+        }
+    } else {
+        if (adapters->http.open_fresh_session(adapters->http.context, session,
+                                              sizeof(session)) != 0)
+            return ED_ERR_SESSION;
+        session_open = 1;
+    }
     if (!terminated(session, sizeof(session)) || session[0] == '\0') {
         session[0] = '\0';
         status = ED_ERR_PROTOCOL;
@@ -200,7 +276,8 @@ ed_result ed_worker_run_one(const ed_worker_adapters *adapters,
     if (!terminated(assignment.job_id, sizeof(assignment.job_id)) ||
         assignment.job_id[0] == '\0' ||
         !terminated(assignment.lease, sizeof(assignment.lease)) ||
-        assignment.lease[0] == '\0') {
+        assignment.lease[0] == '\0' || assignment.total == 0 ||
+        assignment.total > assignment.content.size) {
         status = ED_ERR_PROTOCOL;
         goto done;
     }
@@ -211,7 +288,7 @@ ed_result ed_worker_run_one(const ed_worker_adapters *adapters,
     status = ed_stage_verify(&assignment.content, fetch_assignment_range,
                              &range, &adapters->storage, &verified);
     if (status != ED_OK) {
-        status = report_failed_assignment(&adapters->http, session,
+        status = report_failed_assignment(&adapters->http, &adapters->receipt_store, session,
                                           &assignment, status);
         goto done;
     }
@@ -228,15 +305,15 @@ ed_result ed_worker_run_one(const ed_worker_adapters *adapters,
     ed_verified_release(verified);
     verified = NULL;
     if (status < 0 || active.failed) {
-        status = report_failed_progress(&adapters->http, session, &assignment,
+        status = report_failed_progress(&adapters->http, &adapters->receipt_store, session, &assignment,
                                         active.failed ? ED_ERR_SESSION : ED_ERR_CONTROLLER,
                                         &active);
         goto done;
     }
     if (status == 1) receipt.state = ED_TERMINAL_CANCELED;
     else if (status != 0) {
-        status = report_failed_assignment(&adapters->http, session, &assignment,
-                                          ED_ERR_CONTROLLER);
+        status = report_failed_progress(&adapters->http, &adapters->receipt_store, session, &assignment,
+                                        ED_ERR_CONTROLLER, &active);
         goto done;
     }
     status = receipt_outcome(receipt.state, &outcome);
@@ -251,21 +328,20 @@ ed_result ed_worker_run_one(const ed_worker_adapters *adapters,
          (receipt.acked != receipt.total || !receipt.controller_idle ||
           strcmp(receipt.controller_state, "Idle") != 0 ||
           receipt.error[0] != '\0'))) {
-        status = report_failed_assignment(&adapters->http, session,
-                                          &assignment, ED_ERR_PROTOCOL);
+        status = report_failed_progress(&adapters->http, &adapters->receipt_store, session, &assignment,
+                                        ED_ERR_PROTOCOL, &active);
         goto done;
     }
     if (receipt.state == ED_TERMINAL_CANCELED &&
         (receipt.acked > receipt.total || receipt.total == 0 ||
          strcmp(receipt.controller_state, "Idle") != 0)) {
-        status = report_failed_assignment(&adapters->http, session, &assignment,
-                                          ED_ERR_PROTOCOL);
+        status = report_failed_progress(&adapters->http, &adapters->receipt_store, session, &assignment,
+                                        ED_ERR_PROTOCOL, &active);
         goto done;
     }
-    if (adapters->http.report_terminal(adapters->http.context, session,
-                                       assignment.job_id, assignment.lease,
-                                       &receipt) != 0) {
-        status = ED_ERR_REPORT;
+    status = save_and_report(&adapters->http, &adapters->receipt_store, session,
+                             assignment.job_id, assignment.lease, &receipt);
+    if (status != ED_OK) {
         goto done;
     }
     result->outcome = outcome;

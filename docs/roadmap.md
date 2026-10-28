@@ -78,20 +78,25 @@ unsupported milestone.
   The server and Go worker negotiate protocol 2 for immutable, 4 MiB-bounded
   programs transferred in lease-bound 64 KiB ranges; the worker verifies the
   complete size, SHA-256, and G-code before opening the controller. Protocol 1
-  whole-program assignments remain compatible. A portable C host prototype
-  adds bounded staging, size/framing/digest/G-code validation, immutable
-  verified storage, and a UART output gate that emits no bytes before
-  verification. Its injected controller adapter can poll the same session,
-  job, and lease while streaming; host cycle tests cover repeated monotonic
-  progress, cancel, failed-poll receipts with controller-state preservation,
-  lease binding, and terminal gating.
-  The callback cadence is not timer-enforced, and these tests do not implement
-  a real HTTP client or demonstrate Go-worker compatibility through an
-  integrated fake HTTP/UART flow. Remaining work includes real session and
-  credential adapters, measured heartbeat cadence, lost/duplicate receipt
-  handling, integrated Go compatibility tests, ESP-IDF firmware, and physical
-  firmware/board qualification under #3. The C prototype is not deployable
-  firmware and does not qualify hardware.
+  whole-program assignments remain compatible. The portable C worker stages
+  the program in bounded ranges, verifies size, framing, SHA-256, and G-code,
+  then permits one UART send through an immutable verified handle. Its
+  authenticated HTTPS adapter creates fresh 128-bit sessions, negotiates the
+  bounded protocol-2 assignment, validates lease-bound range responses, and
+  checks active and terminal receipts. A durable NVS outbox retries identical
+  terminal receipts across device restarts; the server retains a receipt digest
+  across job deletion so a lost acknowledgment remains recoverable across
+  server restarts. Fake HTTP/UART tests cover fresh sessions, leases, progress,
+  malformed or truncated content, digest rejection, no output before
+  verification, duplicate/lost receipts, and receipt recovery. A server plus
+  Go-worker integration test runs a large designer-generated job through the
+  compact protocol-2 response, while protocol-1 assignments remain unchanged.
+  CI compiles and links the component against ESP-IDF 5.3.2 for ESP32. The
+  polling cadence remains callback-driven rather than timer-enforced, and the
+  CI build does not exercise Wi-Fi or networking. The component has no Wi-Fi
+  provisioning or controller-board integration yet; physical firmware/board
+  qualification remains under #3. Host and ESP-IDF compile checks do not
+  qualify hardware.
 - [x] [#4: Browser-based laser job designer](https://github.com/constructorfleet/emberdeck/issues/4).
   Review SketchForge-3D interaction patterns and licensing; specify the laser
   designer architecture and formats; implement design creation/import, editing,
