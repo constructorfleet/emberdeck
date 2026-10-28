@@ -33,6 +33,11 @@ type Capabilities struct {
 	PauseResume      bool `json:"pause_resume"`
 	Cancel           bool `json:"cancel"`
 	PositionFeedback bool `json:"position_feedback"`
+	ManualHome       bool `json:"manual_home"`
+	ManualUnlock     bool `json:"manual_unlock"`
+	ManualJog        bool `json:"manual_jog"`
+	ManualSetZero    bool `json:"manual_set_zero"`
+	ManualFrame      bool `json:"manual_frame"`
 }
 
 type Manifest struct {
@@ -363,7 +368,12 @@ func validateManifest(manifest Manifest) error {
 func capabilitiesSubset(device, manifest Capabilities) bool {
 	return (!device.PauseResume || manifest.PauseResume) &&
 		(!device.Cancel || manifest.Cancel) &&
-		(!device.PositionFeedback || manifest.PositionFeedback)
+		(!device.PositionFeedback || manifest.PositionFeedback) &&
+		(!device.ManualHome || manifest.ManualHome) &&
+		(!device.ManualUnlock || manifest.ManualUnlock) &&
+		(!device.ManualJog || manifest.ManualJog) &&
+		(!device.ManualSetZero || manifest.ManualSetZero) &&
+		(!device.ManualFrame || manifest.ManualFrame)
 }
 
 func validateAssignment(assignment Assignment) error {

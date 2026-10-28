@@ -109,6 +109,16 @@ concrete devices; each device may advertise a subset of those capabilities.
 `Configure` receives a device ID and at most 1 MiB of JSON, then returns one
 controller session:
 
+Capability metadata uses stable snake-case names: `PauseResume` maps to
+`pause_resume`, `Cancel` to `cancel`, and `PositionFeedback` to
+`position_feedback`. Manual action fields map to `manual_home`,
+`manual_unlock`, `manual_jog`, `manual_set_zero`, and `manual_frame`. A device
+may advertise only fields declared by its manifest. These manual fields are
+metadata only: the worker does not project them into its HTTP poll capabilities
+or execute manual assignments. Issue #52's worker integration must use these
+exact names with a distinct manual lease/session, `laser_off=true`, and bounded
+durations.
+
 ```text
 Discover -> Configure(device, config) -> Start(assignment) -> Status* -> Close
                                                    |-> Pause / Resume (capability-gated)
