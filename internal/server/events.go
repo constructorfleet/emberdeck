@@ -226,7 +226,7 @@ func (s *Server) rewriteHistory(events []JobEvent, prunedThrough int64) error {
 	if err = os.Rename(f.Name(), h.path); err != nil {
 		if h.path != "" && h.size > 0 {
 			if reopenErr := h.open(h.size); reopenErr != nil {
-				s.storageErr = reopenErr
+				s.failStorage(reopenErr)
 			}
 		}
 		return err

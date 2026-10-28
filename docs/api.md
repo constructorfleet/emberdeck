@@ -204,8 +204,10 @@ credentials; neither the session nor the lease is ever returned. `seq` grows
 across all jobs. History remains readable after a job is deleted until retention
 removes it; an ID with no job and no retained events returns 404.
 
-The server also writes one structured log record (`msg="job transition"`) per
-event with the same fields.
+With `serve -log-level info` or lower, the server also writes one structured
+log record (`msg="job state changed"`) per event. It has the same `seq`,
+`source`, `action`, credential, driver, and session/lease reference fields, plus
+the job name and progress. A job created by an upload logs `from=new`.
 
 Retention is always bounded. `serve -job-event-limit` (default 50,000) caps the
 number of events kept, removing the oldest first, and `serve
