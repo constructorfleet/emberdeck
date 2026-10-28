@@ -8,7 +8,9 @@ import shutil
 import subprocess
 import markdown
 from urllib.parse import urlsplit, unquote
-from docs_validation import validate_rendered_docs
+from docs_validation import validate_markdown_sources, validate_rendered_docs
+
+validate_markdown_sources(Path.cwd())
 
 out = Path('dist/docs')
 if out.exists():

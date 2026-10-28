@@ -5,7 +5,7 @@ from pathlib import Path
 import struct
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from docs_validation import validate_rendered_docs
+from docs_validation import validate_markdown_sources, validate_rendered_docs
 
 
 class RenderedDocsValidationTests(unittest.TestCase):
@@ -67,6 +67,7 @@ class RenderedDocsValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "full-size screenshot link"):
             validate_rendered_docs(self.site)
 
+
     def test_operator_screenshots_declare_matching_intrinsic_dimensions(self):
         (self.site / "operator-guide.html").write_text(
             '<a href="assets/screenshots/detail.png">'
@@ -116,6 +117,57 @@ class RenderedDocsValidationTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(SystemExit, "full-size screenshot link"):
             validate_rendered_docs(self.site)
+
+
+class MarkdownSourceValidationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        (self.root / "docs").mkdir()
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_rejects_acknowledgement_spelling(self):
+        (self.root / "docs/driver.md").write_text(
+            "GRBL acknowledgement arrives here.\n", encoding="utf-8"
+        )
+        with self.assertRaisesRegex(SystemExit, "docs/driver.md.*acknowledgement"):
+            validate_markdown_sources(self.root)
+
+    def test_rejects_moving_support_link_targets(self):
+        (self.root / "docs/driver.md").write_text(
+            "[GRBL](https://github.com/gnea/grbl/blob/master/doc/markdown/interface.md)\n",
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(SystemExit, "docs/driver.md.*blob/master"):
+            validate_markdown_sources(self.root)
+
+    def test_rejects_latest_vendor_documentation(self):
+        (self.root / "docs/driver.md").write_text(
+            "[ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/security/secure-boot.html)\n",
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(SystemExit, "moving external source link"):
+            validate_markdown_sources(self.root)
+
+    def test_accepts_consistent_spelling_and_pinned_links(self):
+        (self.root / "README.md").write_text(
+            "Acknowledgment is documented.\n", encoding="utf-8"
+        )
+        (self.root / "docs/driver.md").write_text(
+            "[GRBL](https://github.com/gnea/grbl/blob/0123456789abcdef0123456789abcdef01234567/doc/markdown/interface.md)\n",
+            encoding="utf-8",
+        )
+        validate_markdown_sources(self.root)
+
+    def test_rejects_short_commit_refs(self):
+        (self.root / "docs/driver.md").write_text(
+            "[GRBL](https://github.com/gnea/grbl/blob/abc1234/doc/markdown/interface.md)\n",
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(SystemExit, "unpinned GitHub source link"):
+            validate_markdown_sources(self.root)
 
 
 if __name__ == "__main__":

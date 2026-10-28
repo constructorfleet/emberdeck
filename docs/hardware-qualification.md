@@ -53,7 +53,7 @@ the exact bytes/results for each case:
   controller and whether a startup banner is observed.
 - Readiness and settings reads from an idle controller, plus refusal from
   startup, alarm, busy, and malformed-response states.
-- Long moves that fill the controller planner. Record when each acknowledgement
+- Long moves that fill the controller planner. Record when each acknowledgment
   arrives while status continues to report motion, and verify the worker does
   not treat buffered or acknowledged commands as completed motion.
 - Door, Alarm, and Hold reports, including fresh Hold transitions after pause

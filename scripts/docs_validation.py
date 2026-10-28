@@ -2,6 +2,7 @@
 
 from html.parser import HTMLParser
 from pathlib import Path
+import re
 from urllib.parse import unquote, urlsplit
 
 
@@ -28,6 +29,38 @@ class _PageParser(HTMLParser):
         if tag == "a" and self.anchors:
             self.anchors.pop()
 
+
+_UNSTABLE_SOURCE_LINK = re.compile(
+    r"https?://[^\s)\]>]*(?:/latest/|/blob/(?:main|master|dev)/)", re.IGNORECASE
+)
+_GITHUB_FILE_LINK = re.compile(
+    r"https?://github\.com/[^/\s)]+/[^/\s)]+/(?:blob|tree)/([^/\s)#)]+)", re.IGNORECASE
+)
+_COMMIT_SHA = re.compile(r"[0-9a-f]{40}", re.IGNORECASE)
+_VERSION_REF = re.compile(r"v?\d+(?:\.\d+)+(?:[-+][0-9A-Za-z.-]+)?")
+
+
+def validate_markdown_sources(root: Path) -> None:
+    """Require consistent spelling and immutable targets for cited source docs."""
+    sources = [root / "README.md", root / "CONTRIBUTING.md"]
+    sources.extend(sorted((root / "docs").rglob("*.md")))
+    for source in sources:
+        if not source.is_file():
+            continue
+        body = source.read_text(encoding="utf-8")
+        relative = source.relative_to(root).as_posix()
+        if re.search(r"acknowledgement", body, re.IGNORECASE):
+            raise SystemExit(f"{relative} uses acknowledgement; use acknowledgment")
+        for match in _UNSTABLE_SOURCE_LINK.finditer(body):
+            raise SystemExit(
+                f"{relative} has a moving external source link: {match.group(0)}"
+            )
+        for match in _GITHUB_FILE_LINK.finditer(body):
+            ref = match.group(1)
+            if not _COMMIT_SHA.fullmatch(ref) and not _VERSION_REF.fullmatch(ref):
+                raise SystemExit(
+                    f"{relative} has an unpinned GitHub source link: {match.group(0)}"
+                )
 
 def _png_dimensions(path: Path):
     header = path.read_bytes()[:24]
