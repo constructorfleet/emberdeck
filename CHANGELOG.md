@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.0](https://github.com/constructorfleet/emberdeck/compare/v0.14.0...v0.15.0) (2026-10-28)
+
+
+### Features
+
+* add leased manual machine preparation controls ([#142](https://github.com/constructorfleet/emberdeck/issues/142)) ([5c2c27c](https://github.com/constructorfleet/emberdeck/commit/5c2c27ce9071c5884bda6cdd3dceda18fae4cb7f))
+* support file-backed environment values ([#96](https://github.com/constructorfleet/emberdeck/issues/96)) ([371ab27](https://github.com/constructorfleet/emberdeck/commit/371ab27d9fabbf6bf5308a587a69f905f487d9c1))
+
 ## [0.14.0](https://github.com/constructorfleet/emberdeck/compare/v0.13.0...v0.14.0) (2026-10-28)
 
 
