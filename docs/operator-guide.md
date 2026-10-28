@@ -47,8 +47,11 @@ the driver and motion details. Home, jog, set-zero, and frame require the
 controller to report **Idle**; unlock is available only for an **Alarm** state.
 Jog is limited to 25 mm per move and 3000 mm/min. Frame is offered only for
 jobs with known in-bounds geometry, and traces the reviewed rectangle with the
-laser off. Stay at the machine and supervise. The panel cannot replace physical
-interlocks or an emergency stop.
+laser off. If homing times out or is interrupted, EmberDeck sends a GRBL soft
+reset and waits for **Alarm**; the controller position is then considered lost
+and the machine must be homed again before position-dependent work. Stay at the
+machine and supervise. The panel cannot replace physical interlocks or an
+emergency stop.
 
 A queued manual request reserves the driver separately from the job queue. If
 worker support is unavailable, no action capability is advertised and the

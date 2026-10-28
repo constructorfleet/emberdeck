@@ -263,11 +263,14 @@ func TestManualCommandFrameWireIsBoundedAndLaserOff(t *testing.T) {
 	}
 }
 
-func TestManualFrameDeadlineSendsRealtimeCancel(t *testing.T) {
+func TestManualFrameDeadlineConfirmsFeedHoldBeforeReturning(t *testing.T) {
 	client, machine := net.Pipe()
 	defer client.Close()
 	defer machine.Close()
 	wire := make(chan string, 16)
+	holdQuery := make(chan struct{}, 1)
+	allowHoldStop := make(chan struct{})
+	holdReported := make(chan struct{})
 	go func() {
 		r := bufio.NewReader(machine)
 		readQuery := func() { b, _ := r.ReadByte(); wire <- string([]byte{b}) }
@@ -282,6 +285,7 @@ func TestManualFrameDeadlineSendsRealtimeCancel(t *testing.T) {
 			wire <- readLine()
 			io.WriteString(machine, "ok\r\n")
 		}
+		holdRequested := false
 		for {
 			b, e := r.ReadByte()
 			if e != nil {
@@ -289,33 +293,144 @@ func TestManualFrameDeadlineSendsRealtimeCancel(t *testing.T) {
 			}
 			wire <- string([]byte{b})
 			if b == '?' {
-				io.WriteString(machine, "<Run|MPos:1,1,0>\r\n")
+				if holdRequested {
+					holdQuery <- struct{}{}
+					<-allowHoldStop
+					io.WriteString(machine, "<Hold:0|MPos:1,1,0>\r\n")
+					close(holdReported)
+				} else {
+					io.WriteString(machine, "<Run|MPos:1,1,0>\r\n")
+				}
 			}
-			if b == 0x85 {
-				return
+			if b == '!' {
+				holdRequested = true
+				io.WriteString(machine, "<Hold:1|MPos:1,1,0>\r\n")
 			}
 		}
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 	bounds := toolpath.Bounds{Min: toolpath.Point{X: 0, Y: 0}, Max: toolpath.Point{X: 2, Y: 2}}
-	err := ManualCommand(ctx, client, ManualCommandRequest{Action: "frame", Confirmed: true, Bounds: bounds})
-	if err == nil || !strings.Contains(err.Error(), "deadline") {
-		t.Fatalf("frame deadline error = %v", err)
-	}
-	var sawCancel bool
+	done := make(chan error, 1)
+	go func() {
+		done <- ManualCommand(ctx, client, ManualCommandRequest{Action: "frame", Confirmed: true, Bounds: bounds})
+	}()
+	var sawFeedHold bool
+	var sawConfirmedStop bool
 	var observed []string
 	timeout := time.After(time.Second)
-	for !sawCancel {
+	for !sawConfirmedStop {
 		select {
 		case got := <-wire:
 			observed = append(observed, got)
-			sawCancel = got == "\x85"
+			if got == "!" {
+				sawFeedHold = true
+			}
+			if got == "?" && sawFeedHold {
+				sawConfirmedStop = true
+			}
 		case <-timeout:
-			t.Fatalf("bounded frame did not send GRBL realtime cancel 0x85; observed %q", observed)
+			t.Fatalf("bounded frame did not confirm feed hold before returning; observed %q", observed)
 		}
 	}
-	if !sawCancel {
-		t.Fatal("bounded frame did not send GRBL realtime cancel 0x85")
+	if !sawFeedHold {
+		t.Fatalf("bounded frame did not send GRBL feed hold; observed %q", observed)
+	}
+	<-holdQuery
+	select {
+	case err := <-done:
+		t.Fatalf("bounded frame returned before GRBL confirmed the hold: %v", err)
+	default:
+	}
+	close(allowHoldStop)
+	<-holdReported
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "deadline") {
+			t.Fatalf("frame deadline error = %v; want the original bounded-motion error after stop confirmation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("bounded frame did not return after confirmed stop; observed %q", observed)
+	}
+}
+
+func TestManualHomeDeadlineResetsAndReportsPositionLoss(t *testing.T) {
+	client, machine := net.Pipe()
+	defer client.Close()
+	defer machine.Close()
+	wire := make(chan string, 16)
+	go func() {
+		r := bufio.NewReader(machine)
+		readByte := func() byte {
+			b, err := r.ReadByte()
+			if err == nil {
+				wire <- string([]byte{b})
+			}
+			return b
+		}
+		readLine := func() string {
+			line, err := r.ReadString('\n')
+			if err == nil {
+				wire <- line
+			}
+			return line
+		}
+		readByte()
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+		readLine()
+		io.WriteString(machine, "ok\r\n")
+		readByte()
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+		readLine()
+		for {
+			b := readByte()
+			switch b {
+			case '?':
+				io.WriteString(machine, "<Alarm|MPos:0,0,0>\r\n")
+			case 0x18:
+				io.WriteString(machine, "ALARM:3\r\n")
+			}
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	err := ManualCommand(ctx, client, ManualCommandRequest{Action: "home", Confirmed: true})
+	if err == nil || !strings.Contains(err.Error(), "deadline") || !strings.Contains(err.Error(), "position is lost") {
+		t.Fatalf("missing homing acknowledgement error = %v; want bounded deadline and explicit position-loss semantics", err)
+	}
+	var sawReset bool
+	for len(wire) > 0 {
+		if <-wire == "\x18" {
+			sawReset = true
+		}
+	}
+	if !sawReset {
+		t.Fatal("bounded homing did not send GRBL soft reset")
+	}
+}
+
+func TestManualCommandInitialStatusWaitUsesRequestDeadline(t *testing.T) {
+	client, machine := net.Pipe()
+	defer client.Close()
+	defer machine.Close()
+	query := make(chan byte, 1)
+	go func() {
+		b, err := bufio.NewReader(machine).ReadByte()
+		if err == nil {
+			query <- b
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	err := ManualCommand(ctx, client, ManualCommandRequest{Action: "set_zero", Confirmed: true})
+	if err == nil || !strings.Contains(err.Error(), "deadline") {
+		t.Fatalf("manual initial status error = %v; want request deadline", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("manual initial status waited %s after request deadline", elapsed)
+	}
+	if got := <-query; got != '?' {
+		t.Fatalf("initial status query = %q; want ?", got)
 	}
 }

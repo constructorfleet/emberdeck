@@ -219,7 +219,11 @@ type ManualCommandRequest struct {
 
 // ManualCommand sends one preparation command after validating confirmation
 // and controller state. Motion commands turn the laser off and verify Idle
-// before issuing motion. The connection is owned and closed by this call.
+// before issuing motion. Framing is stopped with feed hold and waits for a
+// Hold:0 or Idle report if interrupted. Interrupted homing uses Ctrl-X, waits
+// for Alarm, and reports that position is lost. The request context bounds
+// status and acknowledgement reads as well as the motion. The connection is
+// owned and closed by this call.
 func ManualCommand(ctx context.Context, conn io.ReadWriteCloser, request ManualCommandRequest) error {
 	if ctx == nil || conn == nil {
 		return errors.New("driver: context and controller connection are required")
@@ -316,20 +320,17 @@ func ManualCommand(ctx context.Context, conn io.ReadWriteCloser, request ManualC
 			return fmt.Errorf("driver: motion requires Idle after laser-off; got %s", state.State)
 		}
 	}
-	motionSent := false
-	completed := false
-	if moving {
-		defer func() {
-			if motionSent && !completed {
-				_ = write("\x85")
-			}
-		}()
-	}
+	motionSent := moving
 	if e = write(command); e != nil {
+		if motionSent {
+			return stopManualMotion(request.Action, write, lines, readErrors, e)
+		}
 		return e
 	}
-	motionSent = moving
 	if e = awaitManualAck(read); e != nil {
+		if motionSent {
+			return stopManualMotion(request.Action, write, lines, readErrors, e)
+		}
 		return e
 	}
 	if moving {
@@ -338,7 +339,7 @@ func ManualCommand(ctx context.Context, conn io.ReadWriteCloser, request ManualC
 		for {
 			state, e = status()
 			if e != nil {
-				return e
+				return stopManualMotion(request.Action, write, lines, readErrors, e)
 			}
 			if state.State == "Idle" {
 				break
@@ -346,12 +347,64 @@ func ManualCommand(ctx context.Context, conn io.ReadWriteCloser, request ManualC
 			select {
 			case <-ticker.C:
 			case <-bounded.Done():
-				return bounded.Err()
+				return stopManualMotion(request.Action, write, lines, readErrors, bounded.Err())
 			}
 		}
 	}
-	completed = true
 	return nil
+}
+
+// stopManualMotion uses the controller-specific stop behavior and waits for a
+// fresh terminal status before the manual command can report completion. GRBL
+// 0x85 only cancels $J jogs; framing uses ordinary G0 moves and homing needs a
+// reset to stop. A homing reset discards position and leaves GRBL in Alarm.
+func stopManualMotion(action string, write func(string) error, lines <-chan string, readErrors <-chan error, cause error) error {
+	stopCommand := "!"
+	stopped := func(state string) bool { return state == "Idle" || state == "Hold:0" }
+	if action == "home" {
+		stopCommand = "\x18"
+		stopped = func(state string) bool { return strings.HasPrefix(state, "Alarm") }
+	}
+	if err := write(stopCommand); err != nil {
+		return fmt.Errorf("%w; driver: motion stop was not confirmed: could not send stop command: %v", cause, err)
+	}
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(manualPoll)
+	defer ticker.Stop()
+	for {
+		if err := write("?"); err != nil {
+			return fmt.Errorf("%w; driver: motion stop was not confirmed: status query failed: %v", cause, err)
+		}
+		queryDeadline := time.NewTimer(manualPoll)
+		awaitingStatus := true
+		for awaitingStatus {
+			select {
+			case line := <-lines:
+				state, err := ParseStatusReport(line)
+				if err == nil && stopped(state.State) {
+					if action == "home" {
+						return fmt.Errorf("%w; driver: homing was stopped by soft reset; position is lost and the controller remains in Alarm", cause)
+					}
+					return cause
+				}
+			case err := <-readErrors:
+				queryDeadline.Stop()
+				return fmt.Errorf("%w; driver: motion stop was not confirmed: controller read failed: %v", cause, err)
+			case <-queryDeadline.C:
+				awaitingStatus = false
+			case <-deadline.C:
+				queryDeadline.Stop()
+				return fmt.Errorf("%w; driver: motion stop was not confirmed within 2 seconds", cause)
+			}
+		}
+		queryDeadline.Stop()
+		select {
+		case <-ticker.C:
+		case <-deadline.C:
+			return fmt.Errorf("%w; driver: motion stop was not confirmed within 2 seconds", cause)
+		}
+	}
 }
 
 func awaitManualAck(read func() (string, error)) error {
