@@ -6,6 +6,13 @@ authentication, and the embedded browser
 console. A worker owns one controller connection per job and reports progress
 over a versioned HTTP polling protocol. One server can manage multiple workers.
 
+Workers advertising `chunked_content_v1` receive a protocol 2 assignment with
+immutable content size and SHA-256, then fetch 64 KiB-or-smaller ranges under
+their live session and job lease. The worker verifies complete framing, size,
+digest, and G-code before opening the controller. Protocol 1 workers keep the
+whole-program assignment for compatibility. The shared `jobtransfer` contract
+owns the 4 MiB cap, range limit, and manifest verification.
+
 ```text
 Browser → HTTP server → durable job library (single-owner file lock)
                    ↑

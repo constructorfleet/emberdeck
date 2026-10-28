@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ConstructorFleet/emberdeck/driver"
+	"github.com/ConstructorFleet/emberdeck/jobtransfer"
 )
 
 // settingsProbeTimeout bounds an idle `$$` probe, including opening the
@@ -31,7 +32,7 @@ type controllerReport struct {
 func (r *controllerReport) poll(session string, p *progress) pollRequest {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	request := pollRequest{Session: session, Capabilities: []string{"pause_resume"}, progress: p, SettingsError: r.err}
+	request := pollRequest{Session: session, Capabilities: []string{"pause_resume", jobtransfer.Capability}, progress: p, SettingsError: r.err}
 	if r.settings != nil {
 		settings, readAt := *r.settings, r.readAt
 		request.ControllerSettings, request.SettingsReadAt = &settings, &readAt

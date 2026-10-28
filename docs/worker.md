@@ -1,9 +1,27 @@
 # Worker control behavior
 
 `worker.Run` creates a random session and polls the driver's endpoint with the
-`pause_resume` capability on every request. It keeps one controller connection
-for the assigned lease and sends progress, controller state, and command
-responses through the same poll endpoint.
+`pause_resume` and `chunked_content_v1` capabilities on every request. It keeps
+one controller connection for the assigned lease and sends progress, controller
+state, and command responses through the same poll endpoint.
+
+## Verified program transfer
+
+The server advertises immutable content size and SHA-256 in protocol 2
+assignments. The Go worker fetches the assignment in sequential byte ranges of
+at most 64 KiB, using the same credential, process session, and job lease. Each
+range can be safely retried; the worker checks its `Content-Range` and digest
+header against the assignment before accepting the bytes. The full 4 MiB maximum
+program is assembled in bounded memory, checked for exact size and SHA-256, and
+passed through full G-code validation before the worker opens the controller.
+Any short, altered, oversized, or invalid program is reported failed without
+writing a program byte to the controller. Program content is capped at 4 MiB on
+the server and worker.
+
+Workers without `chunked_content_v1` continue to receive the protocol 1 full
+`gcode` assignment. A new worker also accepts that full-program form from an
+older server. Firmware with less RAM should stage the same bounded chunks in
+PSRAM or flash and complete digest plus G-code verification before UART output.
 
 Provision a credential with role `worker` and a `driver_ids` entry matching the
 worker's `-id`, then provide its one-time key as `EMBERDECK_API_KEY`. Worker

@@ -3,6 +3,8 @@ package worker
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	"github.com/ConstructorFleet/emberdeck/driver"
+	"github.com/ConstructorFleet/emberdeck/jobtransfer"
 )
 
 func TestRunRetriesTerminalAndNeverResendsCompletedLease(t *testing.T) {
@@ -76,6 +79,186 @@ func TestRunRetriesTerminalAndNeverResendsCompletedLease(t *testing.T) {
 	}
 	if len(sessions) != 1 {
 		t.Fatalf("sessions = %v", sessions)
+	}
+}
+
+func TestRunFetchesAndVerifiesChunkedContentBeforeOpeningController(t *testing.T) {
+	program := strings.Repeat("(c)\n", 17000) + "M5\n"
+	sum := sha256.Sum256([]byte(program))
+	digest := hex.EncodeToString(sum[:])
+	jobID, lease := strings.Repeat("a", 32), strings.Repeat("b", 64)
+	var mu sync.Mutex
+	ranges := make(map[string]int)
+	session := ""
+	terminal := make(chan struct{})
+	var terminalOnce sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			if r.URL.Path != "/api/v1/drivers/laser/jobs/"+jobID+"/content" || r.Header.Get("X-EmberDeck-Lease") != lease {
+				t.Errorf("unexpected content request: %s %s, lease=%q", r.Method, r.URL.Path, r.Header.Get("X-EmberDeck-Lease"))
+			}
+			mu.Lock()
+			if session == "" {
+				session = r.Header.Get("X-EmberDeck-Session")
+			}
+			if r.Header.Get("X-EmberDeck-Session") != session || session == "" {
+				t.Errorf("content session = %q, poll session = %q", r.Header.Get("X-EmberDeck-Session"), session)
+			}
+			requestRange := r.Header.Get("Range")
+			ranges[requestRange]++
+			attempt := ranges[requestRange]
+			mu.Unlock()
+			if requestRange == "bytes=0-65535" && attempt == 1 {
+				http.Error(w, "temporary lost chunk response", http.StatusServiceUnavailable)
+				return
+			}
+			var start, end int
+			if _, err := fmt.Sscanf(requestRange, "bytes=%d-%d", &start, &end); err != nil || start < 0 || end >= len(program) || start > end {
+				t.Errorf("invalid range request %q", requestRange)
+				http.Error(w, "invalid range", http.StatusRequestedRangeNotSatisfiable)
+				return
+			}
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(program)))
+			w.Header().Set("X-EmberDeck-Content-SHA256", digest)
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = io.WriteString(w, program[start:end+1])
+			return
+		}
+		body := pollSession(t, r)
+		caps, _ := body["capabilities"].([]any)
+		if len(caps) != 2 || caps[1] != jobtransfer.Capability {
+			t.Errorf("worker capabilities = %#v", body["capabilities"])
+		}
+		if body["state"] == "completed" {
+			mu.Lock()
+			if session != body["session"] {
+				t.Errorf("poll session = %#v; content session = %q", body["session"], session)
+			}
+			mu.Unlock()
+			terminalOnce.Do(func() { close(terminal) })
+			io.WriteString(w, `{"command":"idle"}`)
+			return
+		}
+		mu.Lock()
+		session = body["session"].(string)
+		mu.Unlock()
+		io.WriteString(w, fmt.Sprintf(`{"command":"run","protocol":2,"lease":%q,"job":{"id":%q,"size":%d,"content":{"size":%d,"sha256":%q}}}`, lease, jobID, len(program), len(program), digest))
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- RunWithOptions(ctx, server.URL, "key", "laser", func(context.Context) (io.ReadWriteCloser, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			if ranges["bytes=0-65535"] != 2 || ranges[fmt.Sprintf("bytes=65536-%d", len(program)-1)] != 1 {
+				t.Errorf("controller opened before complete verified download: %v", ranges)
+			}
+			return driver.NewSimulator(), nil
+		}, fastOptions(nil))
+	}()
+	select {
+	case <-terminal:
+	case <-time.After(8 * time.Second):
+		cancel()
+		t.Fatal("worker did not finish the verified chunked assignment")
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("worker exit = %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if ranges["bytes=0-65535"] != 2 || ranges[fmt.Sprintf("bytes=65536-%d", len(program)-1)] != 1 {
+		t.Fatalf("chunk requests = %v", ranges)
+	}
+}
+
+func TestRunRejectsUnverifiedOrInvalidChunkedProgramBeforeControllerOutput(t *testing.T) {
+	valid := []byte("M5\n")
+	validSum := sha256.Sum256(valid)
+	tests := []struct {
+		name           string
+		manifest       []byte
+		response       []byte
+		digest         string
+		wantChunk      int
+		rangeHeader    string
+		responseDigest string
+	}{
+		{name: "truncated", manifest: valid, response: []byte("M5"), digest: hex.EncodeToString(validSum[:]), wantChunk: 3},
+		{name: "altered digest", manifest: valid, response: []byte("G0\n"), digest: hex.EncodeToString(validSum[:]), wantChunk: 3},
+		{name: "invalid content range", manifest: valid, response: valid, digest: hex.EncodeToString(validSum[:]), wantChunk: 3, rangeHeader: "bytes 1-3/3"},
+		{name: "invalid digest header", manifest: valid, response: valid, digest: hex.EncodeToString(validSum[:]), wantChunk: 3, responseDigest: strings.Repeat("0", 64)},
+		{name: "invalid gcode", manifest: []byte("M5!\n"), response: []byte("M5!\n"), wantChunk: 4},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if test.digest == "" {
+				sum := sha256.Sum256(test.manifest)
+				test.digest = hex.EncodeToString(sum[:])
+			}
+			jobID, lease := strings.Repeat("c", 32), strings.Repeat("d", 64)
+			failed := make(chan struct{})
+			var failedOnce sync.Once
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					w.Header().Set("Content-Type", "application/octet-stream")
+					contentRange := fmt.Sprintf("bytes 0-%d/%d", test.wantChunk-1, len(test.manifest))
+					if test.rangeHeader != "" {
+						contentRange = test.rangeHeader
+					}
+					w.Header().Set("Content-Range", contentRange)
+					responseDigest := test.digest
+					if test.responseDigest != "" {
+						responseDigest = test.responseDigest
+					}
+					w.Header().Set("X-EmberDeck-Content-SHA256", responseDigest)
+					w.WriteHeader(http.StatusPartialContent)
+					_, _ = w.Write(test.response)
+					return
+				}
+				body := pollSession(t, r)
+				if body["state"] == "failed" {
+					if body["error"] == "" {
+						t.Error("failed transfer receipt has no reason")
+					}
+					failedOnce.Do(func() { close(failed) })
+					io.WriteString(w, `{"command":"idle"}`)
+					return
+				}
+				sum := sha256.Sum256(test.manifest)
+				digest := test.digest
+				if test.name == "invalid gcode" {
+					digest = hex.EncodeToString(sum[:])
+				}
+				io.WriteString(w, fmt.Sprintf(`{"command":"run","protocol":2,"lease":%q,"job":{"id":%q,"size":%d,"content":{"size":%d,"sha256":%q}}}`, lease, jobID, len(test.manifest), len(test.manifest), digest))
+			}))
+			defer server.Close()
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			connected := false
+			go func() {
+				done <- RunWithOptions(ctx, server.URL, "key", "laser", func(context.Context) (io.ReadWriteCloser, error) {
+					connected = true
+					return driver.NewSimulator(), nil
+				}, fastOptions(nil))
+			}()
+			select {
+			case <-failed:
+			case <-time.After(5 * time.Second):
+				cancel()
+				t.Fatal("worker did not report invalid chunked content")
+			}
+			cancel()
+			if err := <-done; !errors.Is(err, context.Canceled) {
+				t.Fatalf("worker exit = %v", err)
+			}
+			if connected {
+				t.Fatal("worker connected to controller before content verification and G-code validation")
+			}
+		})
 	}
 }
 
@@ -566,7 +749,7 @@ func TestRunInitialPauseSendsNoProgramUntilResumeAndReportsController(t *testing
 			t.Error(err)
 		}
 		caps, _ := body["capabilities"].([]any)
-		if len(caps) != 1 || caps[0] != "pause_resume" {
+		if len(caps) != 2 || caps[0] != "pause_resume" || caps[1] != jobtransfer.Capability {
 			t.Errorf("capabilities = %#v", body["capabilities"])
 		}
 		mu.Lock()

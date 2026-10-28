@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ConstructorFleet/emberdeck/driver"
+	"github.com/ConstructorFleet/emberdeck/jobtransfer"
 	"github.com/ConstructorFleet/emberdeck/toolpath"
 )
 
@@ -49,7 +50,8 @@ type workerJob struct {
 	Lease string `json:"lease"`
 	Gcode string `json:"gcode,omitempty"`
 	// ExpectedSettings is the profile snapshot's $30/$31/$32 for generated jobs.
-	ExpectedSettings *driver.Settings `json:"expected_settings,omitempty"`
+	ExpectedSettings *driver.Settings      `json:"expected_settings,omitempty"`
+	Content          *jobtransfer.Manifest `json:"content,omitempty"`
 }
 
 // jobRecord is one durable metadata entry in jobs.json (format version 2).
