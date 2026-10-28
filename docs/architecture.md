@@ -156,6 +156,7 @@ A selected GRBL 1.1 profile declares a millimetre work area with a lower-left
 origin, feed and commanded-power limits, and controller settings. These values
 are operator declarations; the server does not measure the machine, home it,
 set its origin, or configure GRBL.
+
 The supported power mapping requires matching `$30`, `$31=0`, and `$32=1`.
 Workers read these values with GRBL's read-only `$$` during readiness, before
 any program byte. The server refuses to start a profile-generated job (409) when
@@ -205,3 +206,12 @@ GRBL feed hold is a software motion control, not an enclosure interlock or a
 physical emergency stop. Cancellation and communication failure still take the
 bounded stop/reset path. Any active control state is interrupted on restart or
 heartbeat expiration, and never automatically resumed.
+
+## Documentation visual identity
+
+The generated documentation shares the console's near-black surfaces, lime
+accent, neutral text, and monospace technical labels through semantic color,
+spacing, and radius tokens. The browser theme is intentionally dark-only to
+match the console; print styles switch to black text on white paper. The docs
+cover the versioned driver adapter API as an in-process prototype; it is not yet
+loaded by the server or worker.
