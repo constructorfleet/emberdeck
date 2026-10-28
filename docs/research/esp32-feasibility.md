@@ -4,11 +4,13 @@
 
 **Decision: conditionally feasible as a worker that forwards EmberDeck's existing GRBL byte protocol to an already qualified controller.** A standalone ESP-IDF implementation is the best fit. Do not claim support for direct laser/motion control or ESPHome integration today.
 
-The server and Go worker implement a bounded, digest-verified transfer protocol. A portable native C prototype now exercises bounded staging, content verification, and the no-output-before-verification gate. Production MCU firmware must still integrate that contract with the worker lifecycle. No board, electrical interface, or physical machine is qualified.
+The server and Go worker implement a bounded, digest-verified transfer protocol. A portable native C prototype now exercises bounded staging, content verification, and the no-output-before-verification gate. Its coordinator uses injected callbacks for fresh sessions, assignment polls, range fetches, active polls, and terminal reports. The controller adapter receives the verified handle and can report monotonic acknowledged progress, cancel, or fail closed while retaining the assigned lease.
+
+Production MCU firmware must still integrate those seams with the worker lifecycle. No board, electrical interface, or physical machine is qualified.
 
 This report records the feasibility investigation requested by [issue #3](https://github.com/constructorfleet/emberdeck/issues/3), which is closed after its decision and milestone plan. The first no-motion milestone is implemented as a host-only contract prototype in [`firmware/esp32-worker/`](../../firmware/esp32-worker/README.md).
 
-The prototype is not an ESP-IDF target build. It does not implement network sessions, worker credentials, leases, polling, heartbeats, progress, receipts, or a controller state machine. Its fake UART is an in-memory test sink. No ESP32 board, electrical interface, or physical machine is supported or qualified.
+The prototype is not an ESP-IDF target build. It does not implement a real HTTP client, session-ID generation, worker credentials, persistence or retries for lost receipts, or a GRBL controller state machine. The one-second active-poll cadence is an adapter contract; the portable core does not measure or enforce it. Its fake HTTP callbacks and UART sink are in-memory test seams, not an integrated HTTP/UART worker or evidence of physical behavior. No ESP32 board, electrical interface, or physical machine is supported or qualified.
 
 The active server and Go worker behavior below was checked against `docs/api.md`, `docs/architecture.md`, `docs/serial.md`, `docs/worker.md`, `internal/server/lifecycle.go`, `internal/server/server.go`, `worker/worker.go`, and `driver/driver.go`.
 
@@ -99,9 +101,11 @@ Maintenance includes MCU protocol/TLS, certificate and credential rotation, flas
 
 ## Prototype gates and hardware qualification
 
-1. **Contract prototype (no motion hardware).** The server/Go protocol side of [#57 chunked verified transfer](https://github.com/constructorfleet/emberdeck/issues/57) and the portable C staging gate are implemented. The C prototype in [`firmware/esp32-worker/`](../../firmware/esp32-worker/README.md) enforces a 4 MiB cap, requests ordered ranges no larger than 4 KiB, checks SHA-256 and G-code framing, seals staged storage, and permits one fake-UART send only after verification.
+1. **Contract prototype (no motion hardware).** The server/Go protocol side of [#57 chunked verified transfer](https://github.com/constructorfleet/emberdeck/issues/57) and the portable C staging gate are implemented. The C prototype in [`firmware/esp32-worker/`](../../firmware/esp32-worker/README.md) enforces a 4 MiB cap, requests ordered ranges no larger than 4 KiB, checks SHA-256 and G-code framing, seals staged storage, and permits one fake-UART send only after verification. Its coordinator accepts injected callbacks for session creation, assignment polling, active progress polling, range fetch, and terminal reports.
 
-   Native CMake/CTest coverage includes valid multi-range content, truncation, digest mismatch, malformed G-code, oversized manifests, out-of-order fetch, partial-stage cleanup, storage mutation, and no replay. These are host contract tests, not HTTP/session/lease/receipt tests and not an ESP-IDF build. The remaining work is device integration and #57's session, lease, progress, receipt, and protocol fault tests. Worker credential scoping is implemented by [#56](https://github.com/constructorfleet/emberdeck/issues/56).
+   Native CMake/CTest coverage includes valid multi-range content, truncation, digest mismatch, malformed G-code, oversized manifests, out-of-order fetch, partial-stage cleanup, storage mutation, and no output before verification. Worker-cycle tests with fake adapters cover repeated active polls, monotonic progress, unchanged lease identity, cancellation, failed-poll receipts, controller-state preservation, and terminal completion gating.
+
+   These tests do not include a real HTTP client, measured one-second cadence, session/credential integration, lost or duplicate receipt retries, or end-to-end Go-worker compatibility through a fake HTTP/UART server. Worker credential scoping is implemented by [#56](https://github.com/constructorfleet/emberdeck/issues/56), but the C prototype does not consume those credentials.
 
 2. **Protocol prototype (controller with motor/laser outputs disconnected).** Implement the ESP-IDF worker state machine on N8R8. Run UART transcripts for initial `Idle`, each `ok`, errors, alarm, stale status, hold `Hold:1`/`Hold:0`, pause-before-first-line, resume fresh status, cancel, and timeout. Assert exact emitted bytes and no G-code after each injected failure.
 
@@ -115,4 +119,4 @@ Maintenance includes MCU protocol/TLS, certificate and credential rotation, flas
 
 **Acceptance scope:** The #3 feasibility decision and no-motion host contract prototype are complete; deployable ESP32 firmware is not. ESP32-S3-DevKitC-1-N8R8 is a candidate, not a supported board. ESPHome is unsuitable as the job-worker runtime unless it can host the exact lease/control contract without compromising failure behavior; the cited ESPHome docs do not describe such an integration. FluidNC is a direct motion controller option, not a bridge implementation.
 
-Blockers for MCU support include ESP-IDF integration of network authentication, sessions and leases; progress and receipt handling; controller pause/resume/cancel behavior; secure update lifecycle; exact UART electrical target; protocol fault testing on firmware; and successful physical qualification. No firmware, board, or laser operation is claimed available.
+Blockers for MCU support include a real HTTP/session/credential adapter; measured active-poll timing; persistent lost/duplicate receipt handling; end-to-end fake HTTP/UART and Go-worker compatibility tests; ESP-IDF integration of the controller state machine, pause/resume/cancel behavior, and secure update lifecycle; an exact UART electrical target; firmware protocol fault testing; and successful physical qualification. No firmware, board, or laser operation is claimed available.
