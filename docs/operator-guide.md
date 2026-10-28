@@ -8,6 +8,16 @@ stylesheet, script, and icon load without the API key. Only `/api/` requests
 need the key, so a mistyped address shows **Page not found** rather than an
 authentication error.
 
+## Console appearance and accessibility
+
+The operator console is deliberately dark-only: it declares `color-scheme: dark`
+and does not switch palettes for `prefers-color-scheme: light`. Keeping a single
+tested palette avoids an unverified appearance for review and machine-status
+colors. Console surfaces, text, borders, and status colors use the semantic
+tokens in `internal/server/assets/style.css`; its type scale starts at 12 px and
+its spacing scale uses 4 px increments. The browser suite checks computed text
+contrast against the rendered surface and guards the minimum type sizes.
+
 ## Connect and choose a driver
 
 Open the EmberDeck console and enter the private API key supplied by the server
