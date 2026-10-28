@@ -123,10 +123,16 @@ All profile requests are authenticated, strict single JSON objects limited to
 64 KiB, and reject unknown fields. Names are trimmed and must contain 1–120
 bytes. Width and height must be positive and at most 10,000 mm. Feed limits
 must satisfy `0 < min_feed_mm_min <= max_feed_mm_min <= 100000`. Dimension and
-feed values support at most three decimal places. `max_s` is an integer from 1
-through 1,000,000,000; `max_power_percent` is greater than zero and at most
+feed and percentage values support at most three decimal places. `max_s` is an
+integer from 1 through 1,000,000,000; `max_power_percent` is greater than zero and at most
 100. `min_s` must be explicitly present and equal zero. These are declared
 limits, not hardware qualification or safety claims.
+
+Example profile creation body (updates also include the expected `revision`):
+
+```json
+{"schema_version":1,"name":"Declared GRBL","controller":"grbl-1.1","units":"mm","origin":"lower-left","width_mm":300,"height_mm":200,"min_s":0,"max_s":1000,"min_feed_mm_min":1,"max_feed_mm_min":6000,"max_power_percent":100,"laser_mode_enabled":true}
+```
 
 ## Editable rectangle projects
 

@@ -58,6 +58,10 @@ control and job state.
   line progress, controller completion, and failure reporting.
 - Live controller status distinguishes pause requests, deceleration, confirmed
   holds, and resumed execution. The same connection and lease span a pause.
+- Declared GRBL profiles and saved rectangle vector-engraving projects, with a
+  bounded static preview and separate generated jobs for review and explicit
+  dispatch. SVG/text, cutting layers, raster engraving, and live toolpath
+  execution tracking remain future work.
 - One active job per online driver; assignment leases and unique worker sessions.
 - Fail-closed worker behavior on server communication failures. Restarted or
   disconnected work becomes interrupted, with no automatic replay.
@@ -66,6 +70,16 @@ control and job state.
 - Required PR checks across Linux, macOS, Windows, plus container smoke testing.
   Release Please maintains the pending release; releases build native binaries,
   documentation, and container images.
+
+## Design a rectangle
+
+Declare the prepared machine profile, edit and save a rectangle engraving
+project, then generate a separate queued program for review. Generation clears
+the previous readiness confirmation and never starts the machine. See the
+[designer walkthrough](docs/operator-guide.md#declare-a-machine-profile-and-design-a-rectangle)
+for the supported GRBL settings and coordinate assumptions.
+
+![Saved rectangle engraving source and its declared work-area preview](docs/assets/screenshots/designer-project.png)
 
 ## Documentation and development
 

@@ -15,16 +15,18 @@ where indicated. This is an early foundation, not a production certification.
 - [x] Release automation for binaries, generated docs, and container images
 - [x] Verify hosted cross-platform/container checks and v0.1.0 release deployment
 - [x] Pause/resume with explicit controller state reporting
-- [ ] Machine profiles, work-envelope validation, and coordinate preview
+- [x] Declared GRBL profiles and envelope validation/preview for rectangle projects
+- [ ] Profile-aware parsing and coordinate preview for uploaded machine programs
 - [ ] Job history metadata, filtering, pagination, and large-library storage
 - [ ] Separate operator/worker credentials and multi-user permissions
 - [ ] Camera monitoring with authenticated access
 - [ ] Supported-controller hardware qualification matrix and test evidence
 - [ ] Installer/package validation on actual Pi, Windows, Mac, Linux, and LXC
 
-Only the GRBL protocol is implemented. Ruida, proprietary DSP protocols, image
-rasterization, CAD/CAM toolpath generation, and OctoPrint plugin compatibility
-are outside the current implementation. Plugins can add adapters in later work.
+Only the GRBL protocol and a rectangle vector-engraving generator are implemented.
+Ruida, proprietary DSP protocols, image rasterization, general CAD/CAM geometry,
+and OctoPrint plugin compatibility are outside the current implementation.
+Plugins can add adapters in later work.
 
 ## Feature requests
 
@@ -49,8 +51,11 @@ their implementation status and evidence:
   and explicit dispatch. Verify geometry/toolpaths at public interfaces and the
   complete browser workflow, and add screenshots from the implemented designer.
   Distinguish vector cutting, vector engraving, and raster engraving milestones.
-  [Source review and proposed architecture](research/designer-architecture.md)
-  cover the planning subset; the end-to-end implementation remains required.
+  The first end-to-end milestone supports declared profiles and one saved
+  rectangle vector-engraving operation through preview, immutable generated job,
+  review, and explicit dispatch. [Source review and remaining architecture](research/designer-architecture.md)
+  distinguish this milestone from the remaining multi-object editing, transforms,
+  SVG/text, cutting operations, and raster evaluation. The full issue stays open.
 - [ ] [#7: Live completed/remaining toolpath progress](https://github.com/constructorfleet/emberdeck/issues/7).
   Implement camera-independent execution monitoring for supported uploaded G-code
   as well as designer-generated jobs. Share the coordinate/toolpath renderer
