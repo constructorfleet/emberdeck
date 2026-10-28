@@ -16,7 +16,7 @@
   <header class="topbar">
     <a class="brand" href="/" aria-label="EmberDeck home"><span class="brand-mark" aria-hidden="true">E</span><span>EMBER<span class="brand-light">DECK</span></span></a>
     <nav class="app-nav" aria-label="Main pages"><a href="/" data-page-link="library">Job library</a><a href="/designer" data-page-link="designer">Designer</a></nav>
-    <div class="top-meta"><span id="status-dot" class="status-dot" data-state="disconnected" role="img" aria-label="Disconnected"></span><span>LOCAL JOB LIBRARY</span><span class="version">OPERATOR CONSOLE</span></div>
+    <div class="top-meta"><span id="status-dot" class="status-dot" data-state="disconnected" role="img" aria-label="Disconnected"></span><span>LASER WORKSPACE</span><span class="version">OPERATOR CONSOLE</span></div>
   </header>
   <main>
     <section class="intro">
@@ -24,7 +24,7 @@
       <div class="library-count"><span class="count-number" id="job-count">—</span><span>JOBS STORED</span></div>
     </section>
     <section class="auth panel" aria-labelledby="access-title">
-      <div class="section-title"><div><p class="eyebrow">01 / ACCESS</p><h2 id="access-title">Connect to your library</h2></div><span class="lock-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"></rect><path d="M8 10V7a4 4 0 1 1 8 0v3M12 14v3"></path></svg></span></div>
+      <div class="section-title"><div><p class="eyebrow">01 / ACCESS</p><h2 id="access-title">Connect to your library</h2></div><div class="section-actions" aria-hidden="true"></div></div>
       <form id="auth-form" class="auth-form"><label for="api-key">API key</label><div class="inline-field"><input id="api-key" type="password" autocomplete="current-password" placeholder="Enter your EmberDeck API key" required><button id="connect-button" class="button button-primary" type="submit"><span id="connect-label">Connect</span><svg id="connect-arrow" class="button-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15m-6-6 6 6-6 6"></path></svg></button></div><p class="hint">Your key stays in this browser session and is sent only to this EmberDeck server.</p></form>
       <div id="connection-state" class="sr-only" role="status">Not connected</div>
       <div id="connection-controls" class="connection-controls" hidden><span id="connected-label" role="status">Connected</span><button id="change-key" class="button button-small" type="button">Change key</button><button id="disconnect" class="button button-small button-danger" type="button">Disconnect</button></div>
@@ -34,8 +34,8 @@
       <button class="button button-small notice-dismiss" type="button" aria-label="Dismiss notification">Dismiss</button>
     </div>
     <section id="designer-panel" class="panel designer-panel" aria-labelledby="designer-title">
-      <div class="section-title"><div><p class="eyebrow">DESIGN SOURCE</p><h1 id="designer-title">Designer</h1><p class="lede">Create and edit vector designs for a declared machine workspace.</p></div><span class="step-number">MM · GRBL</span></div>
-      <p class="designer-intro">Declare the prepared work area, edit a rectangle or multi-path vector design, and review its generated job before dispatch. Coordinates use the lower-left work origin; controller settings are read for verification but never changed.</p>
+      <div class="section-title"><div><p class="eyebrow">02 / DESIGN SOURCE</p><h1 id="designer-title">Designer</h1><p class="lede">Create and edit vector designs for a declared machine workspace.</p></div><div class="section-actions" aria-hidden="true"></div></div>
+      <p class="designer-intro">Declare the prepared work area, edit a rectangle or multi-path vector design, and review its generated job before dispatch. Coordinates use millimetres and the lower-left work origin; controller settings are read for verification but never changed.</p>
       <div id="designer-status" class="designer-status" role="status">Connect to load saved profiles and projects.</div>
       <div class="designer-columns">
         <section class="designer-section" aria-labelledby="profiles-title">
@@ -146,7 +146,7 @@
     </section>
     <div class="workspace">
       <section class="panel upload-panel" aria-labelledby="upload-title">
-        <div class="section-title"><div><p class="eyebrow">02 / INTAKE</p><h2 id="upload-title">Add a program</h2></div><span class="step-number">02</span></div>
+        <div class="section-title"><div><p class="eyebrow">02 / INTAKE</p><h2 id="upload-title">Add a program</h2></div><div class="section-actions" aria-hidden="true"></div></div>
         <form id="upload-form">
           <label for="job-file">G-code file</label>
           <label class="dropzone" for="job-file"><svg class="upload-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m-5 5 5-5 5 5M5 14v5h14v-5"></path></svg><strong id="file-label">Choose a G-code file</strong><span class="dropzone-caption">Plain text · up to 4 MiB</span><input id="job-file" type="file" accept=".gcode,.nc,.txt,text/plain" required disabled></label>
@@ -156,7 +156,7 @@
         </form>
       </section>
       <section class="panel jobs-panel" aria-labelledby="jobs-title">
-         <div class="section-title jobs-heading"><div><p class="eyebrow">03 / LIBRARY</p><h2 id="jobs-title">Stored programs</h2></div><button id="refresh" class="icon-button" type="button" aria-label="Refresh jobs" title="Refresh" disabled><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7v5h-5M4 17v-5h5"></path><path d="M5.6 9a7 7 0 0 1 11.6-2L20 12M4 12l2.8 5a7 7 0 0 0 11.6-2"></path></svg></button></div>
+         <div class="section-title jobs-heading"><div><p class="eyebrow">03 / LIBRARY</p><h2 id="jobs-title">Stored programs</h2></div><div class="section-actions"><button id="refresh" class="icon-button" type="button" aria-label="Refresh jobs" title="Refresh" disabled><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7v5h-5M4 17v-5h5"></path><path d="M5.6 9a7 7 0 0 1 11.6-2L20 12M4 12l2.8 5a7 7 0 0 0 11.6-2"></path></svg></button></div></div>
         <p id="library-freshness" class="library-freshness" role="status">Connect to load the library.</p>
         <div class="driver-controls"><label for="driver-select">Connected driver</label><select id="driver-select" disabled><option value="">Connect to load drivers</option></select><span id="driver-status" class="driver-status">Drivers are not loaded.</span><span id="controller-settings" class="driver-status" role="status" hidden></span></div>
         <label class="safety-check"><input id="operator-confirmation" type="checkbox" disabled><span>I have checked the program and setup, verified the machine’s interlocks, and will supervise the cut.</span></label>
@@ -167,7 +167,7 @@
       </section>
     </div>
     <section id="program-panel" class="panel program-panel" hidden aria-labelledby="program-title">
-      <div class="section-title"><div><p class="eyebrow">PROGRAM VIEW</p><h2 id="program-title">Program</h2></div><button id="close-program" class="icon-button" type="button" aria-label="Close program"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"></path></svg></button></div>
+      <div class="section-title"><div><p class="eyebrow">PROGRAM VIEW</p><h2 id="program-title">Program</h2></div><div class="section-actions"><button id="close-program" class="icon-button" type="button" aria-label="Close program"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"></path></svg></button></div></div>
       <div id="program-provenance" class="program-provenance" hidden></div>
       <section id="program-history" class="job-history" aria-label="Event history" hidden></section>
       <pre id="program-code" class="program-code"></pre>
