@@ -3,6 +3,7 @@ package driver
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -29,6 +30,11 @@ func TestStreamSendsLinesAndWaitsForIdle(t *testing.T) {
 		n, _ = machine.Read(reader)
 		if got := string(reader[:n]); got != "M5\n" {
 			t.Errorf("second command = %q", got)
+		}
+		io.WriteString(machine, "ok\r\n")
+		n, _ = machine.Read(reader)
+		if got := string(reader[:n]); got != "M5\n" {
+			t.Errorf("beam-off cleanup = %q", got)
 		}
 		io.WriteString(machine, "ok\r\n")
 		n, _ = machine.Read(reader)
@@ -240,6 +246,11 @@ func TestStreamStripsCommentsWithoutSendingRealtimeBytes(t *testing.T) {
 			t.Errorf("parenthetical comment output = %q", line)
 		}
 		io.WriteString(machine, "ok\n")
+		line, _ = reader.ReadString('\n')
+		if line != "M5\n" {
+			t.Errorf("beam-off cleanup = %q", line)
+		}
+		io.WriteString(machine, "ok\n")
 		var status [1]byte
 		reader.Read(status[:])
 		io.WriteString(machine, "<Idle|MPos:0,0,0>\n")
@@ -254,5 +265,97 @@ func TestValidateRejectsMalformedCommentsAndRealtimeProgramBytes(t *testing.T) {
 		if _, err := Validate(program); err == nil {
 			t.Errorf("Validate(%q) succeeded", program)
 		}
+	}
+}
+
+func TestStreamStopsMachineAfterControllerRejectsLaterLine(t *testing.T) {
+	client, machine := net.Pipe()
+	defer client.Close()
+	defer machine.Close()
+	peerDone := make(chan error, 1)
+	go func() {
+		var b [64]byte
+		if _, err := machine.Read(b[:]); err != nil {
+			peerDone <- err
+			return
+		}
+		if _, err := io.WriteString(machine, "<Idle|MPos:0,0,0>\n"); err != nil {
+			peerDone <- err
+			return
+		}
+		if _, err := machine.Read(b[:]); err != nil {
+			peerDone <- err
+			return
+		}
+		if _, err := io.WriteString(machine, "ok\n"); err != nil {
+			peerDone <- err
+			return
+		}
+		if _, err := machine.Read(b[:]); err != nil {
+			peerDone <- err
+			return
+		}
+		if _, err := io.WriteString(machine, "error:2\n"); err != nil {
+			peerDone <- err
+			return
+		}
+		n, err := machine.Read(b[:])
+		if err != nil {
+			peerDone <- err
+			return
+		}
+		if got := string(b[:n]); got != "!\x18" {
+			peerDone <- fmt.Errorf("stop bytes = %q", got)
+			return
+		}
+		machine.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		n, err = machine.Read(b[:])
+		if err == nil {
+			peerDone <- fmt.Errorf("unexpected extra program bytes %q", b[:n])
+			return
+		}
+		peerDone <- nil
+	}()
+	started := time.Now()
+	err := Stream(context.Background(), client, "G1 X1\nG1 X2\nG1 X3", nil)
+	if err == nil || !strings.Contains(err.Error(), "error:2") {
+		t.Fatalf("Stream error = %v", err)
+	}
+	if time.Since(started) > time.Second {
+		t.Fatal("error stop path was not bounded")
+	}
+	if err := <-peerDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStreamSendsBeamOffCleanupBeforeFinalIdle(t *testing.T) {
+	client, machine := net.Pipe()
+	defer client.Close()
+	defer machine.Close()
+	go func() {
+		reader := bufio.NewReader(machine)
+		var status [1]byte
+		machine.Read(status[:])
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\n")
+		line, _ := reader.ReadString('\n')
+		if line != "G1 X1\n" {
+			t.Errorf("source line = %q", line)
+		}
+		io.WriteString(machine, "ok\n")
+		line, _ = reader.ReadString('\n')
+		if line != "M5\n" {
+			t.Errorf("cleanup line = %q", line)
+		}
+		io.WriteString(machine, "ok\n")
+		machine.Read(status[:])
+		io.WriteString(machine, "<Idle|MPos:1,0,0>\n")
+	}()
+	var acked, total int
+	if err := Stream(context.Background(), client, "G1 X1", func(a, n int) { acked, total = a, n }); err != nil {
+		t.Fatal(err)
+	}
+	if acked != 1 || total != 1 {
+		t.Fatalf("source progress = %d/%d", acked, total)
 	}
 }

@@ -1,6 +1,6 @@
 # GRBL driver package
 
-`driver.Validate(program)` checks the full program and returns its executable line count. `driver.Stream(ctx, conn, program, onProgress)` streams a complete G-code program over an `io.ReadWriteCloser`. It sends one line at a time, waits for the corresponding `ok` or `error:` response, reports acknowledged line counts, and polls GRBL status after all acknowledgements until it sees `<Idle...>`. The caller owns and should close the connection after the call.
+`driver.Validate(program)` checks the full program and returns its executable line count. `driver.Stream(ctx, conn, program, onProgress)` streams a complete G-code program over an `io.ReadWriteCloser`. It sends one line at a time, waits for the corresponding `ok` or `error:` response, reports acknowledged line counts, and sends and acknowledges an injected `M5` cleanup command, then polls GRBL status until it sees `<Idle...>`. Progress counts uploaded executable lines; the cleanup command is excluded. The caller owns and should close the connection after the call.
 
 The program is validated in full before any bytes are sent. Input must be ASCII; GRBL realtime characters (`!`, `?`, `~`, Ctrl-X) in executable text are rejected. Semicolon and parenthetical comments are stripped safely; nested or unterminated parenthetical comments are rejected. Lines are trimmed, blank lines are skipped, CRLF is accepted, and executable lines may contain at most 79 bytes, matching GRBL's 80-byte line buffer including its terminator.
 

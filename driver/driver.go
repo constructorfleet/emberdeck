@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -21,7 +22,7 @@ const (
 // polls status at GRBL's supported low rate after all lines are acknowledged,
 // and returns only after observing an Idle report. The caller retains ownership
 // of conn; cancellation closes it to interrupt a blocked read.
-func Stream(ctx context.Context, conn io.ReadWriteCloser, program string, onProgress func(acked, total int)) error {
+func Stream(ctx context.Context, conn io.ReadWriteCloser, program string, onProgress func(acked, total int)) (resultErr error) {
 	if conn == nil {
 		return fmt.Errorf("driver: nil connection")
 	}
@@ -35,22 +36,49 @@ func Stream(ctx context.Context, conn io.ReadWriteCloser, program string, onProg
 
 	done := make(chan struct{})
 	watcherDone := make(chan struct{})
+	var stateMu sync.Mutex
+	var programSent, stopped bool
+	var stopOnce sync.Once
+	stop := func() {
+		stopOnce.Do(func() {
+			stateMu.Lock()
+			stopped = true
+			sent := programSent
+			stateMu.Unlock()
+			if sent {
+				// Feed hold and soft reset are bounded best effort. Closing the
+				// connection interrupts blocked writes and reads even for generic
+				// io.ReadWriteCloser implementations.
+				if deadlineConn, ok := conn.(interface{ SetWriteDeadline(time.Time) error }); ok {
+					_ = deadlineConn.SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
+				}
+				closeTimer := time.AfterFunc(100*time.Millisecond, func() { _ = conn.Close() })
+				_, _ = io.WriteString(conn, "!\x18")
+				closeTimer.Stop()
+			}
+			_ = conn.Close()
+		})
+	}
 	go func() {
 		defer close(watcherDone)
 		select {
 		case <-ctx.Done():
-			// GRBL realtime feed hold and soft reset are best-effort on cancellation.
-			if deadlineConn, ok := conn.(interface{ SetWriteDeadline(time.Time) error }); ok {
-				_ = deadlineConn.SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
-			}
-			closeTimer := time.AfterFunc(100*time.Millisecond, func() { _ = conn.Close() })
-			_, _ = io.WriteString(conn, "!\x18")
-			closeTimer.Stop()
-			_ = conn.Close()
+			stop()
 		case <-done:
 		}
 	}()
-	defer func() { close(done); <-watcherDone }()
+	defer func() {
+		if resultErr != nil {
+			stateMu.Lock()
+			sent := programSent
+			stateMu.Unlock()
+			if sent {
+				stop()
+			}
+		}
+		close(done)
+		<-watcherDone
+	}()
 
 	rw := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
 	if err := requireIdle(ctx, conn, rw.Reader); err != nil {
@@ -60,6 +88,16 @@ func Stream(ctx context.Context, conn io.ReadWriteCloser, program string, onProg
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		stateMu.Lock()
+		if stopped {
+			stateMu.Unlock()
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return fmt.Errorf("driver: connection stopped before line %d", i+1)
+		}
+		programSent = true // an attempted write may have reached the controller
+		stateMu.Unlock()
 		if _, err := rw.WriteString(line + "\n"); err != nil {
 			return fmt.Errorf("driver: send line %d: %w", i+1, err)
 		}
@@ -81,9 +119,32 @@ func Stream(ctx context.Context, conn io.ReadWriteCloser, program string, onProg
 		}
 	}
 
-	if len(lines) == 0 {
-		return fmt.Errorf("driver: program has no executable lines")
+	// Explicitly switch the spindle/laser off after the uploaded program. This
+	// cleanup command is not part of source progress accounting.
+	if err := ctx.Err(); err != nil {
+		return err
 	}
+	stateMu.Lock()
+	if stopped {
+		stateMu.Unlock()
+		return fmt.Errorf("driver: connection stopped before beam-off cleanup")
+	}
+	programSent = true
+	stateMu.Unlock()
+	if _, err := rw.WriteString("M5\n"); err != nil {
+		return fmt.Errorf("driver: send beam-off cleanup: %w", err)
+	}
+	if err := rw.Flush(); err != nil {
+		return fmt.Errorf("driver: send beam-off cleanup: %w", err)
+	}
+	cleanupReply, err := readReply(ctx, conn, rw.Reader)
+	if err != nil {
+		return fmt.Errorf("driver: beam-off cleanup response: %w", err)
+	}
+	if cleanupReply != "ok" {
+		return fmt.Errorf("driver: beam-off cleanup: controller %s", cleanupReply)
+	}
+
 	// GRBL status reports may be ignored while a prior query is pending; poll no
 	// faster than 5 Hz and tolerate unrelated push messages.
 	for {
