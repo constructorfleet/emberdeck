@@ -57,6 +57,23 @@ The simulator is software only and sends no commands to a physical cutter.
 For Windows PowerShell, see the
 [native CLI steps in Deployment](deployment.md#windows-powershell-native-cli).
 
+## Published install checks
+
+The [Published install validation workflow](../.github/workflows/published-install-validation.yml)
+runs weekly and can be started manually. It downloads the two newest published binary releases and verifies
+their published SHA-256 manifests on Ubuntu x86-64, macOS Apple silicon, and
+Windows x86-64. It launches the prior binary, authenticates with the generated
+test key, uploads and dispatches a simulated job, then starts the current
+binary against the same data directory to check upgrade and restart
+persistence. It also runs the released binary through the fake-GRBL artifact
+smoke test and removes the temporary install directory.
+
+These software checks do not qualify Raspberry Pi OS, serial device
+permissions, Windows COM ports, macOS serial devices, systemd reboot/crash
+behavior, Docker images from a published release, or LXC. Those targets still
+need recorded platform runs; simulator and fake-controller results are not
+physical hardware evidence.
+
 ## Build from source
 
 To build rather than download, install Go 1.27 and clone the repository:
