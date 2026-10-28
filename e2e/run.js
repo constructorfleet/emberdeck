@@ -58,7 +58,7 @@ async function stopServer(child) {
 }
 
 async function main() {
-  const binary = path.resolve(process.env.EMBERDECK_BINARY || path.join(root, 'bin', 'emberdeck'));
+  const binary = path.resolve(process.env.EMBERDECK_BINARY || path.join(root, 'bin', process.platform === 'win32' ? 'emberdeck.exe' : 'emberdeck'));
   if (!process.env.EMBERDECK_BINARY) {
     fs.mkdirSync(path.dirname(binary), { recursive: true });
     const result = spawnSync('go', ['build', '-o', binary, './cmd/emberdeck'], { cwd: root, stdio: 'inherit' });

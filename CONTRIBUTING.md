@@ -15,3 +15,7 @@ refactoring. Simulated hardware is not evidence of physical machine safety.
 Documentation lives with code in `docs/` and README.md. Update it in the same PR
 as behavior changes. CI builds the docs; each release deploys that release's
 version to GitHub Pages. Never document planned behavior as available.
+
+When updating linked Go dependencies, review their licenses and regenerate
+`THIRD_PARTY_NOTICES.txt` with `python3 scripts/check-notices.py --write`. CI
+compares notices with the modules actually linked into the shipped command.

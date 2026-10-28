@@ -15,7 +15,8 @@ npx playwright install chromium
 npm test
 ```
 
-The test runner builds `bin/emberdeck` when that binary is missing. It starts
+The test runner builds `bin/emberdeck` from current sources unless
+`EMBERDECK_BINARY` supplies an explicit prebuilt binary. It starts
 `emberdeck serve -simulate` with a temporary data directory and a test-only API
 key, waits for the HTTP server, runs the Playwright tests, then stops the server
 and removes the temporary data. No production data or API key is used.

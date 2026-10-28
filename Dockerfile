@@ -15,7 +15,7 @@ RUN export GOARM=${TARGETVARIANT#v}; export GOARM=${GOARM:-7}; CGO_ENABLED=0 GOO
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build --chown=65532:65532 /out/emberdeck /usr/local/bin/emberdeck
 COPY --from=build --chown=65532:65532 /out/data /data
-COPY LICENSE /usr/share/licenses/emberdeck/LICENSE
+COPY LICENSE THIRD_PARTY_NOTICES.txt /usr/share/licenses/emberdeck/
 VOLUME ["/data"]
 EXPOSE 8080
 ENV EMBERDECK_API_KEY=""
