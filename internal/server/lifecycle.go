@@ -78,6 +78,7 @@ func (s *Server) expire() error {
 		if time.Since(d.LastSeen) > driverTTL {
 			if manual := s.manualControls[id]; manual != nil && manualAssignmentActive(manual.State) {
 				manual.State = manualStateInterrupted
+				manual.RequireFreshStatus = true
 				manual.Error = "worker lease expired; inspect the machine before releasing manual control"
 				manual.Updated = time.Now().UTC()
 			}
@@ -343,16 +344,17 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 
 // pollReport is one worker poll: session metadata plus optional job progress.
 type pollReport struct {
-	Capabilities    []string            `json:"capabilities"`
-	ControllerState string              `json:"controller_state"`
-	Session         string              `json:"session"`
-	JobID           string              `json:"job_id"`
-	Lease           string              `json:"lease"`
-	State           string              `json:"state"`
-	Acked           int                 `json:"acked"`
-	Total           int                 `json:"total"`
-	Error           string              `json:"error"`
-	Execution       *toolpath.Execution `json:"execution"`
+	Capabilities          []string            `json:"capabilities"`
+	ControllerState       string              `json:"controller_state"`
+	ControllerStatusFresh bool                `json:"controller_status_fresh,omitempty"`
+	Session               string              `json:"session"`
+	JobID                 string              `json:"job_id"`
+	Lease                 string              `json:"lease"`
+	State                 string              `json:"state"`
+	Acked                 int                 `json:"acked"`
+	Total                 int                 `json:"total"`
+	Error                 string              `json:"error"`
+	Execution             *toolpath.Execution `json:"execution"`
 	// Controller settings read with `$$` (see controller_settings.go).
 	ControllerSettings *driver.Settings `json:"controller_settings"`
 	SettingsReadAt     *time.Time       `json:"settings_read_at"`
@@ -462,6 +464,7 @@ func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCa
 		fail(w, 400, "invalid controller settings report")
 		return nil, false, false
 	}
+	manual := s.manualControls[id]
 	recordSettings(&d, in)
 	if in.Capabilities != nil {
 		if d.Busy && !sameCapabilities(d.Capabilities, in.Capabilities) {
@@ -472,14 +475,11 @@ func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCa
 			d.Capabilities = append([]string(nil), in.Capabilities...)
 		}
 	}
-	if in.ControllerState != "" {
-		d.ControllerState = in.ControllerState
-	}
+	recordManualControllerStatus(&d, manual, in)
 	d.ID = id
 	d.Session = in.Session
 	d.CredentialID = cause.actor.ID
 	d.LastSeen = time.Now().UTC()
-	manual := s.manualControls[id]
 	if in.ManualLease != "" {
 		if err := manualReceiptError(manual, in); err != nil {
 			fail(w, http.StatusConflict, err.Error())
@@ -501,6 +501,8 @@ func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCa
 			}
 			if manualMotion(manual.Action) && in.ControllerState != "Idle" {
 				manual.State = manualStateInterrupted
+				manual.RequireFreshStatus = true
+				d.ControllerState = ""
 				manual.Error = "motion ended without a fresh Idle controller report; inspect the machine before release"
 			} else {
 				manual.State = in.ManualState

@@ -84,9 +84,51 @@ func Jog(ctx context.Context, conn io.ReadWriteCloser, request JogRequest) error
 			_ = deadline.SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
 		}
 		closeTimer := time.AfterFunc(100*time.Millisecond, func() { _ = conn.Close() })
-		_, err := io.WriteString(conn, raw)
+		n, err := io.WriteString(conn, raw)
 		closeTimer.Stop()
+		if err == nil && n != len(raw) {
+			err = io.ErrShortWrite
+		}
 		return err
+	}
+	stopJog := func(cause error) error {
+		if err := write("\x85"); err != nil {
+			return fmt.Errorf("%w; driver: jog stop was not confirmed: could not send cancel: %v", cause, err)
+		}
+		deadline := time.NewTimer(2 * time.Second)
+		defer deadline.Stop()
+		ticker := time.NewTicker(manualPoll)
+		defer ticker.Stop()
+		for {
+			if err := write("?"); err != nil {
+				return fmt.Errorf("%w; driver: jog stop was not confirmed: status query failed: %v", cause, err)
+			}
+			queryDeadline := time.NewTimer(manualPoll)
+			awaitingStatus := true
+			for awaitingStatus {
+				select {
+				case line := <-lines:
+					status, err := ParseStatusReport(line)
+					if err == nil && status.State == "Idle" {
+						return cause
+					}
+				case err := <-readErrors:
+					queryDeadline.Stop()
+					return fmt.Errorf("%w; driver: jog stop was not confirmed: controller read failed: %v", cause, err)
+				case <-queryDeadline.C:
+					awaitingStatus = false
+				case <-deadline.C:
+					queryDeadline.Stop()
+					return fmt.Errorf("%w; driver: jog stop was not confirmed within 2 seconds", cause)
+				}
+			}
+			queryDeadline.Stop()
+			select {
+			case <-ticker.C:
+			case <-deadline.C:
+				return fmt.Errorf("%w; driver: jog stop was not confirmed within 2 seconds", cause)
+			}
+		}
 	}
 	awaitLine := func(deadline time.Duration) (string, error) {
 		timer := time.NewTimer(deadline)
@@ -156,7 +198,7 @@ func Jog(ctx context.Context, conn io.ReadWriteCloser, request JogRequest) error
 	}
 	command := fmt.Sprintf("$J=G91 G21 %s%s F%s\n", request.Axis, strconv.FormatFloat(request.DistanceMM, 'f', -1, 64), strconv.FormatFloat(request.FeedMMMin, 'f', -1, 64))
 	if err := write(command); err != nil {
-		return fmt.Errorf("driver: send jog: %w", err)
+		return stopJog(fmt.Errorf("driver: send jog: %w", err))
 	}
 	acked := false
 	statusTicker := time.NewTicker(manualPoll)
@@ -164,12 +206,10 @@ func Jog(ctx context.Context, conn io.ReadWriteCloser, request JogRequest) error
 	for {
 		select {
 		case <-bounded.Done():
-			_ = write("\x85")
-			return bounded.Err()
+			return stopJog(bounded.Err())
 		case <-statusTicker.C:
 			if err := write("?"); err != nil {
-				_ = write("\x85")
-				return fmt.Errorf("driver: query jog state: %w", err)
+				return stopJog(fmt.Errorf("driver: query jog state: %w", err))
 			}
 		case line := <-lines:
 			if line == "ok" {
@@ -177,16 +217,14 @@ func Jog(ctx context.Context, conn io.ReadWriteCloser, request JogRequest) error
 				continue
 			}
 			if strings.HasPrefix(line, "error:") || strings.HasPrefix(line, "ALARM:") {
-				_ = write("\x85")
-				return fmt.Errorf("driver: jog rejected: %s", line)
+				return stopJog(fmt.Errorf("driver: jog rejected: %s", line))
 			}
 			status, parseErr := ParseStatusReport(line)
 			if parseErr == nil && acked && status.State == "Idle" {
 				return nil
 			}
 		case err := <-readErrors:
-			_ = write("\x85")
-			return fmt.Errorf("driver: controller read failed during jog: %w", err)
+			return stopJog(fmt.Errorf("driver: controller read failed during jog: %w", err))
 		}
 	}
 }
@@ -266,8 +304,11 @@ func ManualCommand(ctx context.Context, conn io.ReadWriteCloser, request ManualC
 			_ = d.SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
 		}
 		timer := time.AfterFunc(100*time.Millisecond, func() { _ = conn.Close() })
-		_, e := io.WriteString(conn, raw)
+		n, e := io.WriteString(conn, raw)
 		timer.Stop()
+		if e == nil && n != len(raw) {
+			e = io.ErrShortWrite
+		}
 		return e
 	}
 	read := func() (string, error) {
@@ -327,7 +368,8 @@ func ManualCommand(ctx context.Context, conn io.ReadWriteCloser, request ManualC
 		}
 		return e
 	}
-	if e = awaitManualAck(read); e != nil {
+	ackCount := strings.Count(command, "\n")
+	if e = awaitManualAcks(read, ackCount); e != nil {
 		if motionSent {
 			return stopManualMotion(request.Action, write, lines, readErrors, e)
 		}
@@ -429,6 +471,15 @@ func awaitManualAck(read func() (string, error)) error {
 			return fmt.Errorf("driver: controller rejected manual command: %s", line)
 		}
 	}
+}
+
+func awaitManualAcks(read func() (string, error), count int) error {
+	for i := 0; i < count; i++ {
+		if err := awaitManualAck(read); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func manualCommand(request ManualCommandRequest) (string, bool, string, error) {

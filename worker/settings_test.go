@@ -19,6 +19,19 @@ import (
 
 const profileSnapshot = `{"$30":1000,"$31":0,"$32":1}`
 
+func TestControllerFreshStatusIsReportedOnce(t *testing.T) {
+	var report controllerReport
+	report.setFreshControllerState("Idle")
+	first := report.poll("session", nil)
+	if first.ControllerState != "Idle" || !first.ControllerStatusFresh {
+		t.Fatalf("fresh status poll = %#v; want fresh Idle", first)
+	}
+	second := report.poll("session", nil)
+	if second.ControllerStatusFresh {
+		t.Fatalf("fresh status marker was repeated: %#v", second)
+	}
+}
+
 // settingsController answers status queries with Idle, `$$` with reply, and
 // program lines with ok. It records every byte the worker writes.
 func settingsController(reply string, written *strings.Builder, mu *sync.Mutex) io.ReadWriteCloser {

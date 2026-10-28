@@ -166,7 +166,7 @@ func TestManualCancelRequiresFreshIdleBeforeReleaseAfterUnsafeStop(t *testing.T)
 	if start.Code != http.StatusConflict {
 		t.Fatalf("job start before fresh Idle = %d %s", start.Code, start.Body.String())
 	}
-	request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll", `{"session":"owner","capabilities":["manual_jog"],"controller_state":"Idle"}`, "test-key")
+	request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll", `{"session":"owner","capabilities":["manual_jog"],"controller_state":"Idle","controller_status_fresh":true}`, "test-key")
 	released := request(t, s, http.MethodDelete, "/api/v1/drivers/bench/manual", `{"confirmed":true}`, "test-key")
 	if released.Code != http.StatusOK {
 		t.Fatalf("release after Idle = %d %s", released.Code, released.Body.String())

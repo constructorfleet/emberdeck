@@ -33,24 +33,25 @@ type manualControlRequest struct {
 }
 
 type manualControlLease struct {
-	ID            string           `json:"id"`
-	Lease         string           `json:"-"`
-	DriverID      string           `json:"driver_id"`
-	Action        string           `json:"action"`
-	Axis          string           `json:"axis,omitempty"`
-	DistanceMM    float64          `json:"distance_mm,omitempty"`
-	FeedMMMin     float64          `json:"feed_mm_min,omitempty"`
-	JobID         string           `json:"job_id,omitempty"`
-	Bounds        *toolpath.Bounds `json:"bounds,omitempty"`
-	LaserOff      bool             `json:"laser_off"`
-	State         string           `json:"state"`
-	Error         string           `json:"error,omitempty"`
-	MaxDuration   time.Duration    `json:"-"`
-	MaxDurationMS int64            `json:"max_duration_ms"`
-	Created       time.Time        `json:"created"`
-	Updated       time.Time        `json:"updated"`
-	ExpiresAt     time.Time        `json:"expires_at"`
-	Session       string           `json:"-"`
+	ID                 string           `json:"id"`
+	Lease              string           `json:"-"`
+	DriverID           string           `json:"driver_id"`
+	Action             string           `json:"action"`
+	Axis               string           `json:"axis,omitempty"`
+	DistanceMM         float64          `json:"distance_mm,omitempty"`
+	FeedMMMin          float64          `json:"feed_mm_min,omitempty"`
+	JobID              string           `json:"job_id,omitempty"`
+	Bounds             *toolpath.Bounds `json:"bounds,omitempty"`
+	LaserOff           bool             `json:"laser_off"`
+	State              string           `json:"state"`
+	Error              string           `json:"error,omitempty"`
+	MaxDuration        time.Duration    `json:"-"`
+	MaxDurationMS      int64            `json:"max_duration_ms"`
+	Created            time.Time        `json:"created"`
+	Updated            time.Time        `json:"updated"`
+	ExpiresAt          time.Time        `json:"expires_at"`
+	Session            string           `json:"-"`
+	RequireFreshStatus bool             `json:"-"`
 }
 
 type manualControlAssignment struct {
@@ -83,6 +84,19 @@ func manualCapability(action string) (string, time.Duration, bool) {
 
 func manualMotion(action string) bool {
 	return action == "home" || action == "jog" || action == "frame"
+}
+
+func recordManualControllerStatus(d *Driver, manual *manualControlLease, in *pollReport) {
+	if in.ControllerState == "" {
+		return
+	}
+	if manual != nil && manual.State == manualStateInterrupted && manual.RequireFreshStatus {
+		if !in.ControllerStatusFresh {
+			return
+		}
+		manual.RequireFreshStatus = false
+	}
+	d.ControllerState = in.ControllerState
 }
 
 func manualAssignmentActive(state string) bool {
@@ -248,7 +262,7 @@ func (s *Server) releaseManualControl(w http.ResponseWriter, r *http.Request) {
 		respond(w, http.StatusAccepted, record)
 		return
 	}
-	if record.State == manualStateInterrupted && d.ControllerState != "Idle" {
+	if record.State == manualStateInterrupted && (record.RequireFreshStatus || d.ControllerState != "Idle") {
 		fail(w, http.StatusConflict, "interrupted manual control requires a fresh Idle status before release")
 		return
 	}

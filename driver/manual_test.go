@@ -3,11 +3,14 @@ package driver
 import (
 	"bufio"
 	"context"
+	"errors"
 	"github.com/ConstructorFleet/emberdeck/toolpath"
 	"io"
 	"math"
 	"net"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -56,7 +59,7 @@ func TestJogSendsBoundedIncrementalCommandAndCancelsOnDeadline(t *testing.T) {
 	client, machine := net.Pipe()
 	defer client.Close()
 	defer machine.Close()
-	wire := make(chan []byte, 5)
+	wire := make(chan []byte, 7)
 	go func() {
 		reader := bufio.NewReader(machine)
 		query, _ := reader.ReadByte()
@@ -73,6 +76,9 @@ func TestJogSendsBoundedIncrementalCommandAndCancelsOnDeadline(t *testing.T) {
 		io.WriteString(machine, "ok\r\n")
 		cancel, _ := reader.ReadByte()
 		wire <- []byte{cancel}
+		query, _ = reader.ReadByte()
+		wire <- []byte{query}
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -94,6 +100,112 @@ func TestJogSendsBoundedIncrementalCommandAndCancelsOnDeadline(t *testing.T) {
 	}
 	if got := string(<-wire); got != "\x85" {
 		t.Fatalf("jog cancel byte = %q; want 0x85", got)
+	}
+	if got := string(<-wire); got != "?" {
+		t.Fatalf("cancel status query = %q; want ?", got)
+	}
+}
+
+func TestJogShortCommandWriteCancelsAndConfirmsIdle(t *testing.T) {
+	rawClient, machine := net.Pipe()
+	client := &partialWriteConn{Conn: rawClient, prefix: "$J=", count: 3}
+	defer client.Close()
+	defer machine.Close()
+	wire := make(chan string, 8)
+	go func() {
+		r := bufio.NewReader(machine)
+		readByte := func() byte { b, _ := r.ReadByte(); wire <- string([]byte{b}); return b }
+		readLine := func() string { line, _ := r.ReadString('\n'); wire <- line; return line }
+		readByte()
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+		readLine()
+		io.WriteString(machine, "ok\r\n")
+		readByte()
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+		for i := 0; i < 3; i++ {
+			readByte() // partial $J= command bytes
+		}
+		if readByte() != 0x85 {
+			return
+		}
+		readByte()
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	err := Jog(ctx, client, JogRequest{Axis: "X", DistanceMM: 5, FeedMMMin: 300, Confirmed: true})
+	if err == nil || !strings.Contains(err.Error(), "short write") {
+		t.Fatalf("partial jog write error = %v; want short-write failure after stop confirmation", err)
+	}
+	want := []string{"?", "M5\n", "?", "$", "J", "=", "\x85", "?"}
+	for i, expected := range want {
+		if got := <-wire; got != expected {
+			t.Fatalf("wire command %d = %q; want %q", i+1, got, expected)
+		}
+	}
+}
+
+func TestJogDeadlineWaitsForCancelIdleStatus(t *testing.T) {
+	client, machine := net.Pipe()
+	defer client.Close()
+	defer machine.Close()
+	wire := make(chan string, 12)
+	cancelSeen := make(chan struct{})
+	allowIdle := make(chan struct{})
+	idleSent := make(chan struct{})
+	go func() {
+		r := bufio.NewReader(machine)
+		readByte := func() byte { b, _ := r.ReadByte(); wire <- string([]byte{b}); return b }
+		readLine := func() string { line, _ := r.ReadString('\n'); wire <- line; return line }
+		readByte()
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+		readLine()
+		io.WriteString(machine, "ok\r\n")
+		readByte()
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+		readLine()
+		io.WriteString(machine, "ok\r\n")
+		for readByte() != 0x85 {
+		}
+		close(cancelSeen)
+		readByte()
+		io.WriteString(machine, "<Run|MPos:1,0,0>\r\n")
+		readByte()
+		<-allowIdle
+		io.WriteString(machine, "<Idle|MPos:2,0,0>\r\n")
+		close(idleSent)
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- Jog(ctx, client, JogRequest{Axis: "X", DistanceMM: 5, FeedMMMin: 300, Confirmed: true})
+	}()
+	select {
+	case <-cancelSeen:
+	case <-time.After(time.Second):
+		t.Fatal("jog timeout did not send 0x85")
+	}
+	for {
+		if got := <-wire; got == "\x85" {
+			break
+		}
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("Jog returned before the cancel status was Idle: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(allowIdle)
+	<-idleSent
+	if err := <-done; !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Jog deadline error = %v; want deadline after confirmed Idle", err)
+	}
+	if got := <-wire; got != "?" {
+		t.Fatalf("post-cancel query = %q; want ?", got)
+	}
+	if got := <-wire; got != "?" {
+		t.Fatalf("Idle confirmation query = %q; want ?", got)
 	}
 }
 
@@ -273,6 +385,123 @@ func TestManualCommandFrameWireIsBoundedAndLaserOff(t *testing.T) {
 	}
 }
 
+func TestManualFrameWaitsForEveryGCodeAcknowledgement(t *testing.T) {
+	client, machine := net.Pipe()
+	defer client.Close()
+	defer machine.Close()
+	firstAck := make(chan struct{})
+	allowRemainingAcks := make(chan struct{})
+	var wireMu sync.Mutex
+	var wire []string
+	go func() {
+		r := bufio.NewReader(machine)
+		readByte := func() byte {
+			b, _ := r.ReadByte()
+			wireMu.Lock()
+			wire = append(wire, string([]byte{b}))
+			wireMu.Unlock()
+			return b
+		}
+		readLine := func() string {
+			line, _ := r.ReadString('\n')
+			wireMu.Lock()
+			wire = append(wire, line)
+			wireMu.Unlock()
+			return line
+		}
+		readByte()
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+		readLine()
+		io.WriteString(machine, "ok\r\n")
+		readByte()
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+		for i := 0; i < 5; i++ {
+			readLine()
+			if i == 0 {
+				io.WriteString(machine, "ok\r\n")
+				close(firstAck)
+			}
+		}
+		<-allowRemainingAcks
+		io.WriteString(machine, "ok\r\nok\r\nok\r\nok\r\n")
+		readByte()
+		io.WriteString(machine, "<Run|MPos:1,1,0>\r\n")
+		readByte()
+		io.WriteString(machine, "<Idle|MPos:2,2,0>\r\n")
+	}()
+	bounds := toolpath.Bounds{Min: toolpath.Point{X: 0, Y: 0}, Max: toolpath.Point{X: 2, Y: 2}}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- ManualCommand(ctx, client, ManualCommandRequest{Action: "frame", Confirmed: true, Bounds: bounds})
+	}()
+	select {
+	case <-firstAck:
+	case <-time.After(time.Second):
+		t.Fatal("frame did not receive its first acknowledgement")
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("frame returned before acknowledging all four G0 moves: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(allowRemainingAcks)
+	if err := <-done; err != nil {
+		t.Fatalf("frame after all acknowledgements and Idle: %v", err)
+	}
+	wireMu.Lock()
+	defer wireMu.Unlock()
+	wantMotionLines := []string{"G90 G21\n", "G0 X0 Y0\n", "G0 X2 Y0\n", "G0 X2 Y2\n", "G0 X0 Y0\n"}
+	var motionLines []string
+	for _, got := range wire {
+		if strings.HasPrefix(got, "G") {
+			motionLines = append(motionLines, got)
+		}
+	}
+	if !reflect.DeepEqual(motionLines, wantMotionLines) {
+		t.Fatalf("frame motion wire = %#v; want %#v", motionLines, wantMotionLines)
+	}
+}
+
+func TestManualFrameShortWriteFeedsHoldAndConfirmsStopped(t *testing.T) {
+	rawClient, machine := net.Pipe()
+	client := &partialWriteConn{Conn: rawClient, prefix: "G90 G21\n", count: 3}
+	defer client.Close()
+	defer machine.Close()
+	wire := make(chan string, 12)
+	go func() {
+		r := bufio.NewReader(machine)
+		readByte := func() byte { b, _ := r.ReadByte(); wire <- string([]byte{b}); return b }
+		readLine := func() string { line, _ := r.ReadString('\n'); wire <- line; return line }
+		readByte()
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+		readLine()
+		io.WriteString(machine, "ok\r\n")
+		readByte()
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+		for i := 0; i < 3; i++ {
+			readByte()
+		}
+		if readByte() != '!' {
+			return
+		}
+		readByte()
+		io.WriteString(machine, "<Hold:0|MPos:0,0,0>\r\n")
+	}()
+	bounds := toolpath.Bounds{Min: toolpath.Point{X: 0, Y: 0}, Max: toolpath.Point{X: 2, Y: 2}}
+	err := ManualCommand(context.Background(), client, ManualCommandRequest{Action: "frame", Confirmed: true, Bounds: bounds})
+	if err == nil || !strings.Contains(err.Error(), "short write") {
+		t.Fatalf("partial frame write error = %v; want short-write failure after feed-hold confirmation", err)
+	}
+	want := []string{"?", "M5\n", "?", "G", "9", "0", "!", "?"}
+	for i, expected := range want {
+		if got := <-wire; got != expected {
+			t.Fatalf("wire command %d = %q; want %q", i+1, got, expected)
+		}
+	}
+}
+
 func TestManualFrameDeadlineConfirmsFeedHoldBeforeReturning(t *testing.T) {
 	client, machine := net.Pipe()
 	defer client.Close()
@@ -443,4 +672,23 @@ func TestManualCommandInitialStatusWaitUsesRequestDeadline(t *testing.T) {
 	if got := <-query; got != '?' {
 		t.Fatalf("initial status query = %q; want ?", got)
 	}
+}
+
+type partialWriteConn struct {
+	net.Conn
+	prefix string
+	count  int
+	wrote  bool
+}
+
+func (c *partialWriteConn) Write(p []byte) (int, error) {
+	if !c.wrote && strings.HasPrefix(string(p), c.prefix) {
+		c.wrote = true
+		count := c.count
+		if count > len(p) {
+			count = len(p)
+		}
+		return c.Conn.Write(p[:count])
+	}
+	return c.Conn.Write(p)
 }

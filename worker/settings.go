@@ -27,11 +27,12 @@ type controllerReport struct {
 	err      string
 	// reset holds a probe's reset-banner error until it refuses the next job:
 	// the probe consumed the banner a later connection would have shown.
-	reset               string
-	capabilities        []string
-	adapterCapabilities bool
-	manualCapabilities  bool
-	controllerState     string
+	reset                 string
+	capabilities          []string
+	adapterCapabilities   bool
+	manualCapabilities    bool
+	controllerState       string
+	controllerStatusFresh bool
 }
 
 func (r *controllerReport) poll(session string, p *progress) pollRequest {
@@ -44,7 +45,8 @@ func (r *controllerReport) poll(session string, p *progress) pollRequest {
 	if r.manualCapabilities {
 		capabilities = append(capabilities, "manual_home", "manual_unlock", "manual_jog", "manual_set_zero", "manual_frame")
 	}
-	request := pollRequest{Session: session, Capabilities: capabilities, progress: p, SettingsError: r.err, ControllerState: r.controllerState}
+	request := pollRequest{Session: session, Capabilities: capabilities, progress: p, SettingsError: r.err, ControllerState: r.controllerState, ControllerStatusFresh: r.controllerStatusFresh}
+	r.controllerStatusFresh = false
 	if p != nil {
 		request.ControllerState = p.ControllerState
 	}
@@ -65,6 +67,13 @@ func (r *controllerReport) setControllerState(state string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.controllerState = state
+}
+
+func (r *controllerReport) setFreshControllerState(state string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.controllerState = state
+	r.controllerStatusFresh = state != ""
 }
 
 func (r *controllerReport) setCapabilities(capabilities driveradapter.Capabilities) {
@@ -89,7 +98,7 @@ func (r *controllerReport) failed(err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// Earlier values may be stale; the server must not compare against them.
-	r.settings, r.err, r.controllerState = nil, truncate(err.Error(), 500), ""
+	r.settings, r.err, r.controllerState, r.controllerStatusFresh = nil, truncate(err.Error(), 500), "", false
 	if strings.Contains(err.Error(), "controller reset") {
 		r.reset = err.Error()
 	}
@@ -138,10 +147,10 @@ func (r *controllerReport) probe(ctx context.Context, connect Connector) {
 	r.record(settings)
 	status, err := driver.ReadStatus(probeCtx, conn, settingsProbeTimeout)
 	if err != nil {
-		r.setControllerState("")
+		r.setFreshControllerState("")
 		return
 	}
-	r.setControllerState(status.State)
+	r.setFreshControllerState(status.State)
 }
 
 func (r *controllerReport) probeStatus(ctx context.Context, connect Connector) {
@@ -152,16 +161,16 @@ func (r *controllerReport) probeStatus(ctx context.Context, connect Connector) {
 		err = errors.New("connector returned nil connection")
 	}
 	if err != nil {
-		r.setControllerState("")
+		r.setFreshControllerState("")
 		return
 	}
 	defer conn.Close()
 	status, err := driver.ReadStatus(probeCtx, conn, settingsProbeTimeout)
 	if err != nil {
-		r.setControllerState("")
+		r.setFreshControllerState("")
 		return
 	}
-	r.setControllerState(status.State)
+	r.setFreshControllerState(status.State)
 }
 
 func truncate(value string, limit int) string {

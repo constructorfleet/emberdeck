@@ -122,15 +122,16 @@ type progress struct {
 	Execution       *toolpath.Execution `json:"execution,omitempty"`
 }
 type pollRequest struct {
-	Session            string           `json:"session"`
-	Capabilities       []string         `json:"capabilities"`
-	ControllerSettings *driver.Settings `json:"controller_settings,omitempty"`
-	SettingsReadAt     *time.Time       `json:"settings_read_at,omitempty"`
-	SettingsError      string           `json:"settings_error,omitempty"`
-	ControllerState    string           `json:"controller_state,omitempty"`
-	ManualLease        string           `json:"manual_lease,omitempty"`
-	ManualState        string           `json:"manual_state,omitempty"`
-	ManualError        string           `json:"manual_error,omitempty"`
+	Session               string           `json:"session"`
+	Capabilities          []string         `json:"capabilities"`
+	ControllerSettings    *driver.Settings `json:"controller_settings,omitempty"`
+	SettingsReadAt        *time.Time       `json:"settings_read_at,omitempty"`
+	SettingsError         string           `json:"settings_error,omitempty"`
+	ControllerState       string           `json:"controller_state,omitempty"`
+	ControllerStatusFresh bool             `json:"controller_status_fresh,omitempty"`
+	ManualLease           string           `json:"manual_lease,omitempty"`
+	ManualState           string           `json:"manual_state,omitempty"`
+	ManualError           string           `json:"manual_error,omitempty"`
 	*progress
 }
 
