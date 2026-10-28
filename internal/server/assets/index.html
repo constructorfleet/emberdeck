@@ -96,7 +96,19 @@
                 <label class="button button-small svg-import-button" for="vector-svg-file">Import SVG<input id="vector-svg-file" type="file" accept=".svg,image/svg+xml" disabled></label>
               </div>
               <p class="hint">Imports static paths and basic shapes. SVG C/c and Q/q curves become lines within 0.05 mm chord deviation; circles and ellipses become 32-point paths. M/L/H/V/Z and C/c/Q/q paths and element transforms are supported. Curves exceeding the 4,000-point or subdivision limits, nested groups, styling, text, and machine settings are not imported.</p>
-              <h4 class="vector-subhead">Shapes</h4><ul id="vector-object-list" class="vector-list" aria-label="Project shapes"></ul>
+              <h4 class="vector-subhead">Shapes</h4><p class="hint">Use the checkboxes to select shapes for alignment. Select a shape name to edit its geometry and transform.</p><ul id="vector-object-list" class="vector-list" aria-label="Project shapes"></ul>
+              <div id="vector-align-controls" class="vector-align-controls" role="group" aria-label="Align selected shapes">
+                <span class="vector-subhead">Align selected shapes</span>
+                <div class="vector-toolbar">
+                  <button class="button button-small" type="button" data-align="left" disabled>Align left</button>
+                  <button class="button button-small" type="button" data-align="center-x" disabled>Align horizontal centers</button>
+                  <button class="button button-small" type="button" data-align="right" disabled>Align right</button>
+                  <button class="button button-small" type="button" data-align="top" disabled>Align top</button>
+                  <button class="button button-small" type="button" data-align="center-y" disabled>Align vertical centers</button>
+                  <button class="button button-small" type="button" data-align="bottom" disabled>Align bottom</button>
+                </div>
+                <p id="vector-align-status" class="hint" aria-live="polite"></p>
+              </div>
               <div id="vector-geometry" class="numeric-grid vector-fields" hidden>
                 <label>X (mm)<input id="vector-x" type="number" min="0" step="0.001"></label>
                 <label>Y (mm)<input id="vector-y" type="number" min="0" step="0.001"></label>

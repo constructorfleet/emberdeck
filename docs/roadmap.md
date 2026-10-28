@@ -14,8 +14,8 @@ Simulator and software checks do not qualify a physical machine. See
 - Declared GRBL machine profiles, saved rectangle and multi-path vector projects,
   and separate queued G-code generation for review and explicit dispatch. The
   editor supports vector cutting and engraving and a bounded static SVG importer
-  for line/Bezier paths, basic shapes, and element transforms. Nested groups,
-  smooth/arc commands, text import, editor transforms, undo/redo, and raster
+  for line/Bezier paths, basic shapes, element transforms, and multi-shape
+  alignment. Nested groups, smooth/arc commands, text import, undo/redo, and raster
   engraving remain future work.
 - Uploaded-job review against a selected machine profile, including upload-time
   line validation, known or unknown path bounds, unsupported/incomplete-motion
@@ -45,7 +45,7 @@ Simulator and software checks do not qualify a physical machine. See
   incremental or machine-coordinate moves, offset writes, and programs without a
   known initial head position are reported as unknown rather than guessed, so a
   review may still require an explicit bounds override.
-- SVG text import, arbitrary path editing, rotation/alignment, raster engraving,
+- SVG text import, arbitrary path editing, raster engraving,
   and automatic design-to-machine configuration.
 - Universal Wi-Fi, proprietary DSP/Ruida controllers, or OctoPrint plugin
   compatibility.
@@ -86,9 +86,11 @@ designer's remaining capabilities are delivered.
   vector engrave/cut layers, profile preview, immutable generated jobs, and
   explicit dispatch. Single-object translation, X/Y scaling, and rotation are
   saved, previewed, checked against the work area, and applied to generated
-  toolpaths. [Source review and remaining architecture](research/designer-architecture.md)
-  track the remaining alignment, multi-selection, nested SVG groups, smooth/arc
-  commands, text import, arbitrary path editing, and raster evaluation. A bounded
+  toolpaths. Keyboard-accessible multi-selection aligns left/center/right and
+  top/middle/bottom using transformed bounds, saves the resulting translations,
+  and preserves profile warnings. [Source review and remaining architecture](research/designer-architecture.md)
+  track nested SVG groups, smooth/arc commands, text import, arbitrary path
+  editing, and raster evaluation. A bounded
   static SVG importer now converts basic shapes and
   line/Bezier paths into editable, unassigned geometry. The full issue stays open.
 - [ ] [#7: Live completed/remaining toolpath progress](https://github.com/constructorfleet/emberdeck/issues/7).

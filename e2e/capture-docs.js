@@ -177,6 +177,13 @@ async function main() {
     await page.getByLabel('Rotation (degrees)').fill('15');
     await expect(page.locator('#vector-validation')).toBeHidden();
     await captureElement(page, '#vector-form', 'designer-vector-transform.png');
+    const alignmentChecks = page.getByRole('checkbox', { name: /Select shape/ });
+    await alignmentChecks.nth(0).check();
+    await alignmentChecks.nth(1).check();
+    await expect(page.getByRole('button', { name: 'Align left' })).toBeEnabled();
+    await page.getByRole('button', { name: 'Align left' }).click();
+    await expect(page.locator('#vector-align-status')).toContainText('2 shapes aligned left');
+    await captureElement(page, '#vector-form', 'designer-vector-alignment.png');
     await page.getByRole('button', { name: 'Save vector project' }).click();
     await expect(page.locator('#designer-status')).toContainText('Vector project saved');
     await captureElement(page, '#vector-form', 'designer-vector-project.png');
@@ -187,6 +194,12 @@ async function main() {
     await captureElement(page, '#program-panel', 'designer-vector-review.png');
     await page.setViewportSize({ width: 390, height: 844 });
     await captureElement(page, '#vector-form', 'designer-vector-mobile.png');
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.getByRole('button', { name: '1. rectangle' }).click();
+    await page.getByRole('checkbox', { name: /Select shape 1 rectangle/ }).check();
+    await page.getByRole('checkbox', { name: /Select shape 2 ellipse/ }).check();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await captureElement(page, '#vector-form', 'designer-vector-alignment-mobile.png');
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.locator('#close-program').click();
     await page.locator('#close-vector-project').click();

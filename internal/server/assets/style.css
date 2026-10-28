@@ -932,6 +932,37 @@ footer {
   background: var(--surface-selected);
 }
 
+.vector-alignment-select {
+  width: auto;
+  min-width: 1.1rem;
+  min-height: 1.1rem;
+  margin: 0 var(--space-1);
+  accent-color: var(--accent);
+}
+
+.vector-alignment-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.vector-align-controls {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-subtle);
+}
+
+.vector-align-controls .vector-subhead {
+  display: block;
+  margin: 0 0 var(--space-2);
+}
+
+.vector-align-controls p {
+  min-height: 1.3em;
+  margin: var(--space-2) 0 0;
+}
+
 .vector-select {
   flex: 1;
   padding: var(--space-2);
@@ -1010,6 +1041,10 @@ footer {
 .vector-path.unassigned-path {
   stroke: var(--text-muted);
   stroke-dasharray: 2 3;
+}
+
+.vector-path.selected-vector-path {
+  stroke-width: 4.5;
 }
 
 .preview-wrap .vector-path {

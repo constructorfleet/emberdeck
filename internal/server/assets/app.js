@@ -44,6 +44,7 @@
   let vectorObjects = [];
   let vectorOperations = [];
   let selectedVectorObject = "";
+  let selectedVectorObjects = new Set();
   let vectorIDSequence = 0;
   const toolpathCache = new Map();
   const toolpathViewports = new Map();
@@ -335,7 +336,7 @@
 
   function decimalPlacesAtMostThree(raw) {
     const value = String(raw).trim();
-    return /^\d+(?:\.\d{1,3})?$/.test(value);
+    return /^-?\d+(?:\.\d{1,3})?$/.test(value);
   }
 
   function finiteField(selector) {
@@ -553,6 +554,13 @@
     }));
   }
 
+  function transformedBounds(object) {
+    const points = transformedSubpaths(object).flatMap((path) => path.points);
+    const xs = points.map((point) => point.x_mm), ys = points.map((point) => point.y_mm);
+    const left = Math.min(...xs), right = Math.max(...xs), bottom = Math.min(...ys), top = Math.max(...ys);
+    return { left, right, bottom, top, centerX: (left + right) / 2, centerY: (bottom + top) / 2 };
+  }
+
   function updateSelectedTransform() {
     const object = vectorObjects.find((candidate) => candidate.id === selectedVectorObject);
     if (!object) return;
@@ -591,8 +599,28 @@
     vectorObjects.forEach((object, index) => {
       const row = document.createElement("li");
       row.className = object.id === selectedVectorObject ? "selected" : "";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "vector-alignment-select";
+      checkbox.checked = selectedVectorObjects.has(object.id);
+      checkbox.dataset.vectorObjectId = object.id;
+      checkbox.setAttribute("aria-label", `Select shape ${index + 1} ${objectKind(object)} for alignment`);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          selectedVectorObjects.add(object.id);
+          selectedVectorObject = object.id;
+        } else {
+          selectedVectorObjects.delete(object.id);
+          if (selectedVectorObject === object.id) selectedVectorObject = [...selectedVectorObjects][0] || vectorObjects[0]?.id || "";
+        }
+        renderVectorEditor();
+        const nextCheckbox = [...document.querySelectorAll(".vector-alignment-select")]
+          .find((candidate) => candidate.dataset.vectorObjectId === object.id);
+        nextCheckbox?.focus({ preventScroll: true });
+      });
       const select = button(`${index + 1}. ${objectKind(object)}`, "vector-select", () => {
         selectedVectorObject = object.id;
+        if (!selectedVectorObjects.has(object.id)) selectedVectorObjects = new Set([object.id]);
         renderVectorEditor();
       });
       const assigned = vectorOperations.find((operation) => operation.id === object.operation_id);
@@ -600,12 +628,14 @@
       detail.textContent = assigned ? assigned.type.replace("vector-", "") : "Unassigned";
       const remove = button("Remove", "button button-small button-danger", () => {
         vectorObjects = vectorObjects.filter((candidate) => candidate.id !== object.id);
+        selectedVectorObjects.delete(object.id);
         selectedVectorObject = vectorObjects[0]?.id || "";
         renderVectorEditor();
       }, `Remove shape ${index + 1}`);
-      row.append(select, detail, remove);
+      row.append(checkbox, select, detail, remove);
       list.append(row);
     });
+    renderVectorAlignmentControls();
     const object = vectorObjects.find((candidate) => candidate.id === selectedVectorObject);
     $("#vector-geometry").hidden = !object;
     $("#vector-transform").hidden = !object;
@@ -625,6 +655,37 @@
     assignment.replaceChildren(new Option("Unassigned", ""));
     vectorOperations.forEach((operation, index) => assignment.append(new Option(`${index + 1}. ${operation.type.replace("vector-", "")}`, operation.id)));
     assignment.value = object.operation_id || "";
+  }
+
+  function renderVectorAlignmentControls() {
+    const canAlign = selectedVectorObjects.size >= 2;
+    document.querySelectorAll("[data-align]").forEach((control) => { control.disabled = !canAlign; });
+  }
+
+  function alignSelectedVectorObjects(alignment) {
+    const selected = vectorObjects.filter((object) => selectedVectorObjects.has(object.id));
+    if (selected.length < 2) return;
+    const bounds = selected.map(transformedBounds);
+    const left = Math.min(...bounds.map((box) => box.left));
+    const right = Math.max(...bounds.map((box) => box.right));
+    const bottom = Math.min(...bounds.map((box) => box.bottom));
+    const top = Math.max(...bounds.map((box) => box.top));
+    const round = (value) => Math.round(value * 1000) / 1000;
+    selected.forEach((object, index) => {
+      const box = bounds[index];
+      const transform = normalizedTransform(object.transform);
+      if (alignment === "left") transform.translate_x_mm = round(transform.translate_x_mm + left - box.left);
+      else if (alignment === "center-x") transform.translate_x_mm = round(transform.translate_x_mm + (left + right) / 2 - box.centerX);
+      else if (alignment === "right") transform.translate_x_mm = round(transform.translate_x_mm + right - box.right);
+      else if (alignment === "top") transform.translate_y_mm = round(transform.translate_y_mm + top - box.top);
+      else if (alignment === "center-y") transform.translate_y_mm = round(transform.translate_y_mm + (bottom + top) / 2 - box.centerY);
+      else if (alignment === "bottom") transform.translate_y_mm = round(transform.translate_y_mm + bottom - box.bottom);
+      object.transform = transform;
+      if (isIdentityTransform(transform)) delete object.transform;
+    });
+    const names = { left: "left", "center-x": "horizontal centers", right: "right", top: "top", "center-y": "vertical centers", bottom: "bottom" };
+    $("#vector-align-status").textContent = `${selected.length} shapes aligned ${names[alignment]}.`;
+    renderVectorEditor();
   }
 
   function renderVectorOperations() {
@@ -686,6 +747,7 @@
         if (path.closed) commands.push("Z");
       });
       const path = svgElement("path", { class: `vector-path ${operation ? (operation.type === "vector-cut" ? "cut-path" : "engrave-path") : "unassigned-path"}`, d: commands.join(" ") });
+      if (selectedVectorObjects.has(object.id)) path.classList.add("selected-vector-path");
       if (!operation) {
         path.style.stroke = "var(--text-muted)";
         path.style.strokeDasharray = "2 3";
@@ -771,6 +833,7 @@
     vectorObjects = project ? project.objects.map((object) => ({ ...object, kind: objectKind(object), transform: object.transform ? { ...object.transform } : undefined, subpaths: object.subpaths.map((path) => ({ ...path, points: path.points.map((point) => ({ ...point })) })) })) : [];
     vectorOperations = project ? project.operations.map((operation) => ({ ...operation })) : [{ id: vectorID("operation"), type: "vector-engrave", feed_mm_min: 600, power_percent: 25 }];
     selectedVectorObject = vectorObjects[0]?.id || "";
+    selectedVectorObjects = new Set(selectedVectorObject ? [selectedVectorObject] : []);
     $("#vector-form").hidden = false;
     $("#vector-name").value = project ? project.name : "Untitled vector design";
     $("#vector-form-title").textContent = project ? `Edit ${project.name}` : "New multi-path vector project";
@@ -789,6 +852,7 @@
     if (vectorOperations[0]) object.operation_id = vectorOperations[0].id;
     vectorObjects.push(object);
     selectedVectorObject = object.id;
+    selectedVectorObjects = new Set([object.id]);
     renderVectorEditor();
   }
 
@@ -937,6 +1001,7 @@
       }));
       vectorObjects.push(...objects);
       selectedVectorObject = objects[0]?.id || selectedVectorObject;
+      selectedVectorObjects = new Set(objects.length ? [objects[0].id] : []);
       renderVectorEditor();
       setDesignerStatus(`Imported ${objects.length} editable SVG path${objects.length === 1 ? "" : "s"}. Assign each path to an operation layer; no machine settings were imported.`);
     } catch (error) { setDesignerError(error.message); }
@@ -945,6 +1010,9 @@
     const operation = { id: vectorID("operation"), type: "vector-engrave", feed_mm_min: 600, power_percent: 25 };
     vectorOperations.push(operation);
     renderVectorEditor();
+  });
+  document.querySelectorAll("[data-align]").forEach((control) => {
+    control.addEventListener("click", () => alignSelectedVectorObjects(control.dataset.align));
   });
   $("#vector-form").addEventListener("submit", saveVectorProject);
   $("#vector-form").addEventListener("input", (event) => {
