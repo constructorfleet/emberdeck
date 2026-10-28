@@ -45,12 +45,22 @@ backend; power-loss recovery there is not guaranteed. Keep backups and inspect
 the machine after any unclean shutdown before starting work. A cross-platform OS lock
 prevents concurrent servers from writing the same directory. Back up the data
 directory with the server stopped. Local filesystem semantics are assumed; NFS
-and multi-server high availability have not been qualified. The whole job library
-is currently rewritten per mutation, so very large libraries need future work.
+and multi-server high availability have not been qualified.
+
+The job library keeps each program in its own file under `programs/` and only
+metadata, sizes, and SHA-256 digests in jobs.json. Progress-only worker reports
+stay in memory; state transitions are synced before the request is answered, and
+a clean shutdown saves pending progress. Startup migrates an older embedded-program
+jobs.json atomically and fails closed on a missing or damaged program file.
+Each state transition also appends an event to `job-events.jsonl`, synced before
+the jobs.json rename, which records the last committed event sequence. Startup
+discards uncommitted events and fails closed on damaged committed history.
+Retention is bounded by event count and age.
 
 Each driver ID has one live process session. Each assignment has a random lease.
-A worker executes a lease once, reports terminal results idempotently, and stops
-on network failure. The server treats expired leases and restarts as interrupted
+A worker executes a lease once and reports terminal results idempotently. An
+idle worker retries failed polls with jittered backoff and a fresh session; a
+worker holding an active lease fails closed on network failure. The server treats expired leases and restarts as interrupted
 work and never automatically reassigns it. Inspection is required before retry.
 
 The `toolpath` package parses a bounded subset of linear XY G-code for display
@@ -138,8 +148,12 @@ origin, feed and commanded-power limits, and controller settings. These values
 are operator declarations; the server does not measure the machine, home it,
 set its origin, or configure GRBL.
 The supported power mapping requires matching `$30`, `$31=0`, and `$32=1`.
-Selecting a profile does not verify a connected driver's configuration; the
-operator must match the profile and prepared work coordinates to that machine.
+Workers read these values with GRBL's read-only `$$` during readiness, before
+any program byte. The server refuses to start a profile-generated job (409) when
+the driver's reported `$30`, `$31`, or `$32` differ from the job's profile
+snapshot, and the worker re-checks before streaming. Uploaded jobs are warned, not
+blocked, for `$32=0` or `M3`. The operator must still match the prepared work
+coordinates to that machine.
 
 Profile and project revisions prevent silent overwrites. Changing a profile
 makes bound projects stale until the operator reviews and resaves them.
