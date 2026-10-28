@@ -402,6 +402,13 @@ and lease; they never authorize reconnecting or replaying an earlier program.
 A pause command may be the initial assignment, before any source bytes were
 sent. Such work must remain gated until an explicit resume.
 
+For an active lease, `acked` progress must be monotonic and within `0..total`;
+a decreasing or out-of-range report returns HTTP 400 without changing the
+stored progress. A terminal receipt is committed with its state, counts,
+controller state, error, and execution telemetry. Retrying the identical receipt
+is idempotent (HTTP 200); changing any of those fields conflicts with the
+committed result (HTTP 409).
+
 The server returns `command:"pause"` while pausing/paused and
 `command:"resume"` while resuming. Paused workers continue heartbeats; an
 intentional hold can last indefinitely while communications remain healthy.
