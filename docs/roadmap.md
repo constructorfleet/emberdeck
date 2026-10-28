@@ -26,13 +26,13 @@ Only the GRBL protocol is implemented. Ruida, proprietary DSP protocols, image
 rasterization, CAD/CAM toolpath generation, and OctoPrint plugin compatibility
 are outside the current implementation. Plugins can add adapters in later work.
 
-## Open feature requests
+## Feature requests
 
 Review open GitHub feature requests before selecting new work, then read the
 current issue body and comments for acceptance criteria. Issues #3 and #4 are
 required parts of the active product goal alongside the core deployment and
-job-management requirements above. Issues #7 and #8 are also open requests;
-their work remains unimplemented unless marked with direct evidence below:
+job-management requirements above. Issues #7 and #8 are tracked below with
+their implementation status and evidence:
 
 - [x] [#3: ESP32 driver firmware and ESPHome feasibility](https://github.com/constructorfleet/emberdeck/issues/3).
   Compare standalone firmware, an ESPHome component, and existing bridges;
@@ -60,16 +60,17 @@ their work remains unimplemented unless marked with direct evidence below:
   bounds with an accessible legend. Label estimated, ambiguous, repeated-path,
   interrupted, or unknown execution honestly. Verify wire correlation through
   pause/resume/disconnect and the browser workflow, then regenerate guide images.
-- [ ] [#8: Categorized documentation navigation and UX cleanup](https://github.com/constructorfleet/emberdeck/issues/8).
+- [x] [#8: Categorized documentation navigation and UX cleanup](https://github.com/constructorfleet/emberdeck/issues/8).
   Review the deployed documentation and record a content grouping; implement
   categorized navigation and presentation improvements across the site while
   preserving existing page URLs and generated references. Keep common operator
   tasks easy to find, show hierarchy and current page, and make narrow-screen
   menus accessible to keyboard, touch, and assistive technology. Verify desktop
   and mobile layouts, focus and menu semantics, links, images, and rendered
-  release docs; capture before/after screenshots. This remains an open request;
-  the existing release docs build and deployment workflow are not evidence that
-  the requested navigation redesign is implemented.
+  release docs; capture before/after screenshots. The shared renderer and
+  rendered-browser tests implement this navigation; see the
+  [review and before/after captures](browser-tests.md#documentation-navigation-review).
+  Verify the published release before closing the GitHub issue.
 
 The current issue bodies remain authoritative when their acceptance criteria
 change. A roadmap checkmark requires corresponding evidence, not a planned task.
