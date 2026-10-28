@@ -20,11 +20,8 @@ closes its connection, and persistent connection reuse has not been validated.
 
 The implementation uses [`go.bug.st/serial`](https://pkg.go.dev/go.bug.st/serial),
 whose API exposes cross-platform serial open, read/write/close, read timeouts,
-and port enumeration. Port names and permissions are OS-specific. On Linux,
-the service account may need membership in the distribution's serial-device
-group (commonly `dialout`); log out/in or restart the service after changing
-group membership. On macOS and Windows, select the port name reported by the OS
-and ensure no other process owns it.
+and port enumeration. Operator port selection and device permissions are covered
+in [Deployment](deployment.md#serial-workers-and-all-in-one-hardware-mode).
 
 No physical controller has been tested or qualified with this transport yet.
 In particular, issue #48's bench confirmation of open-time modem-line and reset

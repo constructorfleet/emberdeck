@@ -16,13 +16,25 @@ Documentation lives with code in `docs/` and README.md. Update it in the same PR
 as behavior changes. CI builds the docs; each release deploys that release's
 version to GitHub Pages. Never document planned behavior as available.
 
+## Local development checks
+
+Install the pinned documentation dependency and run the full check suite:
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r docs/requirements.txt
+scripts/check.sh
+```
+
+The script runs formatting, vet, race-enabled tests, command builds, artifact
+smoke tests, license checks, and documentation rendering. The docs include CLI
+help from that build and an API route index derived from registered routes.
+Update explanatory docs in the same PR as behavior changes.
+
 When updating linked Go dependencies, review their licenses and regenerate
 `THIRD_PARTY_NOTICES.txt` with `python3 scripts/check-notices.py --write`. CI
 compares notices with the modules actually linked into the shipped command.
-
-Before planning a feature, inspect open GitHub issues and read relevant request
-bodies/comments. Issues #3 and #4 are required product deliverables; their current
-acceptance criteria and the delivery plan govern the scope.
 
 Operator-facing controls belong in the illustrated operator guide. Regenerate
 its screenshots with `npm run docs:screenshots` after UI changes. Browser CI

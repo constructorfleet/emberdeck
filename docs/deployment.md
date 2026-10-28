@@ -11,6 +11,10 @@ selection and enumeration. No particular cutter, controller, enclosure, or emerg
 setup has been qualified. The simulator is software only and must be selected
 explicitly.
 
+For a first-run route, start with [Install](install.md), then read the
+[Operator Guide](operator-guide.md). Keep the [Troubleshooting](troubleshooting.md),
+[Glossary](glossary.md), and [Safety & Limitations](safety.md) pages nearby.
+
 Set a long, unique `EMBERDECK_API_KEY` before starting the server. The server
 listens on loopback by default; the examples below bind all interfaces. Expose
 that listener only on a trusted network, or put it behind a TLS reverse proxy.
@@ -184,12 +188,17 @@ In all-in-one mode, a local worker failure is logged with its transport (for
 example `serial driver /dev/ttyUSB0: ...`). The driver shows as offline while the
 worker restarts, and the web console stays available.
 
-Windows names are typically `COM3`; macOS names often begin `/dev/cu.`. Use the
-OS-reported name instead of assuming either convention. The Linux service user
-needs access to the selected device (see [serial transport](serial.md)). Docker
-needs explicit `--device` or Compose `devices` plus appropriate group permissions;
-no device passthrough is configured by default. These commands expose the
-transport; they do not qualify a physical machine for use.
+Use `emberdeck driver -list-ports` to see the names reported by the operating
+system. Windows names are typically `COM3`; macOS names often begin `/dev/cu.`.
+On Linux, the account running EmberDeck needs permission to open the device,
+commonly through the `dialout` group or a distribution-configured udev device
+group; restart its login session or service after changing group membership.
+Docker needs explicit `--device` or Compose `devices`
+plus appropriate group permissions; no device passthrough is configured by
+default. Select the reported port and verify the required baud rate and the
+controller's state. Opening some serial devices can reset a controller. These
+steps expose the transport; they do not qualify a physical machine for use. See
+[Troubleshooting](troubleshooting.md#serial-permission-denied) if access is denied.
 
 ## Driver as a service
 
