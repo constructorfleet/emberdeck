@@ -1,14 +1,34 @@
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
+const http = require('node:http');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { test, expect } = require('@playwright/test');
 
 const root = path.resolve(__dirname, '..');
 const docs = path.join(root, 'dist', 'docs');
+let staticServer;
+let staticBase;
 
-test.beforeAll(() => {
+test.beforeAll(async () => {
   execFileSync(process.env.PYTHON || 'python3', ['scripts/build-docs.py'], { cwd: root, stdio: 'inherit' });
+  staticServer = http.createServer((request, response) => {
+    const pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
+    const candidate = path.resolve(docs, `.${pathname}`);
+    const inDocs = candidate === docs || candidate.startsWith(`${docs}${path.sep}`);
+    const found = inDocs && fs.existsSync(candidate) && fs.statSync(candidate).isFile();
+    const file = found ? candidate : path.join(docs, '404.html');
+    const status = found ? 200 : 404;
+    const contentType = file.endsWith('.svg') ? 'image/svg+xml' : 'text/html; charset=utf-8';
+    response.writeHead(status, { 'content-type': contentType });
+    fs.createReadStream(file).pipe(response);
+  });
+  await new Promise((resolve) => staticServer.listen(0, '127.0.0.1', resolve));
+  staticBase = `http://127.0.0.1:${staticServer.address().port}`;
+});
+
+test.afterAll(async () => {
+  if (staticServer) await new Promise((resolve) => staticServer.close(resolve));
 });
 
 test('rendered documentation has grouped, current, keyboard accessible navigation without broken assets or overflow', async ({ browser }) => {
@@ -16,18 +36,31 @@ test('rendered documentation has grouped, current, keyboard accessible navigatio
   expect(pages).toContain('operator-guide.html');
   expect(pages).toContain('api-routes.html');
   expect(pages).toContain('cli.html');
+  expect(pages).toContain('404.html');
   const expectedGroups = {
-    'Getting Started': [['Overview', 'index.html'], ['Install', 'install.html'], ['Operator Guide', 'operator-guide.html']],
-    'Deploy & Run': [['Deployment', 'deployment.html'], ['Troubleshooting', 'troubleshooting.html'], ['Glossary', 'glossary.html'], ['Safety & Limitations', 'safety.html']],
-    'Develop & Extend': [['Contributing', 'CONTRIBUTING.html'], ['Architecture', 'architecture.html'], ['Plugins', 'plugins.html'], ['Browser Tests', 'browser-tests.html'], ['Artifact Tests', 'artifact-tests.html'], ['Roadmap', 'roadmap.html'], ['Designer Architecture', 'designer-architecture.html'], ['ESP32 Feasibility', 'esp32-feasibility.html'], ['GRBL Driver Package', 'driver.html'], ['Worker Package', 'worker.html'], ['Serial Transport Package', 'serial.html']],
-    Reference: [['API', 'api.html'], ['API Routes', 'api-routes.html'], ['CLI', 'cli.html']],
+    'Getting Started': [['Overview', 'index.html'], ['Install', 'install.html'], ['Operator console guide', 'operator-guide.html']],
+    'Deploy & Run': [['Deployment', 'deployment.html'], ['Prometheus metrics', 'metrics.html'], ['Troubleshooting', 'troubleshooting.html'], ['Glossary', 'glossary.html'], ['Safety & Limitations', 'safety.html']],
+    'Develop & Extend': [['Contributing', 'CONTRIBUTING.html'], ['Architecture', 'architecture.html'], ['Process plugins', 'plugins.html'], ['Browser console tests', 'browser-tests.html'], ['Shipped binary smoke test', 'artifact-tests.html'], ['Product status', 'roadmap.html'], ['Browser laser designer: architecture review', 'designer-architecture.html'], ['ESP32 worker feasibility', 'esp32-feasibility.html'], ['GRBL driver package', 'driver.html'], ['Worker control behavior', 'worker.html'], ['Serial transport', 'serial.html']],
+    Reference: [['HTTP API and worker contract', 'api.html'], ['API route index', 'api-routes.html'], ['CLI reference', 'cli.html']],
   };
 
-  for (const pageName of pages) {
+  for (const pageName of pages.filter((name) => name !== '404.html')) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     await page.goto(pathToFileURL(path.join(docs, pageName)).href);
     await expect(page.getByRole('navigation', { name: 'Documentation' })).toBeVisible();
     await expect(page.locator('nav a[aria-current="page"]')).toHaveAttribute('href', pageName);
+    const heading = await page.locator('main h1').innerText();
+    await expect(page).toHaveTitle(`${heading} · EmberDeck docs`);
+    await expect(page.locator('nav a[aria-current="page"]')).toHaveText(heading);
+    await expect(page.locator('meta[name="description"]')).toHaveAttribute('content', /.+/);
+    const description = await page.locator('meta[name="description"]').getAttribute('content');
+    expect(description.length).toBeLessThanOrEqual(160);
+    expect(description).not.toMatch(/<[^>]+>/);
+    await expect(page.locator('meta[property="og:title"]')).toHaveAttribute('content', `${heading} · EmberDeck docs`);
+    await expect(page.locator('meta[property="og:description"]')).toHaveAttribute('content', /.+/);
+    await expect(page.locator('meta[property="og:image"]')).toHaveAttribute('content', /^https:\/\//);
+    await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', `https://constructorfleet.github.io/emberdeck/${pageName}`);
+    await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', 'assets/favicon.svg');
     const currentPageName = await page.locator('nav a[aria-current="page"]').innerText();
     const currentSummary = page.locator('nav details:has(a[aria-current="page"]) > summary');
     await expect(currentSummary).toHaveAccessibleName(new RegExp(`Current page: ${currentPageName}`));
@@ -86,6 +119,26 @@ test('rendered documentation has grouped, current, keyboard accessible navigatio
   await expect(mobile.locator('nav details')).toHaveCount(4);
   await mobile.locator('nav summary').nth(3).tap();
   await expect(mobile.locator('nav details').nth(3)).toHaveAttribute('open', '');
-  await expect(mobile.locator('nav details').nth(3).getByRole('link', { name: 'API Routes' })).toBeVisible();
+  await expect(mobile.locator('nav details').nth(3).getByRole('link', { name: 'API route index' })).toBeVisible();
   expect(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('custom 404 has shared navigation without a current page and links home', async ({ page, request }) => {
+  const favicon = await request.get(`${staticBase}/assets/favicon.svg`);
+  expect(favicon.status()).toBe(200);
+  expect(favicon.headers()['content-type']).toContain('image/svg+xml');
+
+  const response = await page.goto(`${staticBase}/a-missing-page`);
+  expect(response.status()).toBe(404);
+  await expect(page).toHaveTitle('Page not found · EmberDeck docs');
+  await expect(page.locator('meta[name="description"]')).toHaveAttribute('content', /.+/);
+  await expect(page.locator('meta[property="og:title"]')).toHaveAttribute('content', 'Page not found · EmberDeck docs');
+  await expect(page.locator('meta[property="og:description"]')).toHaveAttribute('content', /.+/);
+  await expect(page.locator('meta[property="og:image"]')).toHaveAttribute('content', /^https:\/\//);
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://constructorfleet.github.io/emberdeck/404.html');
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', 'assets/favicon.svg');
+  await expect(page.getByRole('navigation', { name: 'Documentation' })).toBeVisible();
+  await expect(page.locator('nav a[aria-current="page"]')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Page not found', level: 1 })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Home' })).toHaveAttribute('href', 'index.html');
 });
