@@ -193,3 +193,72 @@ func TestManualCommandFrameBoundsAreFiniteAndBounded(t *testing.T) {
 		}
 	}
 }
+
+func TestManualCommandUnlockAndSetZeroWire(t *testing.T) {
+	for _, tc := range []struct{ action, state, want string }{
+		{"unlock", "Alarm:1", "$X\n"},
+		{"set_zero", "Idle", "G10 L20 P1 X0 Y0\n"},
+	} {
+		t.Run(tc.action, func(t *testing.T) {
+			client, machine := net.Pipe()
+			defer client.Close()
+			defer machine.Close()
+			wire := make(chan string, 2)
+			go func() {
+				r := bufio.NewReader(machine)
+				b, _ := r.ReadByte()
+				wire <- string(b)
+				io.WriteString(machine, "<"+tc.state+"|MPos:0,0,0>\r\n")
+				line, _ := r.ReadString('\n')
+				wire <- line
+				io.WriteString(machine, "ok\r\n")
+			}()
+			if err := ManualCommand(context.Background(), client, ManualCommandRequest{Action: tc.action, Confirmed: true}); err != nil {
+				t.Fatalf("ManualCommand %s: %v", tc.action, err)
+			}
+			if got := <-wire; got != "?" {
+				t.Fatalf("initial query = %q", got)
+			}
+			if got := <-wire; got != tc.want {
+				t.Fatalf("wire command = %q; want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestManualCommandFrameWireIsBoundedAndLaserOff(t *testing.T) {
+	client, machine := net.Pipe()
+	defer client.Close()
+	defer machine.Close()
+	wire := make(chan string, 12)
+	go func() {
+		r := bufio.NewReader(machine)
+		b, _ := r.ReadByte()
+		wire <- string(b)
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+		line, _ := r.ReadString('\n')
+		wire <- line
+		io.WriteString(machine, "ok\r\n")
+		b, _ = r.ReadByte()
+		wire <- string(b)
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+		for i := 0; i < 5; i++ {
+			line, _ = r.ReadString('\n')
+			wire <- line
+			io.WriteString(machine, "ok\r\n")
+		}
+		b, _ = r.ReadByte()
+		wire <- string(b)
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+	}()
+	bounds := toolpath.Bounds{Min: toolpath.Point{X: 1, Y: 2}, Max: toolpath.Point{X: 5, Y: 7}}
+	if err := ManualCommand(context.Background(), client, ManualCommandRequest{Action: "frame", Confirmed: true, Bounds: bounds}); err != nil {
+		t.Fatalf("ManualCommand frame: %v", err)
+	}
+	want := []string{"?", "M5\n", "?", "G90 G21\n", "G0 X1 Y2\n", "G0 X5 Y2\n", "G0 X5 Y7\n", "G0 X1 Y2\n", "?"}
+	for i, w := range want {
+		if got := <-wire; got != w {
+			t.Fatalf("wire %d = %q; want %q", i+1, got, w)
+		}
+	}
+}
