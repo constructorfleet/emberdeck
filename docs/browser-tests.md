@@ -6,7 +6,7 @@ the safety confirmation gate, Start and Cancel confirmation dialogs that name
 the job and driver, focusable unavailable-Start reasons, job-named row action
 labels, live progress, program viewing, completion,
 controller acknowledged pause and resume, cancellation while paused, and deletion.
-The pause test observes the simulator's `Hold:0` acknowledgement across repeated
+The pause test observes the simulator's `Hold:0` acknowledgment across repeated
 job polls and confirms progress stays fixed while held. After the explicit
 Resume, it verifies acknowledged progress advances and accepts either a sampled
 `Run` report or a completed job with the final `Idle` report; a short simulator

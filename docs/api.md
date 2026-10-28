@@ -329,7 +329,7 @@ correlation unknown. GRBL may emit WCO intermittently; the worker retains the
 last reported offset. GRBL `Ln` is optional at compile time, and only applies
 when the source contains matching N words. The line marker, when available,
 describes the executing line; it is not inferred from acknowledged commands.
-See the [GRBL status report fields](https://github.com/gnea/grbl/blob/master/doc/markdown/interface.md#real-time-status-reports)
+See the [GRBL 1.1 status report fields at commit `bfb67f0`](https://github.com/gnea/grbl/blob/bfb67f0c7963fe3ce4aaf8a97f9009ea5a8db36e/doc/markdown/interface.md#real-time-status-reports)
 for its coordinate and line-number limits.
 
 A controller `Idle` receipt drains the planned motion, but none of these values
@@ -438,8 +438,8 @@ write controller settings. Operators must set GRBL `$30` to `max_s`, `$31` to
 0, and `$32` to 1 themselves. A profile must
 explicitly declare `min_s:0`; other values are unsupported because linear power
 percentage conversion would not match a nonzero GRBL minimum PWM. See GRBL's
-[settings reference](https://github.com/gnea/grbl/blob/master/doc/markdown/settings.md)
-and [laser mode reference](https://github.com/gnea/grbl/blob/master/doc/markdown/laser_mode.md).
+[settings reference at commit `bfb67f0`](https://github.com/gnea/grbl/blob/bfb67f0c7963fe3ce4aaf8a97f9009ea5a8db36e/doc/markdown/settings.md)
+and [laser mode reference at the same commit](https://github.com/gnea/grbl/blob/bfb67f0c7963fe3ce4aaf8a97f9009ea5a8db36e/doc/markdown/laser_mode.md).
 
 `GET /profiles` lists profiles in ID order. `POST /profiles` creates one and
 returns 201 with a Location header; omit `id` and `revision`. `GET /profiles/{id}`

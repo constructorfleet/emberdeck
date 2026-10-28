@@ -6,7 +6,7 @@ Simulator and software checks do not qualify a physical machine. See
 
 ## Available
 
-- Persistent G-code library, explicit dispatch, controller acknowledgements,
+- Persistent G-code library, explicit dispatch, controller acknowledgments,
   pause/resume on capable workers, cancellation, and failure reporting.
 - Simulator, GRBL serial and TCP transports, and distributed workers using
   sessions and single-execution leases. Active jobs interrupted by server restart
