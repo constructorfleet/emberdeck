@@ -95,3 +95,84 @@ stops the worker; restart it only after inspecting the machine.
 
 `GET /plugins` lists configured preflight manifests. Plugins are explicit trusted
 executables loaded at startup. See the plugin protocol for installation and limits.
+
+## Declared machine profiles
+
+Profiles are operator declarations stored separately from `jobs.json` in the
+durable `profiles.json` library. EmberDeck does not measure or configure a
+controller from these values. The initial designer profile supports only
+`controller:"grbl-1.1"`, `units:"mm"`, `origin:"lower-left"`, and
+`laser_mode_enabled:true`. The declared work origin is the currently prepared
+GRBL work origin; EmberDeck does not home, zero, change coordinate systems, or
+write controller settings. Operators must match `max_s` with GRBL `$30`,
+`min_s:0` with `$31`, and laser mode with `$32=1` themselves. A profile must
+explicitly declare `min_s:0`; other values are unsupported because linear power
+percentage conversion would not match a nonzero GRBL minimum PWM. See GRBL's
+[settings reference](https://github.com/gnea/grbl/blob/master/doc/markdown/settings.md)
+and [laser mode reference](https://github.com/gnea/grbl/blob/master/doc/markdown/laser_mode.md).
+
+`GET /profiles` lists profiles in ID order. `POST /profiles` creates one and
+returns 201 with a Location header; omit `id` and `revision`. `GET /profiles/{id}`
+reads a profile. `PUT /profiles/{id}` replaces its declaration and requires the
+current positive `revision`; successful updates increment the revision, while
+stale updates return 409. `DELETE /profiles/{id}` requires `{"revision":N}` and
+returns 204. Missing profiles return 404. A profile referenced by a saved
+project cannot be deleted.
+
+All profile requests are authenticated, strict single JSON objects limited to
+64 KiB, and reject unknown fields. Names are trimmed and must contain 1–120
+bytes. Width and height must be positive and at most 10,000 mm. Feed limits
+must satisfy `0 < min_feed_mm_min <= max_feed_mm_min <= 100000`. Dimension and
+feed and percentage values support at most three decimal places. `max_s` is an
+integer from 1 through 1,000,000,000; `max_power_percent` is greater than zero and at most
+100. `min_s` must be explicitly present and equal zero. These are declared
+limits, not hardware qualification or safety claims.
+
+Example profile creation body (updates also include the expected `revision`):
+
+```json
+{"schema_version":1,"name":"Declared GRBL","controller":"grbl-1.1","units":"mm","origin":"lower-left","width_mm":300,"height_mm":200,"min_s":0,"max_s":1000,"min_feed_mm_min":1,"max_feed_mm_min":6000,"max_power_percent":100,"laser_mode_enabled":true}
+```
+
+## Editable rectangle projects
+
+Projects are saved independently in the durable `designs.json` library. This
+initial project schema supports one rectangle and one `vector-engrave`
+operation. Geometry uses millimetres from the lower-left declared work origin.
+The profile reference includes its revision. `profile_stale` is computed on
+reads and is true after the profile revision changes; save the project with the
+current reviewed profile revision before generation. Project creation and
+updates require the referenced profile to exist at the submitted revision,
+reject out-of-envelope rectangles, and validate feed and power against that
+profile. Missing or changed profiles return 409. Profile deletion returns 409
+while a project references it.
+
+`GET /projects` returns projects in ID order. `POST /projects` creates an
+editable project and returns 201 with a Location header. `GET /projects/{id}`
+reads one project. `PUT /projects/{id}` requires its current positive `revision`
+and increments it on success; stale writes return 409. `DELETE /projects/{id}`
+requires `{"revision":N}` and returns 204. Missing projects return 404.
+
+The request shape is `{"schema_version":1,"name":"Panel outline",
+"profile_id":"PROFILE_ID","profile_revision":1,"rectangle":{"x_mm":10,
+"y_mm":20,"width_mm":30,"height_mm":20},"operation":{"type":"vector-engrave",
+"feed_mm_min":600,"power_percent":25}}`. Updates also include `revision`.
+All requests are authenticated strict JSON objects limited to 64 KiB, with no
+unknown fields. Names are trimmed and 1–120 bytes. Coordinates are nonnegative,
+rectangle dimensions are positive, and the full rectangle must fit the profile
+envelope. Coordinates, dimensions, feed, and power accept at most three decimal
+places. Feed must fit the profile range; power must be above zero and at most
+the profile maximum, and must round to at least one GRBL S unit. Other operation
+types and SVG, text, raster, and cut workflows are not supported by this API.
+
+`POST /projects/{id}/generate` accepts `{"revision":N}` and returns 201 with a
+Location pointing to a normal queued job. It requires the current project
+revision and the exact current profile revision. The full G-code is checked by
+the existing GRBL driver validator before persistence. The generated program is
+an immutable job named `<project name>.gcode`; it contains deterministic
+rectangle vector engraving moves, and is never dispatched automatically.
+Generated jobs include `provenance` with `generator_version`, and complete
+`project` and `profile` value snapshots including IDs and revisions. Later
+project edits, project deletion, and profile deletion do not alter those job
+bytes or snapshots. Uploaded jobs have no provenance and retain their existing
+upload behavior.

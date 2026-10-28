@@ -165,6 +165,13 @@ restart point. A current server interrupts every active control state on restart
 older releases do not understand the new paused/resuming records, so complete or
 cancel work before downgrading and retain a stopped-server data backup.
 
+Designer data adds `profiles.json`, `designs.json`, and generated source/profile
+snapshots in `jobs.json`. Back up the whole stopped-server data directory, not
+just the job file. Older servers cannot manage editable projects and can discard
+generated-job provenance when rewriting their older job model. Use a separate
+data directory restored from a backup matching that server version for rollback;
+do not alternate old and new servers against the same writable library.
+
 Older workers can still execute jobs on a current server, but confirmed
 pause/resume is offered only when the worker advertises that capability. Upgrade
 the server before a new worker: an older server rejects the new worker metadata,

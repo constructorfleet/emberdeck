@@ -15,23 +15,25 @@ where indicated. This is an early foundation, not a production certification.
 - [x] Release automation for binaries, generated docs, and container images
 - [x] Verify hosted cross-platform/container checks and v0.1.0 release deployment
 - [x] Pause/resume with explicit controller state reporting
-- [ ] Machine profiles, work-envelope validation, and coordinate preview
+- [x] Declared GRBL profiles and envelope validation/preview for rectangle projects
+- [ ] Profile-aware parsing and coordinate preview for uploaded machine programs
 - [ ] Job history metadata, filtering, pagination, and large-library storage
 - [ ] Separate operator/worker credentials and multi-user permissions
 - [ ] Camera monitoring with authenticated access
 - [ ] Supported-controller hardware qualification matrix and test evidence
 - [ ] Installer/package validation on actual Pi, Windows, Mac, Linux, and LXC
 
-Only the GRBL protocol is implemented. Ruida, proprietary DSP protocols, image
-rasterization, CAD/CAM toolpath generation, and OctoPrint plugin compatibility
-are outside the current implementation. Plugins can add adapters in later work.
+Only the GRBL protocol and a rectangle vector-engraving generator are implemented.
+Ruida, proprietary DSP protocols, image rasterization, general CAD/CAM geometry,
+and OctoPrint plugin compatibility are outside the current implementation.
+Plugins can add adapters in later work.
 
 ## Feature requests
 
 Review open GitHub feature requests before selecting new work, then read the
 current issue body and comments for acceptance criteria. Issues #3 and #4 are
 required parts of the active product goal alongside the core deployment and
-job-management requirements above. Issues #7 and #8 are tracked below with
+job-management requirements above. Additional requests are tracked below with
 their implementation status and evidence:
 
 - [x] [#3: ESP32 driver firmware and ESPHome feasibility](https://github.com/constructorfleet/emberdeck/issues/3).
@@ -49,8 +51,11 @@ their implementation status and evidence:
   and explicit dispatch. Verify geometry/toolpaths at public interfaces and the
   complete browser workflow, and add screenshots from the implemented designer.
   Distinguish vector cutting, vector engraving, and raster engraving milestones.
-  [Source review and proposed architecture](research/designer-architecture.md)
-  cover the planning subset; the end-to-end implementation remains required.
+  The first end-to-end milestone supports declared profiles and one saved
+  rectangle vector-engraving operation through preview, immutable generated job,
+  review, and explicit dispatch. [Source review and remaining architecture](research/designer-architecture.md)
+  distinguish this milestone from the remaining multi-object editing, transforms,
+  SVG/text, cutting operations, and raster evaluation. The full issue stays open.
 - [ ] [#7: Live completed/remaining toolpath progress](https://github.com/constructorfleet/emberdeck/issues/7).
   Implement camera-independent execution monitoring for supported uploaded G-code
   as well as designer-generated jobs. Share the coordinate/toolpath renderer
@@ -71,6 +76,22 @@ their implementation status and evidence:
   rendered-browser tests implement this navigation; see the
   [review and before/after captures](browser-tests.md#documentation-navigation-review).
   Verify the published release before closing the GitHub issue.
+- [ ] [#15: Driver-adapter plugins for network cutters](https://github.com/constructorfleet/emberdeck/issues/15).
+  Define and implement a versioned adapter lifecycle, discovery/configuration,
+  capabilities, transfer/status/control feedback, and bounded failures while
+  preserving sessions, leases, confirmation, and no replay. Support adapters on
+  server or distributed hosts, provide a simulated example and a concrete
+  non-built-in network protocol target, and verify the operator workflow.
+  Built-in GRBL-over-TCP already supports compatible network endpoints; this
+  request does not imply universal Wi-Fi compatibility or qualified hardware.
+- [ ] [#16: Importer/converter plugins](https://github.com/constructorfleet/emberdeck/issues/16).
+  Add a distinct versioned import/conversion contract with format capabilities,
+  options, editable-design or validated-job outputs, original-source retention,
+  version/settings provenance, warnings, preview, and explicit operator review.
+  Share the designer model with #4. Provide a bounded SVG example and tests for
+  malformed, oversized, unsupported, lossy, and external/active-content cases.
+  Trusted plugin processes are not sandboxes; input conversion never starts a
+  machine or silently chooses units, origin, speed, power, or controller settings.
 
 The current issue bodies remain authoritative when their acceptance criteria
 change. A roadmap checkmark requires corresponding evidence, not a planned task.

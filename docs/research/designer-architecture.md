@@ -1,10 +1,26 @@
 # Browser laser designer: architecture review
 
-**Status:** architecture proposal and source review for [issue #4](https://github.com/constructorfleet/emberdeck/issues/4), not implemented behavior. Issue #4 asks for creation/import, editing, operations, profile-aware preview, editable projects, generated jobs, explicit dispatch, public-seam geometry tests, browser workflow tests, and illustrated operator instructions. It specifically requires separate milestones for vector cutting, vector engraving, and raster engraving. There are no issue comments changing that scope.
+**Status:** the first rectangle vector-engraving milestone is implemented; this document also retains the source review and remaining architecture for [issue #4](https://github.com/constructorfleet/emberdeck/issues/4). The full issue remains open. Issue #4 asks for creation/import, editing, operations, profile-aware preview, editable projects, generated jobs, explicit dispatch, public-seam geometry tests, browser workflow tests, and illustrated operator instructions. It specifically requires separate milestones for vector cutting, vector engraving, and raster engraving.
 
-## Current EmberDeck boundary
+## Implemented rectangle milestone
 
-The current browser is an authenticated job library: it uploads text G-code to `POST /api/v1/jobs`, displays stored programs, and requires an explicit operator confirmation to start a queued job. Upload is limited to 4 MiB and stores the supplied program verbatim; it does not generate or certify it ([API contract](https://github.com/constructorfleet/emberdeck/blob/ccd366dd500d6fd65f84aacf8050e3f3371dac72/docs/api.md), [current console markup](https://github.com/constructorfleet/emberdeck/blob/ccd366dd500d6fd65f84aacf8050e3f3371dac72/internal/server/assets/index.html)). The driver validates an entire program before streaming; each executable line is limited to 79 bytes, and completion requires GRBL `Idle` ([driver contract](https://github.com/constructorfleet/emberdeck/blob/ccd366dd500d6fd65f84aacf8050e3f3371dac72/docs/driver.md)). Only GRBL is implemented; rasterization and CAD/CAM toolpath generation are explicitly outside the current implementation ([delivery plan](https://github.com/constructorfleet/emberdeck/blob/ccd366dd500d6fd65f84aacf8050e3f3371dac72/docs/roadmap.md)).
+The embedded editor creates/selects declared GRBL profiles, saves and reopens a
+versioned rectangle project, edits numeric position/dimensions and engraving
+feed/commanded power, and previews its declared millimetre envelope. Generation
+creates a separate queued G-code job with immutable project/profile provenance;
+the operator reviews it and uses the existing explicit readiness/start controls.
+Profile revision changes require review and resave before generation.
+See the [API contract](../api.md) and [illustrated guide](../operator-guide.md).
+
+This milestone has one rectangle outline and one vector-engraving operation.
+It does not implement SVG import, text, multiple objects, rotation/alignment,
+cutting layers, or raster engraving. The remaining sections describe the broader
+design, not additional available controls. The static preview is not execution
+monitoring for [issue #7](https://github.com/constructorfleet/emberdeck/issues/7).
+
+## Pre-designer baseline
+
+At reviewed commit `ccd366d`, the browser was an authenticated job library: it uploaded text G-code to `POST /api/v1/jobs`, displayed stored programs, and required explicit operator confirmation to start a queued job. Upload was limited to 4 MiB and stored the supplied program verbatim ([API contract at review](https://github.com/constructorfleet/emberdeck/blob/ccd366dd500d6fd65f84aacf8050e3f3371dac72/docs/api.md), [console markup at review](https://github.com/constructorfleet/emberdeck/blob/ccd366dd500d6fd65f84aacf8050e3f3371dac72/internal/server/assets/index.html)). Those upload/dispatch controls remain. The driver still validates an entire program before streaming; each executable line is limited to 79 bytes, and completion requires GRBL `Idle` ([driver contract](../driver.md)). The rectangle generator extends that baseline without adding general CAD/CAM or raster support.
 
 ## SketchForge review and reuse choice
 

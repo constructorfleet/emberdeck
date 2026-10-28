@@ -24,6 +24,58 @@
       <div id="connection-state" class="connection-state" role="status">Not connected</div>
     </section>
     <div id="notice" class="notice" role="alert" hidden></div>
+    <section id="designer-panel" class="panel designer-panel" aria-labelledby="designer-title">
+      <div class="section-title"><div><p class="eyebrow">DESIGN SOURCE</p><h2 id="designer-title">Profiles and rectangle projects</h2></div><span class="step-number">MM · GRBL</span></div>
+      <p class="designer-intro">Declare the prepared work area and edit one vector-engraved rectangle. Coordinates use the lower-left work origin; no machine settings are read or changed.</p>
+      <div id="designer-status" class="designer-status" role="status">Connect to load saved profiles and projects.</div>
+      <div class="designer-columns">
+        <section class="designer-section" aria-labelledby="profiles-title">
+          <div class="designer-heading"><h3 id="profiles-title">Machine profiles</h3><button id="new-profile" class="button button-small" type="button">New profile</button></div>
+          <label for="profile-select">Selected profile</label><select id="profile-select" disabled><option>Connect to load profiles</option></select>
+          <div class="designer-actions"><button id="edit-profile" class="button button-small" type="button" disabled>Edit profile</button><button id="delete-profile" class="button button-small button-danger" type="button" disabled>Delete profile</button></div>
+          <form id="profile-form" class="designer-form" hidden>
+            <h4 id="profile-form-title">New declared profile</h4>
+            <label for="profile-name">Profile name</label><input id="profile-name" maxlength="120" required>
+            <div class="numeric-grid">
+              <label>Work area width (mm)<input id="profile-width" aria-label="Work area width (mm)" type="number" min="0.001" max="10000" step="0.001" required></label>
+              <label>Work area height (mm)<input id="profile-height" aria-label="Work area height (mm)" type="number" min="0.001" max="10000" step="0.001" required></label>
+              <label>Minimum spindle value ($31)<input id="profile-min-s" aria-label="Minimum spindle value ($31)" type="number" value="0" readonly></label>
+              <label>Maximum spindle value ($30)<input id="profile-max-s" aria-label="Maximum spindle value ($30)" type="number" min="1" max="1000000000" step="1" required></label>
+              <label>Minimum feed (mm/min)<input id="profile-min-feed" aria-label="Minimum feed (mm/min)" type="number" min="0.001" max="100000" step="0.001" required></label>
+              <label>Maximum feed (mm/min)<input id="profile-max-feed" aria-label="Maximum feed (mm/min)" type="number" min="0.001" max="100000" step="0.001" required></label>
+              <label>Maximum commanded power (%)<input id="profile-max-power" aria-label="Maximum commanded power (%)" type="number" min="0.001" max="100" step="0.001" required></label>
+            </div>
+            <p class="hint profile-declaration">Operator declaration only. Selecting a profile does not verify the dispatch driver or work coordinates. Before Start, confirm its $30 matches this maximum, declare $31=0 and $32=1, and prepare the active lower-left work origin. EmberDeck does not query, home, zero, or change controller settings. Commanded S percentage is not a measurement of optical output.</p>
+            <div class="designer-actions"><button class="button button-primary" type="submit">Save profile</button><button id="cancel-profile" class="button button-small" type="button">Cancel</button></div>
+          </form>
+        </section>
+        <section class="designer-section" aria-labelledby="projects-title">
+          <div class="designer-heading"><h3 id="projects-title">Rectangle projects</h3><button id="new-project" class="button button-small" type="button" disabled>New rectangle project</button></div>
+          <ul id="project-list" class="project-list" aria-label="Saved rectangle projects"></ul>
+          <form id="project-form" class="designer-form" hidden>
+            <h4 id="project-form-title">New rectangle project</h4>
+            <label for="project-name">Project name</label><input id="project-name" maxlength="120" required>
+            <p id="stale-profile-warning" class="designer-warning" role="alert" hidden>Profile revision changed. Review this project against the current declared envelope and save it before generating.</p>
+            <p id="profile-save-hint" class="hint" hidden>Save or cancel profile edits before generating this project.</p>
+            <div class="project-editor-grid">
+              <div class="numeric-grid">
+                <label>X position (mm)<input id="rect-x" aria-label="X position (mm)" type="number" min="0" step="0.001" required></label>
+                <label>Y position (mm)<input id="rect-y" aria-label="Y position (mm)" type="number" min="0" step="0.001" required></label>
+                <label>Width (mm)<input id="rect-width" aria-label="Width (mm)" type="number" min="0.001" step="0.001" required></label>
+                <label>Height (mm)<input id="rect-height" aria-label="Height (mm)" type="number" min="0.001" step="0.001" required></label>
+                <label>Engraving feed (mm/min)<input id="operation-feed" aria-label="Engraving feed (mm/min)" type="number" min="0.001" step="0.001" required></label>
+                <label>Commanded engraving power (%)<input id="operation-power" aria-label="Engraving power (%)" type="number" min="0.001" max="100" step="0.001" required></label>
+              </div>
+              <div class="preview-wrap"><svg id="project-preview" viewBox="0 0 620 360" role="img" aria-label="Declared workspace preview in millimetres"><title>Declared workspace preview</title><desc>Rectangle and laser-off approach endpoint in the declared work area.</desc><g id="preview-content"></g></svg><p id="preview-legend">Workspace · outline shows the vector-engrave path · marker shows the laser-off approach endpoint. Starting position is unknown.</p></div>
+            </div>
+            <p id="project-validation" class="designer-warning" role="alert" hidden></p>
+            <p id="project-save-hint" class="hint" hidden>Save changes before generating; the preview has unsaved edits.</p>
+            <p id="stale-preview" class="hint" hidden>Preview uses this declared profile revision. Confirm the machine is prepared to match it.</p>
+            <div class="designer-actions"><button class="button button-primary" type="submit">Save project</button><button id="generate-project" class="button button-start" type="button" disabled>Generate queued job</button><button id="delete-project" class="button button-small button-danger" type="button" hidden>Delete project</button><button id="cancel-project" class="button button-small" type="button">Close editor</button></div>
+          </form>
+        </section>
+      </div>
+    </section>
     <div class="workspace">
       <section class="panel upload-panel" aria-labelledby="upload-title">
         <div class="section-title"><div><p class="eyebrow">02 / INTAKE</p><h2 id="upload-title">Add a program</h2></div><span class="step-number">02</span></div>
@@ -44,6 +96,7 @@
     </div>
     <section id="program-panel" class="panel program-panel" hidden aria-labelledby="program-title">
       <div class="section-title"><div><p class="eyebrow">PROGRAM VIEW</p><h2 id="program-title">Program</h2></div><button id="close-program" class="icon-button" type="button" aria-label="Close program">×</button></div>
+      <div id="program-provenance" class="program-provenance" hidden></div>
       <pre id="program-code" class="program-code"></pre>
     </section>
   </main>

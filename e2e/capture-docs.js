@@ -46,6 +46,10 @@ async function capture(page, name) {
   await page.screenshot({ path: path.join(screenshotDir, name), fullPage: true });
 }
 
+async function captureElement(page, selector, name) {
+  await page.locator(selector).screenshot({ path: path.join(screenshotDir, name), animations: 'disabled' });
+}
+
 async function captureDocumentationNavigation(browser) {
   const python = process.env.PYTHON || 'python3';
   const result = spawnSync(python, ['scripts/build-docs.py'], { cwd: root, stdio: 'inherit' });
@@ -97,6 +101,50 @@ async function main() {
     await page.getByRole('button', { name: /Connect/ }).click();
     await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
     await expect(page.locator('#driver-select')).toHaveValue('simulator');
+
+    await page.getByRole('button', { name: 'New profile' }).click();
+    await page.getByLabel('Profile name').fill('Documented GRBL');
+    await page.getByLabel('Work area width (mm)').fill('300');
+    await page.getByLabel('Work area height (mm)').fill('200');
+    await page.getByLabel('Maximum spindle value ($30)').fill('1000');
+    await page.getByLabel('Minimum feed (mm/min)').fill('1');
+    await page.getByLabel('Maximum feed (mm/min)').fill('6000');
+    await page.getByLabel('Maximum commanded power (%)').fill('100');
+    await page.getByRole('button', { name: 'Save profile' }).click();
+    await expect(page.locator('#designer-status')).toContainText('Profile saved');
+    await page.getByRole('button', { name: 'Edit profile' }).click();
+    await page.locator('#profile-name').evaluate((input) => input.blur());
+    await captureElement(page, '#designer-panel', 'designer-profile.png');
+    await page.getByRole('button', { name: 'Cancel' }).click();
+
+    await page.getByRole('button', { name: 'New rectangle project' }).click();
+    await page.locator('#project-name').fill('Panel outline');
+    await page.locator('#rect-x').fill('10');
+    await page.locator('#rect-y').fill('20');
+    await page.locator('#rect-width').fill('30');
+    await page.locator('#rect-height').fill('20');
+    await page.locator('#operation-feed').fill('600');
+    await page.locator('#operation-power').fill('25');
+    await expect(page.locator('#project-validation')).toBeHidden();
+    await page.getByRole('button', { name: 'Save project' }).click();
+    await expect(page.locator('#designer-status')).toContainText('Project saved');
+    await captureElement(page, '#project-form', 'designer-project.png');
+    await page.getByRole('button', { name: 'Generate queued job' }).click();
+    const designerRow = page.locator('#job-list li').filter({ hasText: 'Panel outline.gcode' });
+    await expect(designerRow).toContainText(/queued/i);
+    await expect(page.locator('#program-provenance')).toContainText('Panel outline');
+    await captureElement(page, '#program-panel', 'designer-generated-review.png');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await captureElement(page, '#designer-panel', 'designer-mobile.png');
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    const projectRow = page.locator('#project-list li').filter({ hasText: 'Panel outline' });
+    page.once('dialog', (dialog) => dialog.accept());
+    await projectRow.getByRole('button', { name: 'Delete project Panel outline' }).click();
+    await expect(projectRow).toHaveCount(0);
+    await page.getByRole('button', { name: 'Delete profile' }).click();
+    page.once('dialog', (dialog) => dialog.accept());
+    await designerRow.getByRole('button', { name: /Delete Panel outline\.gcode/ }).click();
+    await expect(designerRow).toHaveCount(0);
 
     const lines = 4000;
     const name = 'documented-controller-demo.gcode';
