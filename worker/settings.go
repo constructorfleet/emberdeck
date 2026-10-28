@@ -72,6 +72,8 @@ func (r *controllerReport) setCapabilities(capabilities driveradapter.Capabiliti
 	defer r.mu.Unlock()
 	r.adapterCapabilities = true
 	r.capabilities = nil
+	// Manual* adapter fields are declarations only until this worker has an
+	// adapter execution and confirmed-stop interface for those actions.
 	if capabilities.PauseResume {
 		r.capabilities = append(r.capabilities, "pause_resume")
 	}
