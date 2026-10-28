@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/constructorfleet/emberdeck/compare/v0.11.0...v0.12.0) (2026-10-28)
+
+
+### Features
+
+* **worker:** poll active lease during controller streaming ([#126](https://github.com/constructorfleet/emberdeck/issues/126)) ([0d8a63a](https://github.com/constructorfleet/emberdeck/commit/0d8a63a50eca32dfb74c98e33631067f158ffab7))
+
 ## [0.11.0](https://github.com/constructorfleet/emberdeck/compare/v0.10.2...v0.11.0) (2026-10-28)
 
 
