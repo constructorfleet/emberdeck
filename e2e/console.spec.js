@@ -128,7 +128,7 @@ test('error notices persist across polls until dismissed and a successful refres
   await page.route('**/api/v1/jobs?*', (route) => route.abort('failed'));
   await page.locator('#refresh').click();
   const notice = page.locator('#notice');
-  await expect(notice).toContainText('Failed to fetch');
+  await expect(notice).toContainText('Could not reach EmberDeck. Check your connection and try again.');
   await expect(notice).toHaveClass(/notice-error/);
   await expect(notice).toHaveAttribute('role', 'alert');
   await page.waitForTimeout(4300);
@@ -200,7 +200,7 @@ test('rejected key is not stored or polled, then a trimmed correct key connects'
   releaseValidation();
   await expect(page.locator('#connection-state')).toHaveText('Not connected', { timeout: 5000 });
   await expect(page.locator('#api-key')).toBeFocused();
-  await expect(page.locator('#notice')).toContainText('authentication required');
+  await expect(page.locator('#notice')).toContainText('That API key was not accepted. Check it and try again.');
   await expect(page.locator('.status-dot')).toHaveAttribute('data-state', 'error');
   expect(await page.evaluate(() => sessionStorage.getItem('emberdeck-api-key'))).toBeNull();
   const rejectedRequestCount = apiRequests;
@@ -252,7 +252,7 @@ test('a 401 during refresh clears a stored key, focuses the key field, and stops
   await page.locator('#refresh').click();
   await expect(page.locator('#auth-form')).toBeVisible();
   await expect(page.locator('#connection-state')).toHaveText('Not connected');
-  await expect(page.locator('#notice')).toContainText('authentication required');
+  await expect(page.locator('#notice')).toContainText('That API key was not accepted. Check it and try again.');
   await expect(page.locator('.status-dot')).toHaveAttribute('data-state', 'error');
   await expect(page.locator('#api-key')).toBeFocused();
   expect(await page.evaluate(() => sessionStorage.getItem('emberdeck-api-key'))).toBeNull();

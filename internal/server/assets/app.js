@@ -276,11 +276,18 @@
     const headers = new Headers(options.headers || {});
     headers.set("Authorization", `Bearer ${requestToken}`);
     if (options.body) headers.set("Content-Type", "application/json");
-    const response = await fetch(path, { ...options, headers });
+    let response;
+    try { response = await fetch(path, { ...options, headers }); }
+    catch (cause) {
+      const error = new Error(cause instanceof TypeError ? "Could not reach EmberDeck. Check your connection and try again." : "The request could not be completed. Try again.");
+      error.cause = cause;
+      throw error;
+    }
     if (!response.ok) {
       let detail = `Request failed (${response.status})`;
       let payload = {};
       try { payload = await response.json(); detail = payload.error || detail; } catch (_) { /* keep status */ }
+      if (response.status === 401) detail = "That API key was not accepted. Check it and try again.";
       if (response.status === 401 && token === requestToken) {
         forgetSession({ focus: true, clearInput: false });
         notify("error", detail, { sticky: true, connection: true });
@@ -288,6 +295,7 @@
       const error = new Error(detail);
       error.status = response.status;
       error.current = payload.current;
+      error.fields = payload.fields || {};
       throw error;
     }
     return response.status === 204 ? null : response.json();
@@ -295,10 +303,13 @@
 
   async function apiBlob(path) {
     const requestToken = token;
-    const response = await fetch(path, { headers: { Authorization: `Bearer ${requestToken}` }, cache: "no-store" });
+    let response;
+    try { response = await fetch(path, { headers: { Authorization: `Bearer ${requestToken}` }, cache: "no-store" }); }
+    catch (cause) { throw new Error(cause instanceof TypeError ? "Could not reach EmberDeck. Check your connection and try again." : "The request could not be completed. Try again."); }
     if (!response.ok) {
       let detail = `Request failed (${response.status})`;
       try { detail = (await response.json()).error || detail; } catch (_) { /* keep status */ }
+      if (response.status === 401) detail = "That API key was not accepted. Check it and try again.";
       if (response.status === 401 && token === requestToken) {
         forgetSession({ focus: true, clearInput: false });
         notify("error", detail, { sticky: true, connection: true });
@@ -356,6 +367,79 @@
     height_mm: "#rect-height", feed_mm_min: "#operation-feed", power_percent: "#operation-power",
   };
   const svgNS = "http://www.w3.org/2000/svg";
+
+  function renderFieldErrors(form, fieldMap, errors, summary) {
+    const entries = Object.entries(fieldMap);
+    const messages = [];
+    for (const [key, selector] of entries) {
+      const input = $(selector);
+      const errorID = `${input.id}-error`;
+      let output = document.getElementById(errorID);
+      if (!output) {
+        output = document.createElement("span");
+        output.id = errorID;
+        output.className = "field-error";
+        input.insertAdjacentElement("afterend", output);
+      }
+      const message = errors[key] || "";
+      output.textContent = message;
+      output.hidden = !message;
+      const describedBy = new Set((input.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
+      if (message) {
+        input.setAttribute("aria-invalid", "true");
+        describedBy.add(errorID);
+        messages.push(message);
+      } else {
+        input.removeAttribute("aria-invalid");
+        describedBy.delete(errorID);
+      }
+      if (describedBy.size) input.setAttribute("aria-describedby", [...describedBy].join(" "));
+      else input.removeAttribute("aria-describedby");
+    }
+    const mappedKeys = new Set(entries.map(([key]) => key));
+    for (const [key, message] of Object.entries(errors)) {
+      if (!mappedKeys.has(key) && message) messages.push(message);
+    }
+    summary.replaceChildren();
+    if (messages.length === 1) summary.textContent = messages[0];
+    else if (messages.length > 1) {
+      const heading = document.createElement("strong");
+      heading.textContent = `Fix ${messages.length} fields:`;
+      const list = document.createElement("ul");
+      for (const message of messages) { const item = document.createElement("li"); item.textContent = message; list.append(item); }
+      summary.append(heading, list);
+    }
+    summary.hidden = messages.length === 0;
+  }
+
+  function profileValidationErrors() {
+    const errors = {};
+    if (!$(profileFields.name).value.trim()) errors.name = "Enter a profile name.";
+    else if ($(profileFields.name).value.trim().length > 120) errors.name = "Use 120 characters or fewer.";
+    const ranges = {
+      width_mm: [0.001, 10000, "Work area width must be from 0.001 to 10,000 mm."],
+      height_mm: [0.001, 10000, "Work area height must be from 0.001 to 10,000 mm."],
+      max_s: [1, 1000000000, "Maximum spindle value must be from 1 to 1,000,000,000."],
+      min_feed_mm_min: [0.001, 100000, "Minimum feed must be from 0.001 to 100,000 mm/min."],
+      max_feed_mm_min: [0.001, 100000, "Maximum feed must be from 0.001 to 100,000 mm/min."],
+      max_power_percent: [0.001, 100, "Maximum commanded power must be from 0.001 to 100 percent."],
+    };
+    for (const [key, [minimum, maximum, rangeMessage]] of Object.entries(ranges)) {
+      const raw = $(profileFields[key]).value;
+      const value = Number(raw);
+      if (raw === "") errors[key] = "Enter a value for this field.";
+      else if (!Number.isFinite(value)) errors[key] = "Enter a finite number.";
+      else if (key !== "max_s" && !decimalPlacesAtMostThree(raw)) errors[key] = "Use at most three decimal places.";
+      else if (key === "max_s" && !Number.isInteger(value)) errors[key] = "Enter a whole spindle value.";
+      else if (value < minimum || value > maximum) errors[key] = rangeMessage;
+    }
+    const min = Number($(profileFields.min_feed_mm_min).value);
+    const max = Number($(profileFields.max_feed_mm_min).value);
+    if (!errors.min_feed_mm_min && !errors.max_feed_mm_min && max < min) {
+      errors.max_feed_mm_min = "Maximum feed must be at least the minimum feed.";
+    }
+    return errors;
+  }
 
   function selectedProfile() {
     return profiles.find((profile) => profile.id === $("#profile-select").value) || null;
@@ -663,19 +747,29 @@
 
   function projectValidation() {
     const profile = selectedProfile();
-    if (!profile) return "Select or create a declared profile first.";
+    if (!profile) return { _form: "Select or create a declared profile first." };
+    const errors = {};
     const values = {};
     for (const key of ["x_mm", "y_mm", "width_mm", "height_mm", "feed_mm_min", "power_percent"]) {
+      const raw = $(projectFields[key]).value;
       values[key] = finiteField(projectFields[key]);
-      if (values[key] === null) return "Enter finite millimetre and feed values with at most three decimal places.";
+      if (raw === "") errors[key] = "Enter a value for this field.";
+      else if (values[key] === null) errors[key] = "Use at most three decimal places.";
     }
-    if (values.x_mm < 0 || values.y_mm < 0 || values.width_mm <= 0 || values.height_mm <= 0) return "Position must be nonnegative and rectangle dimensions must be positive.";
-    if (milli(values.x_mm) + milli(values.width_mm) > milli(profile.width_mm) || milli(values.y_mm) + milli(values.height_mm) > milli(profile.height_mm)) return "Rectangle is outside the declared workspace.";
-    if (milli(values.feed_mm_min) < milli(profile.min_feed_mm_min) || milli(values.feed_mm_min) > milli(profile.max_feed_mm_min)) return "Engraving feed is outside the selected profile range.";
-    if (values.power_percent <= 0 || milli(values.power_percent) > milli(profile.max_power_percent)) return "Commanded power percentage is outside the selected profile limit.";
-    const sProduct = profile.max_s * milli(values.power_percent);
-    if (!Number.isSafeInteger(sProduct) || Math.floor((sProduct + 50000) / 100000) < 1) return "This percentage rounds to S0; increase commanded power before saving.";
-    return "";
+    for (const key of ["name"]) if (!$(projectFields[key]).value.trim()) errors[key] = "Enter a project name.";
+    if (values.x_mm !== null && values.x_mm < 0) errors.x_mm = "Position cannot be negative.";
+    if (values.y_mm !== null && values.y_mm < 0) errors.y_mm = "Position cannot be negative.";
+    if (values.width_mm !== null && values.width_mm <= 0) errors.width_mm = "Width must be greater than zero.";
+    if (values.height_mm !== null && values.height_mm <= 0) errors.height_mm = "Height must be greater than zero.";
+    if (!errors.x_mm && !errors.width_mm && milli(values.x_mm) + milli(values.width_mm) > milli(profile.width_mm)) errors.width_mm = "Rectangle extends beyond the declared workspace width.";
+    if (!errors.y_mm && !errors.height_mm && milli(values.y_mm) + milli(values.height_mm) > milli(profile.height_mm)) errors.height_mm = "Rectangle extends beyond the declared workspace height.";
+    if (values.feed_mm_min !== null && values.feed_mm_min >= 0 && (values.feed_mm_min < profile.min_feed_mm_min || values.feed_mm_min > profile.max_feed_mm_min)) errors.feed_mm_min = "Engraving feed is outside the selected profile range.";
+    if (values.power_percent !== null && values.power_percent >= 0 && values.power_percent > profile.max_power_percent) errors.power_percent = "Commanded power percentage exceeds the selected profile limit.";
+    if (values.power_percent !== null && values.power_percent > 0) {
+      const sProduct = profile.max_s * milli(values.power_percent);
+      if (!Number.isSafeInteger(sProduct) || Math.floor((sProduct + 50000) / 100000) < 1) errors.power_percent = "This percentage rounds to S0; increase commanded power.";
+    }
+    return errors;
   }
 
   function svgElement(name, attributes = {}, text = "") {
@@ -737,11 +831,9 @@
     $("#stale-profile-warning").hidden = !stale;
     $("#profile-save-hint").hidden = !profileDraftOpen || !openProject;
     $("#stale-preview").hidden = !stale;
-    const error = projectValidation();
-    warning.textContent = error;
-    warning.setAttribute("role", "alert");
-    warning.hidden = !error;
-    const valuesReady = !error && Boolean($(projectFields.name).value.trim());
+    const errors = projectValidation();
+    renderFieldErrors(form, projectFields, errors, warning);
+    const valuesReady = Object.keys(errors).length === 0;
     $("#project-form").querySelector('button[type="submit"]').disabled = !valuesReady || hasRemoteUpdate;
     const projectSaveHint = $("#project-save-hint");
     projectSaveHint.hidden = !dirty && Boolean(openProject);
@@ -813,8 +905,8 @@
   async function saveProject(event) {
     event.preventDefault();
     const profile = selectedProfile();
-    const error = projectValidation();
-    if (!profile || error || !$(projectFields.name).value.trim()) { updateProjectValidation(); return; }
+    const errors = projectValidation();
+    if (!profile || Object.keys(errors).length) { updateProjectValidation(); return; }
     const payload = projectPayload(profile);
     if (openProject) payload.revision = openProject.revision;
     try {
@@ -835,12 +927,13 @@
         pendingProjectUpdate = error.current;
         updateProjectValidation();
         setDesignerError("A newer project revision was saved. Your edits remain in the form; reload it or continue as a separate project.");
-      } else setDesignerError(error.message);
+      } else if (Object.keys(error.fields || {}).length) renderFieldErrors($("#project-form"), projectFields, error.fields, $("#project-validation"));
+      else setDesignerError(error.message);
     }
   }
 
   async function generateProject() {
-    if (!openProject || projectValidation() || !matchesSavedProject(selectedProfile())) { updateProjectValidation(); return; }
+    if (!openProject || Object.keys(projectValidation()).length || !matchesSavedProject(selectedProfile())) { updateProjectValidation(); return; }
     try {
       const job = await api(`/api/v1/projects/${encodeURIComponent(openProject.id)}/generate`, { method: "POST", body: JSON.stringify({ revision: openProject.revision }) });
       confirmation.checked = false;
@@ -1437,13 +1530,21 @@
     state.pending = true;
     updateVectorValidation();
     try {
-      const response = await fetch("/api/v1/designer/text-geometry", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(text),
-      });
+      let response;
+      try {
+        response = await fetch("/api/v1/designer/text-geometry", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify(text),
+        });
+      } catch (cause) {
+        throw new Error(cause instanceof TypeError ? "Could not reach EmberDeck. Check your connection and try again." : "The request could not be completed. Try again.");
+      }
       const result = await response.json();
-      if (response.status === 401 && token) forgetSession({ focus: true, clearInput: false });
+      if (response.status === 401 && token) {
+        forgetSession({ focus: true, clearInput: false });
+        throw new Error("That API key was not accepted. Check it and try again.");
+      }
       if (!response.ok) throw new Error(result.error || `Text geometry failed (${response.status})`);
       if (requestID !== state.requestID || !vectorObjects.some((candidate) => candidate === object)) return;
       object.subpaths = result.subpaths;
@@ -1607,6 +1708,12 @@
   $("#profile-select").addEventListener("change", updateVectorValidation);
   $("#profile-form").addEventListener("submit", async (event) => {
     event.preventDefault();
+    const validationErrors = profileValidationErrors();
+    renderFieldErrors($("#profile-form"), profileFields, validationErrors, $("#profile-validation"));
+    if (Object.keys(validationErrors).length) {
+      $(profileFields.max_feed_mm_min).focus();
+      return;
+    }
     const payload = profilePayload();
     if (editingProfile) payload.revision = editingProfile.revision;
     try {
@@ -1620,8 +1727,12 @@
       if (!$("#project-form").hidden) updateProjectValidation();
       if (!$("#vector-form").hidden) updateVectorValidation();
       notify("success", "Profile saved. Confirm it matches the prepared machine before use.");
-    } catch (error) { setDesignerError(error.message); }
+    } catch (error) {
+      if (Object.keys(error.fields || {}).length) renderFieldErrors($("#profile-form"), profileFields, error.fields, $("#profile-validation"));
+      else setDesignerError(error.message);
+    }
   });
+  $("#profile-form").addEventListener("input", () => renderFieldErrors($("#profile-form"), profileFields, profileValidationErrors(), $("#profile-validation")));
   $("#delete-profile").addEventListener("click", async () => {
     const profile = selectedProfile();
     if (!profile || !window.confirm(`Delete profile “${profile.name}”?`)) return;
@@ -1649,15 +1760,21 @@
     if (!file) return;
     if (!connected || $("#vector-form").hidden) { notify("warning", "Open a vector project before importing SVG geometry."); return; }
     try {
-      const response = await fetch("/api/v1/svg-import", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "image/svg+xml" },
-        body: file,
-      });
+      let response;
+      try {
+        response = await fetch("/api/v1/svg-import", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "image/svg+xml" },
+          body: file,
+        });
+      } catch (cause) {
+        throw new Error(cause instanceof TypeError ? "Could not reach EmberDeck. Check your connection and try again." : "The request could not be completed. Try again.");
+      }
       const imported = await response.json();
       if (response.status === 401 && token) {
         forgetSession({ focus: true, clearInput: false });
-        notify("error", imported.error || "authentication required", { sticky: true, connection: true });
+        notify("error", "That API key was not accepted. Check it and try again.", { sticky: true, connection: true });
+        throw new Error("That API key was not accepted. Check it and try again.");
       }
       if (!response.ok) throw new Error(imported.error || `SVG import failed (${response.status})`);
       const objects = imported.objects.map((object) => ({
@@ -2584,22 +2701,42 @@
     if (!file) return;
     $("#file-label").textContent = file.name;
     if (!jobName.value) jobName.value = file.name;
+    renderFieldErrors(uploadForm, { name: "#job-name", gcode: "#job-file" }, {}, $("#upload-validation"));
   });
+  jobName.addEventListener("input", () => renderFieldErrors(uploadForm, { name: "#job-name", gcode: "#job-file" }, {}, $("#upload-validation")));
 
   uploadForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!connected) { notify("warning", "Connect with your API key before adding a program."); keyInput.focus(); return; }
     const file = fileInput.files && fileInput.files[0];
-    if (!file) return;
+    const uploadErrors = {};
+    if (!jobName.value.trim()) uploadErrors.name = "Enter a display name for this program.";
+    else if (jobName.value.trim().length > 200) uploadErrors.name = "Use 200 characters or fewer.";
+    if (!file) uploadErrors.gcode = "Choose a plain text G-code file.";
+    if (Object.keys(uploadErrors).length) {
+      renderFieldErrors(uploadForm, { name: "#job-name", gcode: "#job-file" }, uploadErrors, $("#upload-validation"));
+      (uploadErrors.name ? jobName : fileInput).focus();
+      return;
+    }
     try {
-      const gcode = await file.text();
+      let gcode;
+      try { gcode = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer()); }
+      catch (_) {
+        renderFieldErrors(uploadForm, { name: "#job-name", gcode: "#job-file" }, { gcode: "Choose a plain text G-code file. This file contains binary or invalid text data." }, $("#upload-validation"));
+        fileInput.focus();
+        return;
+      }
       await api("/api/v1/jobs", { method: "POST", body: JSON.stringify({ name: jobName.value, gcode, profile_id: uploadProfileSelect.value }) });
       uploadForm.reset();
+      renderFieldErrors(uploadForm, { name: "#job-name", gcode: "#job-file" }, {}, $("#upload-validation"));
       $("#file-label").textContent = "Choose a G-code file";
       jobOffset = 0; // New programs are listed first.
       await refresh();
       notify("success", "Program added to the library.");
-    } catch (error) { notify("error", error.message); }
+    } catch (error) {
+      if (Object.keys(error.fields || {}).length) renderFieldErrors(uploadForm, { name: "#job-name", gcode: "#job-file" }, error.fields, $("#upload-validation"));
+      else notify("error", error.message);
+    }
   });
 
   driverSelect.addEventListener("change", async () => {

@@ -217,6 +217,13 @@ async function main() {
     await page.getByRole('button', { name: 'Save project' }).click();
     await expect(page.locator('#notice .notice-message')).toContainText('Project saved');
     await captureElement(page, '#project-form', 'designer-project.png');
+    await page.locator('#rect-x').fill('-1');
+    await page.locator('#rect-y').fill('1.23456');
+    await expect(page.locator('#rect-x')).toHaveAttribute('aria-invalid', 'true');
+    await expect(page.locator('#project-validation')).toContainText('Fix 2 fields:');
+    await captureElement(page, '#project-form', 'designer-field-validation.png');
+    await page.locator('#rect-x').fill('10');
+    await page.locator('#rect-y').fill('20');
     await page.evaluate(async () => {
       const headers = { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' };
       const projects = await (await fetch('/api/v1/projects', { headers })).json();
@@ -241,7 +248,7 @@ async function main() {
     await page.getByRole('button', { name: 'Close editor' }).click();
     await page.getByRole('button', { name: 'Reopen project Panel outline' }).click();
     await page.locator('#rect-x').fill('290');
-    await expect(page.locator('#project-validation')).toContainText(/outside the declared workspace/i);
+    await expect(page.locator('#project-validation')).toContainText(/extends beyond the declared workspace/i);
     await expect(page.locator('#project-preview .engrave-path.out-of-bounds')).toHaveCount(1);
     await expect(page.getByRole('button', { name: 'Save project' })).toBeDisabled();
     await captureElement(page, '#project-form', 'designer-project-out-of-bounds.png');

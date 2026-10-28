@@ -314,7 +314,7 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
   await expect(page.getByRole('img', { name: /declared workspace/i })).toBeVisible();
 
   await page.locator('#rect-width').fill('400');
-  await expect(page.locator('#project-validation')).toContainText(/outside the declared workspace/i);
+  await expect(page.locator('#project-validation')).toContainText(/extends beyond the declared workspace width/i);
   await expect(page.getByRole('button', { name: 'Save project' })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Generate queued job' })).toBeDisabled();
   await page.locator('#rect-width').fill('30');
@@ -473,7 +473,7 @@ test('rectangle bounds accept exact three-decimal millimetre edges', async ({ pa
   await page.locator('#operation-power').fill('0.009');
   await expect(page.locator('#project-validation')).toBeHidden();
   await page.locator('#rect-x').fill('0.101');
-  await expect(page.locator('#project-validation')).toContainText(/outside the declared workspace/i);
+  await expect(page.locator('#project-validation')).toContainText(/extends beyond the declared workspace width/i);
   await page.locator('#rect-x').fill('0.1');
   await expect(page.locator('#project-validation')).toBeHidden();
 });

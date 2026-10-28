@@ -42,8 +42,9 @@
           <div class="designer-heading"><h3 id="profiles-title">Machine profiles</h3><button id="new-profile" class="button button-small" type="button" disabled>New profile</button></div>
           <label for="profile-select">Selected profile</label><select id="profile-select" disabled><option>Connect to load profiles</option></select>
           <div class="designer-actions"><button id="edit-profile" class="button button-small" type="button" disabled>Edit profile</button><button id="delete-profile" class="button button-small button-danger" type="button" disabled>Delete profile</button></div>
-          <form id="profile-form" class="designer-form" hidden>
+          <form id="profile-form" class="designer-form" novalidate hidden>
             <h4 id="profile-form-title">New declared profile</h4>
+            <div id="profile-validation" class="form-error-summary" role="alert" hidden></div>
             <label for="profile-name">Profile name</label><input id="profile-name" maxlength="120" required>
             <div class="numeric-grid">
               <label>Work area width (mm)<input id="profile-width" aria-label="Work area width (mm)" type="number" min="0.001" max="10000" step="0.001" required></label>
@@ -62,8 +63,9 @@
           <div class="designer-heading"><h3 id="projects-title">Rectangle projects</h3><button id="new-project" class="button button-small" type="button" disabled>New rectangle project</button></div>
           <ul id="project-list" class="project-list" aria-label="Saved rectangle projects"></ul>
           <p id="project-empty" class="list-empty" hidden>No rectangle projects yet. Choose <strong>New rectangle project</strong> to create one.</p>
-          <form id="project-form" class="designer-form" hidden>
+          <form id="project-form" class="designer-form" novalidate hidden>
             <h4 id="project-form-title">New rectangle project</h4>
+            <div id="project-validation" class="form-error-summary" role="alert" hidden></div>
             <label for="project-name">Project name</label><input id="project-name" maxlength="120" required>
             <p id="stale-profile-warning" class="form-validation warning" role="status" hidden>Profile revision changed. Review this project against the current declared envelope and save it before generating.</p>
             <section id="project-remote-change" class="remote-project-change" role="status" aria-live="polite" hidden><p id="project-remote-message"></p><div class="designer-actions"><button id="project-reload-latest" class="button button-small" type="button">Reload latest</button><button id="project-copy-local" class="button button-small" type="button">Continue as separate project</button></div></section>
@@ -79,7 +81,6 @@
               </div>
               <div class="preview-wrap"><svg id="project-preview" viewBox="0 0 620 360" role="img" aria-label="Declared workspace preview in millimetres"><title>Declared workspace preview</title><desc>Rectangle and laser-off approach endpoint in the declared work area.</desc><g id="preview-content"></g></svg><div class="preview-annotations"><p id="preview-workspace-label">Declared workspace</p><p id="preview-approach-label">Laser-off approach endpoint: not set</p></div><p id="preview-legend">Workspace · outline shows the vector-engrave path · marker shows the laser-off approach endpoint. Starting position is unknown.</p></div>
             </div>
-            <p id="project-validation" class="form-validation" role="alert" hidden></p>
             <p id="project-save-hint" class="hint" hidden>Save changes before generating; the preview has unsaved edits.</p>
             <p id="stale-preview" class="hint" hidden>Preview uses this declared profile revision. Confirm the machine is prepared to match it.</p>
             <div class="designer-actions"><button class="button button-primary" type="submit">Save project</button><button id="generate-project" class="button button-start" type="button" disabled>Generate queued job</button><button id="delete-project" class="button button-small button-danger" type="button" hidden>Delete project</button><button id="cancel-project" class="button button-small" type="button">Close editor</button></div>
@@ -151,7 +152,8 @@
     <div class="workspace">
       <section class="panel upload-panel" aria-labelledby="upload-title">
         <div class="section-title"><div><p class="eyebrow">02 / INTAKE</p><h2 id="upload-title">Add a program</h2></div><div class="section-actions" aria-hidden="true"></div></div>
-        <form id="upload-form">
+        <form id="upload-form" novalidate>
+          <div id="upload-validation" class="form-error-summary" role="alert" hidden></div>
           <label for="job-file">G-code file</label>
           <label class="dropzone" for="job-file"><svg class="upload-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m-5 5 5-5 5 5M5 14v5h14v-5"></path></svg><strong id="file-label">Choose a G-code file</strong><span class="dropzone-caption">Plain text · up to 4 MiB</span><input id="job-file" type="file" accept=".gcode,.nc,.txt,text/plain" required disabled></label>
           <label for="job-name">Display name</label><input id="job-name" type="text" maxlength="200" placeholder="e.g. acrylic-panel.gcode" required disabled>

@@ -97,6 +97,94 @@ func TestProfileWritesRequireAuthStrictSchemaAndDeclaredGRBLLimits(t *testing.T)
 	}
 }
 
+func TestProfileValidationReportsFieldLevelFeedRangeError(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	body := strings.Replace(profileBody, `"min_feed_mm_min":1`, `"min_feed_mm_min":5000`, 1)
+	body = strings.Replace(body, `"max_feed_mm_min":6000`, `"max_feed_mm_min":100`, 1)
+	w := request(t, s, "POST", "/api/v1/profiles", body, "test-key")
+	var response struct {
+		Error  string            `json:"error"`
+		Fields map[string]string `json:"fields"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid feed range response: %d %s (%v)", w.Code, w.Body.String(), err)
+	}
+	if response.Fields["max_feed_mm_min"] != "Maximum feed must be at least the minimum feed." {
+		t.Fatalf("field errors = %#v; want a maximum-feed message", response.Fields)
+	}
+}
+
+func TestProjectValidationReportsFieldLevelPositionError(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	profileID := createTestProfile(t, s)
+	body := `{"schema_version":1,"name":"Negative origin","profile_id":"` + profileID + `","profile_revision":1,"rectangle":{"x_mm":-1,"y_mm":20,"width_mm":30,"height_mm":20},"operation":{"type":"vector-engrave","feed_mm_min":600,"power_percent":25}}`
+	w := request(t, s, "POST", "/api/v1/projects", body, "test-key")
+	var response struct {
+		Fields map[string]string `json:"fields"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid project response: %d %s (%v)", w.Code, w.Body.String(), err)
+	}
+	if response.Fields["x_mm"] != "X position cannot be negative." {
+		t.Fatalf("field errors = %#v; want a position message", response.Fields)
+	}
+}
+
+func TestProjectValidationReportsSpecificFieldMessages(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	w := request(t, s, "POST", "/api/v1/profiles", profileBody, "test-key")
+	var profile struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &profile); err != nil || w.Code != http.StatusCreated {
+		t.Fatalf("create profile: %d %s %v", w.Code, w.Body.String(), err)
+	}
+	project := func(rectangle, operation string) string {
+		return `{"schema_version":1,"name":"panel","profile_id":"` + profile.ID + `","profile_revision":1,"rectangle":` + rectangle + `,"operation":` + operation + `}`
+	}
+	operationJSON := `{"type":"vector-engrave","feed_mm_min":600,"power_percent":25}`
+	cases := []struct {
+		name   string
+		body   string
+		field  string
+		detail string
+	}{
+		{"negative x", project(`{"x_mm":-1,"y_mm":1,"width_mm":10,"height_mm":10}`, operationJSON), "x_mm", "X position cannot be negative."},
+		{"excess precision", project(`{"x_mm":1.23456,"y_mm":1,"width_mm":10,"height_mm":10}`, operationJSON), "x_mm", "Use at most three decimal places."},
+		{"zero width", project(`{"x_mm":1,"y_mm":1,"width_mm":0,"height_mm":10}`, operationJSON), "width_mm", "Width must be greater than zero."},
+		{"outside workspace", project(`{"x_mm":295,"y_mm":1,"width_mm":10,"height_mm":10}`, operationJSON), "width_mm", "X position plus width exceeds the declared 300 mm workspace."},
+		{"feed outside profile", project(`{"x_mm":1,"y_mm":1,"width_mm":10,"height_mm":10}`, `{"type":"vector-engrave","feed_mm_min":7000,"power_percent":25}`), "feed_mm_min", "Feed must be from 1 to 6000 mm/min."},
+		{"power above profile", project(`{"x_mm":1,"y_mm":1,"width_mm":10,"height_mm":10}`, `{"type":"vector-engrave","feed_mm_min":600,"power_percent":150}`), "power_percent", "Commanded power must be greater than zero and at most 100%."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := request(t, s, "POST", "/api/v1/projects", tc.body, "test-key")
+			var response struct {
+				Error  string            `json:"error"`
+				Fields map[string]string `json:"fields"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || w.Code != http.StatusBadRequest {
+				t.Fatalf("project validation response: %d %s (%v)", w.Code, w.Body.String(), err)
+			}
+			if response.Fields[tc.field] != tc.detail {
+				t.Fatalf("field %s = %q; want %q (all fields %#v)", tc.field, response.Fields[tc.field], tc.detail, response.Fields)
+			}
+		})
+	}
+}
+
 func TestRectangleBoundaryUsesMillimetrePrecisionWithoutFloatDrift(t *testing.T) {
 	s, err := server.Open(t.TempDir(), "test-key")
 	if err != nil {

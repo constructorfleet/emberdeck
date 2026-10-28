@@ -158,11 +158,48 @@ func decodeProfile(w http.ResponseWriter, r *http.Request, request *profileReque
 		return false
 	}
 	request.Name = strings.TrimSpace(request.Name)
-	if len(request.ID) != 0 || !parseRevisionField(request.Revision, updating, &request.ExpectedRevision) || !explicitZero(request.DeclaredMinS) || !validProfileValues(request.profile()) {
+	if len(request.ID) != 0 || !parseRevisionField(request.Revision, updating, &request.ExpectedRevision) || !explicitZero(request.DeclaredMinS) {
 		fail(w, 400, "invalid GRBL machine profile")
 		return false
 	}
+	if fields := profileValidationFields(request.profile()); len(fields) > 0 {
+		failFields(w, 400, "Review the highlighted machine profile fields.", fields)
+		return false
+	}
 	return true
+}
+
+func profileValidationFields(profile MachineProfile) map[string]string {
+	fields := make(map[string]string)
+	if profile.Name == "" {
+		fields["name"] = "Enter a profile name."
+	} else if len(profile.Name) > 120 {
+		fields["name"] = "Use 120 characters or fewer."
+	}
+	if profile.Controller != "grbl-1.1" || profile.Units != "mm" || profile.Origin != "lower-left" || !profile.LaserMode || profile.SchemaVersion != 1 {
+		fields["controller"] = "This profile must declare GRBL 1.1, millimetres, a lower-left origin, and laser mode."
+	}
+	if !finite(profile.WidthMM) || !validPrecision(profile.WidthMM) || profile.WidthMM <= 0 || profile.WidthMM > 10000 {
+		fields["width_mm"] = "Enter a width from 0.001 to 10,000 mm, with at most three decimal places."
+	}
+	if !finite(profile.HeightMM) || !validPrecision(profile.HeightMM) || profile.HeightMM <= 0 || profile.HeightMM > 10000 {
+		fields["height_mm"] = "Enter a height from 0.001 to 10,000 mm, with at most three decimal places."
+	}
+	if profile.MaxS < 1 || profile.MaxS > 1_000_000_000 {
+		fields["max_s"] = "Enter a maximum spindle value from 1 to 1,000,000,000."
+	}
+	if !finite(profile.MinFeed) || !validPrecision(profile.MinFeed) || profile.MinFeed <= 0 || profile.MinFeed > 100000 {
+		fields["min_feed_mm_min"] = "Enter a minimum feed from 0.001 to 100,000 mm/min, with at most three decimal places."
+	}
+	if !finite(profile.MaxFeed) || !validPrecision(profile.MaxFeed) || profile.MaxFeed <= 0 || profile.MaxFeed > 100000 {
+		fields["max_feed_mm_min"] = "Enter a maximum feed from 0.001 to 100,000 mm/min, with at most three decimal places."
+	} else if profile.MaxFeed < profile.MinFeed {
+		fields["max_feed_mm_min"] = "Maximum feed must be at least the minimum feed."
+	}
+	if !finite(profile.MaxPowerPct) || !validPrecision(profile.MaxPowerPct) || profile.MaxPowerPct <= 0 || profile.MaxPowerPct > 100 {
+		fields["max_power_percent"] = "Enter a maximum commanded power from 0.001 to 100 percent, with at most three decimal places."
+	}
+	return fields
 }
 
 func parseRevisionField(raw json.RawMessage, updating bool, out *int) bool {

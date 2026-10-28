@@ -331,6 +331,10 @@ func fail(w http.ResponseWriter, status int, message string) {
 	respond(w, status, map[string]string{"error": message})
 }
 
+func failFields(w http.ResponseWriter, status int, message string, fields map[string]string) {
+	respond(w, status, map[string]any{"error": message, "fields": fields})
+}
+
 func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Name      string `json:"name"`
@@ -349,8 +353,19 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input.Name = strings.TrimSpace(input.Name)
-	if input.Name == "" || len(input.Name) > 200 || strings.TrimSpace(input.Gcode) == "" || strings.ContainsFunc(input.Gcode, func(r rune) bool { return (r < 32 && r != '\n' && r != '\r' && r != '\t') || r == 127 }) {
-		fail(w, 400, "name and text G-code are required")
+	fields := make(map[string]string)
+	if input.Name == "" {
+		fields["name"] = "Enter a display name for this program."
+	} else if len(input.Name) > 200 {
+		fields["name"] = "Use 200 characters or fewer."
+	}
+	if strings.TrimSpace(input.Gcode) == "" {
+		fields["gcode"] = "Enter the program text."
+	} else if strings.ContainsFunc(input.Gcode, func(r rune) bool { return (r < 32 && r != '\n' && r != '\r' && r != '\t') || r == 127 }) {
+		fields["gcode"] = "Program must be plain text G-code without binary or control bytes."
+	}
+	if len(fields) > 0 {
+		failFields(w, 400, "Review the highlighted upload fields.", fields)
 		return
 	}
 	if len(input.Gcode) > jobtransfer.MaxProgramBytes {
