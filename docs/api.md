@@ -127,3 +127,34 @@ feed values support at most three decimal places. `max_s` is an integer from 1
 through 1,000,000,000; `max_power_percent` is greater than zero and at most
 100. `min_s` must be explicitly present and equal zero. These are declared
 limits, not hardware qualification or safety claims.
+
+## Editable rectangle projects
+
+Projects are saved independently in the durable `designs.json` library. This
+initial project schema supports one rectangle and one `vector-engrave`
+operation. Geometry uses millimetres from the lower-left declared work origin.
+The profile reference includes its revision. `profile_stale` is computed on
+reads and is true after the profile revision changes; save the project with the
+current reviewed profile revision before generation. Project creation and
+updates require the referenced profile to exist at the submitted revision,
+reject out-of-envelope rectangles, and validate feed and power against that
+profile. Missing or changed profiles return 409. Profile deletion returns 409
+while a project references it.
+
+`GET /projects` returns projects in ID order. `POST /projects` creates an
+editable project and returns 201 with a Location header. `GET /projects/{id}`
+reads one project. `PUT /projects/{id}` requires its current positive `revision`
+and increments it on success; stale writes return 409. `DELETE /projects/{id}`
+requires `{"revision":N}` and returns 204. Missing projects return 404.
+
+The request shape is `{"schema_version":1,"name":"Panel outline",
+"profile_id":"PROFILE_ID","profile_revision":1,"rectangle":{"x_mm":10,
+"y_mm":20,"width_mm":30,"height_mm":20},"operation":{"type":"vector-engrave",
+"feed_mm_min":600,"power_percent":25}}`. Updates also include `revision`.
+All requests are authenticated strict JSON objects limited to 64 KiB, with no
+unknown fields. Names are trimmed and 1–120 bytes. Coordinates are nonnegative,
+rectangle dimensions are positive, and the full rectangle must fit the profile
+envelope. Coordinates, dimensions, feed, and power accept at most three decimal
+places. Feed must fit the profile range; power must be above zero and at most
+the profile maximum, and must round to at least one GRBL S unit. Other operation
+types and SVG, text, raster, and cut workflows are not supported by this API.

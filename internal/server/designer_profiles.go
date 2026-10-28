@@ -264,6 +264,12 @@ func (s *Server) deleteProfile(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "profile revision conflict")
 		return
 	}
+	for _, project := range s.projects {
+		if project.ProfileID == id {
+			fail(w, 409, "profile is referenced by a project")
+			return
+		}
+	}
 
 	profiles := copyProfiles(s.profiles)
 	delete(profiles, id)
