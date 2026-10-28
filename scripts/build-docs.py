@@ -261,6 +261,89 @@ code_style = '''
  img{max-width:100%}
 }
 '''
+scroll_region_style = '''
+.scroll-region{max-width:100%;overflow:auto;overscroll-behavior:contain}
+.scroll-region:focus-visible{outline:3px solid var(--color-focus);outline-offset:3px;border-radius:var(--radius-sm)}
+.scroll-region pre{overflow:visible}
+.scroll-region table{display:table;overflow:visible;width:max-content;max-width:none}
+.scroll-region td,.scroll-region th{overflow-wrap:normal;word-break:normal;hyphens:none}
+footer{max-width:78ch;margin:var(--space-8) auto 0;padding:var(--space-4) var(--space-5) var(--space-5)}
+footer a{display:inline-block;min-height:44px;padding:var(--space-2)}
+@media(max-width:740px){footer{margin-top:var(--space-6);padding:var(--space-3) var(--space-4) var(--space-4)}}
+'''
+
+def add_scrollable_code_region(body):
+    """Make overflowing code samples keyboard reachable as named regions."""
+    return re.sub(
+        r'<pre(?:\s[^>]*)?>.*?</pre>',
+        lambda match: '<div class="scroll-region code-scroll-region" tabindex="0" role="region" aria-label="Scrollable code sample">' + match.group(0) + '</div>',
+        body,
+        flags=re.DOTALL,
+    )
+
+def add_scrollable_table_region(body):
+    """Give horizontally overflowing tables a named, focusable scroll region."""
+    return re.sub(
+        r'<table(?:\s[^>]*)?>.*?</table>',
+        lambda match: '<div class="scroll-region table-scroll-region" tabindex="0" role="region" aria-label="Scrollable documentation table">' + match.group(0) + '</div>',
+        body,
+        flags=re.DOTALL,
+    )
+
+def shell_break_positions(line):
+    """Find spaces where a shell command can continue without splitting a token."""
+    positions, quote, escaped = [], None, False
+    for index, character in enumerate(line):
+        if escaped:
+            escaped = False
+        elif character == '\\':
+            escaped = True
+        elif quote:
+            if character == quote:
+                quote = None
+        elif character in ('"', "'"):
+            quote = character
+        elif character == '`':
+            return []
+        elif character.isspace():
+            positions.append(index)
+    return positions
+
+def wrap_shell_command_line(line, width=72):
+    """Use shell continuations to keep long, safely splittable commands readable."""
+    newline = '\r\n' if line.endswith('\r\n') else '\n' if line.endswith('\n') else ''
+    content = line[:-len(newline)] if newline else line
+    indentation = content[:len(content) - len(content.lstrip())]
+    command = content[len(indentation):]
+    if len(command) <= width or command.rstrip().endswith('\\'):
+        return line
+
+    segments = []
+    while len(command) > width:
+        breaks = [position for position in shell_break_positions(command) if position <= width]
+        if not breaks:
+            return line
+        split = breaks[-1]
+        segments.append(command[:split].rstrip())
+        command = command[split:].lstrip()
+    if not segments:
+        return line
+    continuation = ' \\\n' + indentation + '  '
+    return indentation + continuation.join([*segments, command]) + newline
+
+def wrap_long_shell_commands(text, width=72):
+    """Reflow long lines in shell-language fenced blocks, preserving shell tokens."""
+    fence = re.compile(r'(?m)^```([^\n]*)\n(.*?)^```[ \t]*$', re.DOTALL)
+
+    def wrap_block(match):
+        languages = match.group(1).strip().lower().split()
+        if not languages or languages[0] not in ('sh', 'bash', 'shell'):
+            return match.group(0)
+        code = ''.join(wrap_shell_command_line(line, width) for line in match.group(2).splitlines(keepends=True))
+        return '```' + match.group(1) + '\n' + code + '```'
+
+    return fence.sub(wrap_block, text)
+
 
 nav_script = '''
 (() => {
@@ -351,7 +434,7 @@ def render_page(name, body, page_name):
     canonical = site_base_url + filename
     head = (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
         '<meta name="color-scheme" content="dark">'
         '<title>' + escape(title) + '</title>'
         '<meta name="description" content="' + escape(description) + '">'
@@ -360,20 +443,23 @@ def render_page(name, body, page_name):
         '<meta property="og:image" content="' + escape(site_base_url + og_image_path) + '">'
         '<link rel="canonical" href="' + escape(canonical) + '">'
         '<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">'
-        '<style>' + style_tokens + style + nav_style + code_style + '</style></head>'
+        '<style>' + style_tokens + style + nav_style + code_style + scroll_region_style + '</style></head>'
     )
     nav = make_nav(page_name)
     footer = '<footer>Documentation for v' + escape(version) + ' · <a href="https://github.com/constructorfleet/emberdeck/tree/' + revision + '">Release source</a> · <a href="LICENSE.txt">AGPL-3.0</a></footer>'
-    return head + '<body>' + nav + '<main id="main-content" tabindex="-1">' + body + footer + '</main><script>' + nav_script + '</script><script>' + code_copy_script + '</script></body></html>'
+    return head + '<body>' + nav + '<main id="main-content" tabindex="-1">' + body + '</main>' + footer + '<script>' + nav_script + '</script><script>' + code_copy_script + '</script></body></html>'
 
 
 for name, text in pages.items():
     # The sources are trusted repository documents, never job or plugin output.
     if name in source_paths:
+        text = wrap_long_shell_commands(text)
         text = re.sub(r'\]\(([^)\s]+)\)', lambda match: rewrite_link(match, source_paths[name]), text)
     body = markdown.markdown(text, extensions=['fenced_code', 'tables', 'toc', 'codehilite'])
     body = enhance_operator_guide_screenshots(body, name)
     body = add_code_copy_buttons(body)
+    body = add_scrollable_code_region(body)
+    body = add_scrollable_table_region(body)
     (out / (name + '.html')).write_text(render_page(name, body, name), encoding='utf-8')
 
 not_found_body = markdown.markdown(
