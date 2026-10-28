@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.17.0](https://github.com/constructorfleet/emberdeck/compare/v0.16.0...v0.17.0) (2026-10-28)
+
+
+### Features
+
+* improve keyboard focus management ([#111](https://github.com/constructorfleet/emberdeck/issues/111)) ([f8e8233](https://github.com/constructorfleet/emberdeck/commit/f8e82338be930ac7d80061671baaf5d74d2d318f))
+
+
+### Bug Fixes
+
+* guard unsaved designer changes ([#105](https://github.com/constructorfleet/emberdeck/issues/105)) ([a66f021](https://github.com/constructorfleet/emberdeck/commit/a66f0215c65a63761745fff4fc55fb8124e5aa05))
+* preserve focus across library refreshes ([#146](https://github.com/constructorfleet/emberdeck/issues/146)) ([e4556b8](https://github.com/constructorfleet/emberdeck/commit/e4556b8cc297b269ed27fb5f3399a2663c2ad7aa))
+
 ## [0.16.0](https://github.com/constructorfleet/emberdeck/compare/v0.15.0...v0.16.0) (2026-10-28)
 
 
