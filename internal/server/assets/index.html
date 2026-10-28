@@ -21,8 +21,9 @@
     </section>
     <section class="auth panel" aria-labelledby="access-title">
       <div class="section-title"><div><p class="eyebrow">01 / ACCESS</p><h2 id="access-title">Connect to your library</h2></div><span class="lock-icon" aria-hidden="true">⌑</span></div>
-      <form id="auth-form" class="auth-form"><label for="api-key">API key</label><div class="inline-field"><input id="api-key" type="password" autocomplete="current-password" placeholder="Enter your EmberDeck API key" required><button class="button button-primary" type="submit">Connect <span aria-hidden="true">→</span></button></div><p class="hint">Your key stays in this browser session and is sent only to this EmberDeck server.</p></form>
+      <form id="auth-form" class="auth-form"><label for="api-key">API key</label><div class="inline-field"><input id="api-key" type="password" autocomplete="current-password" placeholder="Enter your EmberDeck API key" required><button id="connect-button" class="button button-primary" type="submit"><span id="connect-label">Connect</span><span id="connect-arrow" aria-hidden="true">→</span></button></div><p class="hint">Your key stays in this browser session and is sent only to this EmberDeck server.</p></form>
       <div id="connection-state" class="connection-state" role="status">Not connected</div>
+      <div id="connection-controls" class="connection-controls" hidden><span id="connected-label" role="status">Connected</span><button id="change-key" class="button button-small" type="button">Change key</button><button id="disconnect" class="button button-small button-danger" type="button">Disconnect</button></div>
     </section>
     <div id="notice" class="notice" role="alert" hidden></div>
     <section id="designer-panel" class="panel designer-panel" aria-labelledby="designer-title">
@@ -31,7 +32,7 @@
       <div id="designer-status" class="designer-status" role="status">Connect to load saved profiles and projects.</div>
       <div class="designer-columns">
         <section class="designer-section" aria-labelledby="profiles-title">
-          <div class="designer-heading"><h3 id="profiles-title">Machine profiles</h3><button id="new-profile" class="button button-small" type="button">New profile</button></div>
+          <div class="designer-heading"><h3 id="profiles-title">Machine profiles</h3><button id="new-profile" class="button button-small" type="button" disabled>New profile</button></div>
           <label for="profile-select">Selected profile</label><select id="profile-select" disabled><option>Connect to load profiles</option></select>
           <div class="designer-actions"><button id="edit-profile" class="button button-small" type="button" disabled>Edit profile</button><button id="delete-profile" class="button button-small button-danger" type="button" disabled>Delete profile</button></div>
           <form id="profile-form" class="designer-form" hidden>
@@ -113,15 +114,15 @@
         <div class="section-title"><div><p class="eyebrow">02 / INTAKE</p><h2 id="upload-title">Add a program</h2></div><span class="step-number">02</span></div>
         <form id="upload-form">
           <label for="job-file">G-code file</label>
-          <label class="dropzone" for="job-file"><span class="upload-icon" aria-hidden="true">↑</span><strong id="file-label">Choose a G-code file</strong><span>Plain text · up to 4 MiB</span><input id="job-file" type="file" accept=".gcode,.nc,.txt,text/plain" required></label>
-          <label for="job-name">Display name</label><input id="job-name" type="text" maxlength="200" placeholder="e.g. acrylic-panel.gcode" required>
-          <button class="button button-primary wide" type="submit">Add to library <span aria-hidden="true">→</span></button>
+          <label class="dropzone" for="job-file"><span class="upload-icon" aria-hidden="true">↑</span><strong id="file-label">Choose a G-code file</strong><span>Plain text · up to 4 MiB</span><input id="job-file" type="file" accept=".gcode,.nc,.txt,text/plain" required disabled></label>
+          <label for="job-name">Display name</label><input id="job-name" type="text" maxlength="200" placeholder="e.g. acrylic-panel.gcode" required disabled>
+          <button class="button button-primary wide" type="submit" disabled>Add to library <span aria-hidden="true">→</span></button>
         </form>
       </section>
       <section class="panel jobs-panel" aria-labelledby="jobs-title">
-        <div class="section-title jobs-heading"><div><p class="eyebrow">03 / LIBRARY</p><h2 id="jobs-title">Stored programs</h2></div><button id="refresh" class="icon-button" type="button" aria-label="Refresh jobs" title="Refresh">↻</button></div>
+        <div class="section-title jobs-heading"><div><p class="eyebrow">03 / LIBRARY</p><h2 id="jobs-title">Stored programs</h2></div><button id="refresh" class="icon-button" type="button" aria-label="Refresh jobs" title="Refresh" disabled>↻</button></div>
         <div class="driver-controls"><label for="driver-select">Connected driver</label><select id="driver-select" disabled><option value="">Connect to load drivers</option></select><span id="driver-status" class="driver-status">Drivers are not loaded.</span></div>
-        <label class="safety-check"><input id="operator-confirmation" type="checkbox"><span>I have checked the program and setup, verified the machine’s interlocks, and will supervise the cut.</span></label>
+        <label class="safety-check"><input id="operator-confirmation" type="checkbox" disabled><span>I have checked the program and setup, verified the machine’s interlocks, and will supervise the cut.</span></label>
         <div id="empty-state" class="empty-state"><span class="empty-mark" aria-hidden="true">⌁</span><strong>Your library is ready</strong><span>Connect to load saved programs.</span></div>
         <ul id="job-list" class="job-list" aria-label="Stored programs"></ul>
       </section>

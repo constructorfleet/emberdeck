@@ -4,6 +4,9 @@
   const $ = (selector) => document.querySelector(selector);
   const keyInput = $("#api-key");
   const authForm = $("#auth-form");
+  const connectButton = $("#connect-button");
+  const connectionState = $("#connection-state");
+  const connectionControls = $("#connection-controls");
   const uploadForm = $("#upload-form");
   const fileInput = $("#job-file");
   const jobName = $("#job-name");
@@ -13,13 +16,16 @@
   const programPanel = $("#program-panel");
   const driverSelect = $("#driver-select");
   const confirmation = $("#operator-confirmation");
-  let token = sessionStorage.getItem("emberdeck-api-key") || "";
+  let token = "";
+  let connected = false;
   let jobs = [];
+  let hasLoadedJobs = false;
   let drivers = [];
   let selectedDriver = "";
   let shownJobID = "";
   let polling = false;
   let pollTimer = null;
+  let sessionVersion = 0;
   let profiles = [];
   let projects = [];
   let editingProfile = null;
@@ -37,12 +43,71 @@
     notice.hidden = !text;
   }
 
+  function setConnecting(isConnecting) {
+    connectButton.disabled = isConnecting;
+    $("#connect-label").textContent = isConnecting ? "Connecting…" : "Connect";
+    $("#connect-arrow").hidden = isConnecting;
+  }
+
+  function setSessionConnected(isConnected) {
+    connected = isConnected;
+    authForm.hidden = isConnected;
+    connectionState.hidden = isConnected;
+    connectionControls.hidden = !isConnected;
+    connectionState.textContent = isConnected ? "Connected · library synced" : "Not connected";
+    $("#upload-form").querySelectorAll("input, button").forEach((control) => { control.disabled = !isConnected; });
+    $("#refresh").disabled = !isConnected;
+    $("#driver-select").disabled = !isConnected || !drivers.length;
+    confirmation.disabled = !isConnected;
+    $("#new-profile").disabled = !isConnected;
+    $("#new-project").disabled = !isConnected || !selectedProfile();
+    $("#new-vector-project").disabled = !isConnected || !selectedProfile();
+  }
+
+  function stopPolling() {
+    if (pollTimer !== null) window.clearInterval(pollTimer);
+    pollTimer = null;
+    polling = false;
+  }
+
+  function forgetSession({ focus = false, clearInput = true } = {}) {
+    token = "";
+    sessionVersion++;
+    stopPolling();
+    sessionStorage.removeItem("emberdeck-api-key");
+    setSessionConnected(false);
+    jobs = [];
+    hasLoadedJobs = false;
+    drivers = [];
+    selectedDriver = "";
+    toolpathCache.clear();
+    toolpathViewports.clear();
+    profiles = [];
+    projects = [];
+    editingProfile = null;
+    openProject = null;
+    openVectorProject = null;
+    shownJobID = "";
+    programPanel.hidden = true;
+    $("#profile-form").hidden = true;
+    $("#project-form").hidden = true;
+    $("#vector-form").hidden = true;
+    if (clearInput) keyInput.value = "";
+    renderDrivers();
+    renderJobs();
+    renderProfiles();
+    setDesignerStatus("Connect to load saved profiles and projects.");
+    if (focus) keyInput.focus();
+  }
+
   async function api(path, options = {}) {
+    const requestToken = token;
     const headers = new Headers(options.headers || {});
-    headers.set("Authorization", `Bearer ${token}`);
+    headers.set("Authorization", `Bearer ${requestToken}`);
     if (options.body) headers.set("Content-Type", "application/json");
     const response = await fetch(path, { ...options, headers });
     if (!response.ok) {
+      if (response.status === 401 && token === requestToken) forgetSession({ focus: true, clearInput: false });
       let detail = `Request failed (${response.status})`;
       try { detail = (await response.json()).error || detail; } catch (_) { /* keep status */ }
       throw new Error(detail);
@@ -102,14 +167,15 @@
         select.append(option);
       }
     }
-    select.disabled = !profiles.length;
+    select.disabled = !connected || !profiles.length;
     if (profiles.some((profile) => profile.id === prior)) select.value = prior;
     else if (profiles.length) select.value = profiles[0].id;
     const hasProfile = Boolean(selectedProfile());
-    $("#edit-profile").disabled = !hasProfile;
-    $("#delete-profile").disabled = !hasProfile;
-    $("#new-project").disabled = !hasProfile;
-    $("#new-vector-project").disabled = !hasProfile;
+    $("#new-profile").disabled = !connected;
+    $("#edit-profile").disabled = !connected || !hasProfile;
+    $("#delete-profile").disabled = !connected || !hasProfile;
+    $("#new-project").disabled = !connected || !hasProfile;
+    $("#new-vector-project").disabled = !connected || !hasProfile;
     renderProjects();
     renderVectorProjects();
     updateProjectValidation();
@@ -133,14 +199,17 @@
   }
 
   async function refreshDesigner() {
-    if (!token) return;
+    if (!connected) return;
+    const version = sessionVersion;
     try {
       const [nextProfiles, nextProjects] = await Promise.all([api("/api/v1/profiles"), api("/api/v1/projects")]);
+      if (!connected || version !== sessionVersion) return;
       profiles = Array.isArray(nextProfiles) ? nextProfiles : [];
       projects = Array.isArray(nextProjects) ? nextProjects : [];
       renderProfiles();
       setDesignerStatus(`${profiles.length} profile${profiles.length === 1 ? "" : "s"} · ${projects.length} saved project${projects.length === 1 ? "" : "s"}`);
     } catch (error) {
+      if (!connected || version !== sessionVersion) return;
       setDesignerError(`Designer storage unavailable: ${error.message}`);
     }
   }
@@ -740,11 +809,11 @@
     if (!drivers.length) {
       const option = document.createElement("option");
       option.value = "";
-      option.textContent = token ? "No drivers connected" : "Connect to load drivers";
+      option.textContent = connected ? "No drivers connected" : "Connect to load drivers";
       driverSelect.append(option);
       driverSelect.disabled = true;
       selectedDriver = "";
-      $("#driver-status").textContent = token ? "Start a driver worker to run programs." : "Drivers are not loaded.";
+      $("#driver-status").textContent = connected ? "Start a driver worker to run programs." : "Drivers are not loaded.";
       return;
     }
     for (const driver of drivers) {
@@ -763,7 +832,7 @@
       selectedDriver = prior;
     }
     driverSelect.value = selectedDriver;
-    driverSelect.disabled = false;
+    driverSelect.disabled = !connected;
     const selected = drivers.find((driver) => driver.id === selectedDriver);
     $("#driver-status").textContent = selected ? (selected.busy ? "Driver has an active job." : `Last seen ${new Date(selected.last_seen).toLocaleTimeString()}`) : "Selected driver is disconnected.";
   }
@@ -811,11 +880,11 @@
   function renderJobs() {
     const checked = confirmation.checked;
     list.replaceChildren();
-    $("#job-count").textContent = String(jobs.length).padStart(2, "0");
+    $("#job-count").textContent = hasLoadedJobs ? String(jobs.length).padStart(2, "0") : "—";
     empty.hidden = jobs.length > 0;
     if (!jobs.length) {
-      empty.querySelector("strong").textContent = token ? "No programs yet" : "Your library is ready";
-      empty.querySelector("span:last-child").textContent = token ? "Add a G-code file to get started." : "Connect to load saved programs.";
+      empty.querySelector("strong").textContent = connected ? "No programs yet" : "Your library is ready";
+      empty.querySelector("span:last-child").textContent = connected ? "Add a G-code file to get started." : "Connect to load saved programs.";
     }
     for (const job of jobs) {
       const item = document.createElement("li");
@@ -1017,27 +1086,28 @@
   }
 
   async function refresh() {
-    if (!token || polling) return;
+    if (!connected || polling) return;
     polling = true;
+    const version = sessionVersion;
     try {
       const results = await Promise.all([api("/api/v1/jobs"), api("/api/v1/drivers")]);
+      if (!connected || version !== sessionVersion) return;
       jobs = results[0];
       drivers = results[1];
-      $("#connection-state").textContent = "Connected · library synced";
-      $("#connection-state").classList.add("connected");
+      hasLoadedJobs = true;
+      message("");
       renderDrivers();
       renderJobs();
       await refreshToolpathViews();
       await refreshDesigner();
     } catch (error) {
-      $("#connection-state").textContent = "Connection failed";
-      $("#connection-state").classList.remove("connected");
+      if (!connected || version !== sessionVersion) return;
       message(error.message);
-    } finally { polling = false; }
+    } finally { if (version === sessionVersion) polling = false; }
   }
 
   function startPolling() {
-    if (pollTimer === null) pollTimer = window.setInterval(refresh, 2000);
+    if (connected && pollTimer === null) pollTimer = window.setInterval(refresh, 2000);
   }
 
   async function showProgram(id) {
@@ -1101,13 +1171,43 @@
     } catch (error) { message(error.message); }
   }
 
+  async function connectWithKey(rawKey) {
+    const candidate = rawKey.trim();
+    if (!candidate || connectButton.disabled) return;
+    keyInput.value = candidate;
+    sessionStorage.removeItem("emberdeck-api-key");
+    token = candidate;
+    setConnecting(true);
+    try {
+      await api("/api/v1/jobs");
+      if (token !== candidate) return;
+      sessionStorage.setItem("emberdeck-api-key", candidate);
+      sessionVersion++;
+      setSessionConnected(true);
+      message("");
+      await refresh();
+      if (connected) startPolling();
+    } catch (error) {
+      if (token === candidate) forgetSession({ clearInput: false });
+      message(error.message);
+      keyInput.focus();
+    } finally {
+      setConnecting(false);
+    }
+  }
+
   authForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    token = keyInput.value.trim();
-    sessionStorage.setItem("emberdeck-api-key", token);
-    await refresh();
-    startPolling();
+    await connectWithKey(keyInput.value);
   });
+
+  $("#change-key").addEventListener("click", () => {
+    const currentKey = token;
+    forgetSession({ clearInput: false });
+    keyInput.value = currentKey;
+    keyInput.focus();
+  });
+  $("#disconnect").addEventListener("click", () => forgetSession());
 
   fileInput.addEventListener("change", () => {
     const file = fileInput.files && fileInput.files[0];
@@ -1118,7 +1218,7 @@
 
   uploadForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (!token) { message("Connect with your API key before adding a program."); keyInput.focus(); return; }
+    if (!connected) { message("Connect with your API key before adding a program."); keyInput.focus(); return; }
     const file = fileInput.files && fileInput.files[0];
     if (!file) return;
     try {
@@ -1139,11 +1239,13 @@
   confirmation.addEventListener("change", renderJobs);
   $("#refresh").addEventListener("click", refresh);
   $("#close-program").addEventListener("click", () => { shownJobID = ""; programPanel.hidden = true; });
-  if (token) {
-    keyInput.value = token;
-    refresh();
-    startPolling();
-  }
+  setSessionConnected(false);
   renderDrivers();
   renderJobs();
+  const rememberedKey = (sessionStorage.getItem("emberdeck-api-key") || "").trim();
+  sessionStorage.removeItem("emberdeck-api-key");
+  if (rememberedKey) {
+    keyInput.value = rememberedKey;
+    connectWithKey(rememberedKey);
+  }
 })();

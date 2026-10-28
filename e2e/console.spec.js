@@ -2,11 +2,101 @@ const { test, expect } = require('@playwright/test');
 
 const apiKey = 'emberdeck-e2e-test-key';
 
+test('API controls stay unavailable and the job count stays unknown before the first load', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#job-count')).toHaveText('—');
+  await expect(page.locator('#new-profile')).toBeDisabled();
+  await expect(page.locator('#new-project')).toBeDisabled();
+  await expect(page.locator('#new-vector-project')).toBeDisabled();
+  await expect(page.locator('#refresh')).toBeDisabled();
+});
+
+test('rejected key is not stored or polled, then a trimmed correct key connects', async ({ page }) => {
+  let apiRequests = 0;
+  let driverPolls = 0;
+  let releaseValidation;
+  let holdValidation = true;
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith('/api/v1/')) apiRequests++;
+    if (request.method() === 'GET' && url.pathname === '/api/v1/drivers') driverPolls++;
+  });
+  await page.route('**/api/v1/jobs', async (route) => {
+    if (holdValidation) await new Promise((resolve) => { releaseValidation = resolve; });
+    await route.continue();
+  });
+  await page.goto('/');
+  await page.locator('#api-key').fill(' wrong-key ');
+  await page.locator('#auth-form button[type="submit"]').click();
+  const connect = page.locator('#auth-form button[type="submit"]');
+  await expect(connect).toContainText('Connecting…');
+  await expect(connect).toBeDisabled();
+  expect(await page.evaluate(() => sessionStorage.getItem('emberdeck-api-key'))).toBeNull();
+  expect(driverPolls).toBe(0);
+  await expect.poll(() => Boolean(releaseValidation)).toBe(true);
+  holdValidation = false;
+  releaseValidation();
+  await expect(page.locator('#connection-state')).toHaveText('Not connected', { timeout: 5000 });
+  await expect(page.locator('#api-key')).toBeFocused();
+  expect(await page.evaluate(() => sessionStorage.getItem('emberdeck-api-key'))).toBeNull();
+  const rejectedRequestCount = apiRequests;
+  expect(rejectedRequestCount).toBe(1);
+  await page.waitForTimeout(2300);
+  expect(apiRequests).toBe(rejectedRequestCount);
+
+  await page.locator('#api-key').fill(`  ${apiKey}  `);
+  await page.locator('#auth-form button[type="submit"]').click();
+  await expect(page.locator('#connection-state')).toContainText('Connected');
+  await expect(page.locator('#auth-form')).toBeHidden();
+  await expect(page.locator('#connection-controls')).toContainText('Connected');
+  await expect(page.locator('#connection-controls')).toContainText('Change key');
+  await expect(page.locator('#connection-controls')).toContainText('Disconnect');
+  expect(await page.evaluate(() => sessionStorage.getItem('emberdeck-api-key'))).toBe(apiKey);
+  await page.locator('#change-key').click();
+  await expect(page.locator('#api-key')).toHaveValue(apiKey);
+});
+
+test('disconnect forgets the key and stops polling', async ({ page }) => {
+  let driverPolls = 0;
+  page.on('request', (request) => {
+    if (request.method() === 'GET' && new URL(request.url()).pathname === '/api/v1/drivers') driverPolls++;
+  });
+  await connect(page);
+  await expect(page.locator('#new-profile')).toBeEnabled();
+  await page.locator('#disconnect').click();
+  await expect(page.locator('#auth-form')).toBeVisible();
+  await expect(page.locator('#connection-state')).toHaveText('Not connected');
+  expect(await page.evaluate(() => sessionStorage.getItem('emberdeck-api-key'))).toBeNull();
+  const pollCountAtDisconnect = driverPolls;
+  await page.waitForTimeout(2300);
+  expect(driverPolls).toBe(pollCountAtDisconnect);
+  await expect(page.locator('#new-profile')).toBeDisabled();
+  await expect(page.locator('#job-count')).toHaveText('—');
+});
+
+test('a 401 during refresh clears a stored key, focuses the key field, and stops polling', async ({ page }) => {
+  let rejectedDriverRequests = 0;
+  await connect(page);
+  expect(await page.evaluate(() => sessionStorage.getItem('emberdeck-api-key'))).toBe(apiKey);
+  await page.route('**/api/v1/drivers', async (route) => {
+    rejectedDriverRequests++;
+    await route.fulfill({ status: 401, contentType: 'application/json', body: '{"error":"authentication required"}' });
+  });
+  await page.locator('#refresh').click();
+  await expect(page.locator('#auth-form')).toBeVisible();
+  await expect(page.locator('#connection-state')).toHaveText('Not connected');
+  await expect(page.locator('#api-key')).toBeFocused();
+  expect(await page.evaluate(() => sessionStorage.getItem('emberdeck-api-key'))).toBeNull();
+  expect(rejectedDriverRequests).toBe(1);
+  await page.waitForTimeout(2300);
+  expect(rejectedDriverRequests).toBe(1);
+});
+
 async function connect(page) {
   await page.goto('/');
   await page.locator('#api-key').fill(apiKey);
   await page.getByRole('button', { name: /Connect/ }).click();
-  await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
+  await expect(page.locator('#connection-controls')).toContainText('Connected');
   await expect(page.locator('#driver-select')).toHaveValue('simulator');
 }
 
