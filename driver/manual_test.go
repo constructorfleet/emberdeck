@@ -153,22 +153,22 @@ func TestManualCommandHomeWireRequiresLaserOffAndIdle(t *testing.T) {
 	go func() {
 		r := bufio.NewReader(machine)
 		b, _ := r.ReadByte()
-		wire <- string(b)
+		wire <- string([]byte{b})
 		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
 		line, _ := r.ReadString('\n')
 		wire <- line
 		io.WriteString(machine, "ok\r\n")
 		b, _ = r.ReadByte()
-		wire <- string(b)
+		wire <- string([]byte{b})
 		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
 		line, _ = r.ReadString('\n')
 		wire <- line
 		io.WriteString(machine, "ok\r\n")
 		b, _ = r.ReadByte()
-		wire <- string(b)
+		wire <- string([]byte{b})
 		io.WriteString(machine, "<Home|MPos:0,0,0>\r\n")
 		b, _ = r.ReadByte()
-		wire <- string(b)
+		wire <- string([]byte{b})
 		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
 	}()
 	if err := ManualCommand(context.Background(), client, ManualCommandRequest{Action: "home", Confirmed: true}); err != nil {
@@ -207,7 +207,7 @@ func TestManualCommandUnlockAndSetZeroWire(t *testing.T) {
 			go func() {
 				r := bufio.NewReader(machine)
 				b, _ := r.ReadByte()
-				wire <- string(b)
+				wire <- string([]byte{b})
 				io.WriteString(machine, "<"+tc.state+"|MPos:0,0,0>\r\n")
 				line, _ := r.ReadString('\n')
 				wire <- line
@@ -234,13 +234,13 @@ func TestManualCommandFrameWireIsBoundedAndLaserOff(t *testing.T) {
 	go func() {
 		r := bufio.NewReader(machine)
 		b, _ := r.ReadByte()
-		wire <- string(b)
+		wire <- string([]byte{b})
 		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
 		line, _ := r.ReadString('\n')
 		wire <- line
 		io.WriteString(machine, "ok\r\n")
 		b, _ = r.ReadByte()
-		wire <- string(b)
+		wire <- string([]byte{b})
 		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
 		for i := 0; i < 5; i++ {
 			line, _ = r.ReadString('\n')
@@ -248,7 +248,7 @@ func TestManualCommandFrameWireIsBoundedAndLaserOff(t *testing.T) {
 			io.WriteString(machine, "ok\r\n")
 		}
 		b, _ = r.ReadByte()
-		wire <- string(b)
+		wire <- string([]byte{b})
 		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
 	}()
 	bounds := toolpath.Bounds{Min: toolpath.Point{X: 1, Y: 2}, Max: toolpath.Point{X: 5, Y: 7}}
@@ -260,5 +260,62 @@ func TestManualCommandFrameWireIsBoundedAndLaserOff(t *testing.T) {
 		if got := <-wire; got != w {
 			t.Fatalf("wire %d = %q; want %q", i+1, got, w)
 		}
+	}
+}
+
+func TestManualFrameDeadlineSendsRealtimeCancel(t *testing.T) {
+	client, machine := net.Pipe()
+	defer client.Close()
+	defer machine.Close()
+	wire := make(chan string, 16)
+	go func() {
+		r := bufio.NewReader(machine)
+		readQuery := func() { b, _ := r.ReadByte(); wire <- string([]byte{b}) }
+		readLine := func() string { line, _ := r.ReadString('\n'); return line }
+		readQuery()
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+		wire <- readLine()
+		io.WriteString(machine, "ok\r\n")
+		readQuery()
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+		for i := 0; i < 5; i++ {
+			wire <- readLine()
+			io.WriteString(machine, "ok\r\n")
+		}
+		for {
+			b, e := r.ReadByte()
+			if e != nil {
+				return
+			}
+			wire <- string([]byte{b})
+			if b == '?' {
+				io.WriteString(machine, "<Run|MPos:1,1,0>\r\n")
+			}
+			if b == 0x85 {
+				return
+			}
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	bounds := toolpath.Bounds{Min: toolpath.Point{X: 0, Y: 0}, Max: toolpath.Point{X: 2, Y: 2}}
+	err := ManualCommand(ctx, client, ManualCommandRequest{Action: "frame", Confirmed: true, Bounds: bounds})
+	if err == nil || !strings.Contains(err.Error(), "deadline") {
+		t.Fatalf("frame deadline error = %v", err)
+	}
+	var sawCancel bool
+	var observed []string
+	timeout := time.After(time.Second)
+	for !sawCancel {
+		select {
+		case got := <-wire:
+			observed = append(observed, got)
+			sawCancel = got == "\x85"
+		case <-timeout:
+			t.Fatalf("bounded frame did not send GRBL realtime cancel 0x85; observed %q", observed)
+		}
+	}
+	if !sawCancel {
+		t.Fatal("bounded frame did not send GRBL realtime cancel 0x85")
 	}
 }
