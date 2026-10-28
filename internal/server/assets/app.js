@@ -57,7 +57,7 @@
   function setConnecting(isConnecting) {
     connectButton.disabled = isConnecting;
     $("#connect-label").textContent = isConnecting ? "Connecting…" : "Connect";
-    $("#connect-arrow").hidden = isConnecting;
+    $("#connect-arrow").style.display = isConnecting ? "none" : "";
   }
 
   function setSessionConnected(isConnected) {
@@ -138,7 +138,31 @@
     const element = document.createElement("button");
     element.type = "button";
     element.className = className;
-    element.textContent = label;
+    const iconPaths = {
+      "↑": "M12 19V5m-6 6 6-6 6 6",
+      "↓": "M12 5v14m-6-6 6 6 6-6",
+      "×": "m6 6 12 12M18 6 6 18",
+      "−": "M5 12h14",
+      "+": "M12 5v14M5 12h14",
+    };
+    if (iconPaths[label]) {
+      const icon = document.createElementNS(svgNS, "svg");
+      icon.setAttribute("class", "button-icon");
+      icon.setAttribute("viewBox", "0 0 24 24");
+      icon.setAttribute("aria-hidden", "true");
+      icon.setAttribute("focusable", "false");
+      const path = document.createElementNS(svgNS, "path");
+      path.setAttribute("d", iconPaths[label]);
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", "currentColor");
+      path.setAttribute("stroke-width", "2");
+      path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-linejoin", "round");
+      icon.append(path);
+      element.append(icon);
+    } else {
+      element.textContent = label;
+    }
     if (ariaLabel) element.setAttribute("aria-label", ariaLabel);
     // aria-disabled keeps an unavailable control focusable, so its click must do nothing.
     element.addEventListener("click", (event) => {
@@ -603,7 +627,7 @@
       });
       const path = svgElement("path", { class: `vector-path ${operation ? (operation.type === "vector-cut" ? "cut-path" : "engrave-path") : "unassigned-path"}`, d: commands.join(" ") });
       if (!operation) {
-        path.style.stroke = "#aab3a9";
+        path.style.stroke = "var(--text-muted)";
         path.style.strokeDasharray = "2 3";
       }
       content.append(path);

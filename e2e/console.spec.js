@@ -31,6 +31,7 @@ test('rejected key is not stored or polled, then a trimmed correct key connects'
   const connect = page.locator('#auth-form button[type="submit"]');
   await expect(connect).toContainText('Connecting…');
   await expect(connect).toBeDisabled();
+  await expect(page.locator('#connect-arrow')).toBeHidden();
   expect(await page.evaluate(() => sessionStorage.getItem('emberdeck-api-key'))).toBeNull();
   expect(driverPolls).toBe(0);
   await expect.poll(() => Boolean(releaseValidation)).toBe(true);
