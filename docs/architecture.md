@@ -18,7 +18,12 @@ Server dispatch → versioned preflight plugins → allow / veto
 ## Storage and ownership
 
 Library mutations write and sync a temporary file before replacing jobs.json.
-A failed write does not publish an in-memory change. A cross-platform OS lock
+On Linux/macOS the containing directory is synced after rename, too. A failed
+write does not publish an in-memory change. A directory-sync failure after
+rename disables the API until restart and inspection, because persistence is
+uncertain. Windows flushes the file but lacks directory-sync support in this
+backend; power-loss recovery there is not guaranteed. Keep backups and inspect
+the machine after any unclean shutdown before starting work. A cross-platform OS lock
 prevents concurrent servers from writing the same directory. Back up the data
 directory with the server stopped. Local filesystem semantics are assumed; NFS
 and multi-server high availability have not been qualified. The whole job library

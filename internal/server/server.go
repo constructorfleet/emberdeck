@@ -36,15 +36,16 @@ type Job struct {
 
 // Server serializes durable mutations before acknowledging API requests.
 type Server struct {
-	lock    *flock.Flock
-	closed  bool
-	plugins []plugin.Plugin
-	drivers map[string]Driver
-	mu      sync.Mutex
-	dir     string
-	key     string
-	jobs    map[string]Job
-	mux     *http.ServeMux
+	storageErr error
+	lock       *flock.Flock
+	closed     bool
+	plugins    []plugin.Plugin
+	drivers    map[string]Driver
+	mu         sync.Mutex
+	dir        string
+	key        string
+	jobs       map[string]Job
+	mux        *http.ServeMux
 }
 
 // Open loads an existing job library or creates an empty one.
@@ -106,6 +107,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, 401, "authentication required")
 		return
 	}
+	s.mu.Lock()
+	unavailable := s.closed || s.storageErr != nil
+	s.mu.Unlock()
+	if unavailable {
+		fail(w, 503, "storage unavailable; stop and inspect server before restarting")
+		return
+	}
 	s.mux.ServeHTTP(w, r)
 }
 
@@ -121,6 +129,9 @@ func fail(w http.ResponseWriter, status int, message string) {
 func (s *Server) save(jobs map[string]Job) error {
 	if s.closed {
 		return errors.New("server is closed")
+	}
+	if s.storageErr != nil {
+		return s.storageErr
 	}
 	data, err := json.Marshal(jobs)
 	if err != nil {
@@ -143,6 +154,12 @@ func (s *Server) save(jobs map[string]Job) error {
 		return err
 	}
 	if err = os.Rename(f.Name(), filepath.Join(s.dir, "jobs.json")); err != nil {
+		return err
+	}
+	if err := syncDirectory(s.dir); err != nil {
+		// Rename is already visible. Reject all subsequent API work so no uncertain
+		// assignment can be dispatched from either old or new in-memory state.
+		s.storageErr = err
 		return err
 	}
 	s.jobs = jobs

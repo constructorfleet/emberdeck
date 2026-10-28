@@ -169,3 +169,36 @@ func TestPhysicalCompletionWinsRaceWithCancellation(t *testing.T) {
 		t.Fatal("finished worker remains busy")
 	}
 }
+
+func TestRestartInterruptsPendingCancellation(t *testing.T) {
+	dir := t.TempDir()
+	s, err := server.Open(dir, "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	w := request(t, s, "POST", "/api/v1/jobs", `{"name":"test","gcode":"M5"}`, "test-key")
+	var job struct{ ID string }
+	if err := json.Unmarshal(w.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	request(t, s, "POST", "/api/v1/drivers/bench/poll", `{"session":"owner"}`, "test-key")
+	request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true}`, "test-key")
+	request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/cancel", `{}`, "test-key")
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := server.Open(dir, "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	w = request(t, restarted, "GET", "/api/v1/jobs/"+job.ID, "", "test-key")
+	var result struct{ State string }
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.State != "interrupted" {
+		t.Fatalf("restart left cancellation pending forever: %s", w.Body.String())
+	}
+}

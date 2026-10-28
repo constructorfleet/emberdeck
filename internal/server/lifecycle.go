@@ -39,7 +39,7 @@ func (s *Server) recoverInterrupted() error {
 	jobs := s.copyJobs()
 	changed := false
 	for id, j := range jobs {
-		if j.State == "running" {
+		if j.State == "running" || j.State == "canceling" {
 			j.State = "interrupted"
 			j.Error = "server restarted; inspect machine before creating a new job"
 			j.Lease = ""
