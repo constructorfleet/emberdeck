@@ -53,6 +53,9 @@ func Stream(ctx context.Context, conn io.ReadWriteCloser, program string, onProg
 	defer func() { close(done); <-watcherDone }()
 
 	rw := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
+	if err := requireIdle(ctx, conn, rw.Reader); err != nil {
+		return err
+	}
 	for i, line := range lines {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -117,20 +120,79 @@ func Stream(ctx context.Context, conn io.ReadWriteCloser, program string, onProg
 	}
 }
 
+// requireIdle performs a fresh status query before any program bytes are sent.
+// A serial port may emit its startup banner when opened, so only this first
+// handshake tolerates that banner; a state other than Idle fails closed.
+func requireIdle(ctx context.Context, conn io.ReadWriteCloser, r *bufio.Reader) error {
+	if _, err := io.WriteString(conn, "?"); err != nil {
+		return fmt.Errorf("driver: query initial status: %w", err)
+	}
+	deadline := time.Now().Add(responseTimeout)
+	for {
+		line, err := readLineUntil(ctx, conn, r, deadline)
+		if err != nil {
+			return fmt.Errorf("driver: initial status: %w", err)
+		}
+		if strings.HasPrefix(line, "ALARM:") {
+			return fmt.Errorf("driver: controller alarm before job: %s", line)
+		}
+		if strings.HasPrefix(line, "Grbl ") {
+			continue
+		}
+		if strings.HasPrefix(line, "<") && strings.HasSuffix(line, ">") {
+			state := strings.SplitN(line[1:len(line)-1], "|", 2)[0]
+			if state == "Idle" {
+				return nil
+			}
+			return fmt.Errorf("driver: controller is %s before job; operator readiness required", state)
+		}
+	}
+}
+
 func parseProgram(program string) ([]string, error) {
+	var cleaned strings.Builder
+	inParen, inSemicolon := false, false
 	for i := 0; i < len(program); i++ {
 		b := program[i]
 		if b > 0x7e || (b < 0x20 && b != '\n' && b != '\r' && b != '\t') || b == 0x7f {
 			return nil, fmt.Errorf("driver: unsupported byte 0x%02x at offset %d", b, i)
 		}
-		if b == '!' || b == '?' || b == '~' || b == 0x18 {
+		if inSemicolon {
+			if b == '\n' {
+				inSemicolon = false
+				cleaned.WriteByte('\n')
+			}
+			continue
+		}
+		if inParen {
+			switch b {
+			case '(':
+				return nil, fmt.Errorf("driver: nested parenthetical comment at offset %d", i)
+			case ')':
+				inParen = false
+			case '\n':
+				cleaned.WriteByte('\n')
+			}
+			continue
+		}
+		switch b {
+		case '(':
+			inParen = true
+			continue
+		case ')':
+			return nil, fmt.Errorf("driver: unmatched closing parenthesis at offset %d", i)
+		case ';':
+			inSemicolon = true
+			continue
+		case '!', '?', '~', 0x18:
 			return nil, fmt.Errorf("driver: realtime byte %q at offset %d", b, i)
 		}
-		if b == '(' || b == ')' || b == ';' {
-			return nil, fmt.Errorf("driver: comments are not accepted (offset %d)", i)
-		}
+		cleaned.WriteByte(b)
 	}
-	raw := strings.Split(strings.ReplaceAll(program, "\r\n", "\n"), "\n")
+	if inParen {
+		return nil, fmt.Errorf("driver: unclosed parenthetical comment")
+	}
+	raw := strings.Split(strings.ReplaceAll(cleaned.String(), "\r\n", "\n"), "\n")
 	lines := make([]string, 0, len(raw))
 	for i, line := range raw {
 		line = strings.TrimSpace(line)

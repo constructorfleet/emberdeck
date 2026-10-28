@@ -17,6 +17,11 @@ func TestStreamSendsLinesAndWaitsForIdle(t *testing.T) {
 	go func() {
 		reader := make([]byte, 64)
 		n, _ := machine.Read(reader)
+		if got := string(reader[:n]); got != "?" {
+			t.Errorf("initial status query = %q", got)
+		}
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+		n, _ = machine.Read(reader)
 		if got := string(reader[:n]); got != "G0 X1\n" {
 			t.Errorf("first command = %q", got)
 		}
@@ -76,7 +81,13 @@ func TestStreamReturnsControllerError(t *testing.T) {
 	client, machine := net.Pipe()
 	defer client.Close()
 	defer machine.Close()
-	go func() { var b [32]byte; machine.Read(b[:]); io.WriteString(machine, "error:2\n") }()
+	go func() {
+		var b [32]byte
+		machine.Read(b[:])
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\n")
+		machine.Read(b[:])
+		io.WriteString(machine, "error:2\n")
+	}()
 	err := Stream(context.Background(), client, "G1 Xbad", nil)
 	if err == nil || !strings.Contains(err.Error(), "error:2") {
 		t.Fatalf("error = %v", err)
@@ -90,6 +101,15 @@ func TestStreamCancellationInterruptsBlockedResponse(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- Stream(ctx, client, "G0 X1", nil) }()
 	var command [16]byte
+	if _, err := machine.Read(command[:]); err != nil {
+		t.Fatal(err)
+	}
+	if string(command[:1]) != "?" {
+		t.Fatalf("initial query = %q", command[:1])
+	}
+	if _, err := io.WriteString(machine, "<Idle|MPos:0,0,0>\n"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := machine.Read(command[:]); err != nil {
 		t.Fatal(err)
 	}
@@ -179,5 +199,60 @@ func TestSimulatorImplementsRealtimeHoldResumeAndReset(t *testing.T) {
 	write("?")
 	if got := read(); !strings.HasPrefix(got, "<Idle|") {
 		t.Fatalf("reset state = %q", got)
+	}
+}
+
+func TestStreamRejectsBusyControllerBeforeSendingProgram(t *testing.T) {
+	client, machine := net.Pipe()
+	defer client.Close()
+	defer machine.Close()
+	go func() { var b [16]byte; machine.Read(b[:]); io.WriteString(machine, "<Run|MPos:0,0,0>\r\n") }()
+	err := Stream(context.Background(), client, "G0 X1", nil)
+	if err == nil || !strings.Contains(err.Error(), "is Run") {
+		t.Fatalf("error = %v", err)
+	}
+	machine.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+	var b [16]byte
+	if n, e := machine.Read(b[:]); e == nil {
+		t.Fatalf("program bytes sent while busy: %q", b[:n])
+	}
+}
+
+func TestStreamStripsCommentsWithoutSendingRealtimeBytes(t *testing.T) {
+	client, machine := net.Pipe()
+	defer client.Close()
+	defer machine.Close()
+	go func() {
+		var initial [1]byte
+		machine.Read(initial[:])
+		if string(initial[:]) != "?" {
+			t.Errorf("initial query = %q", initial[:])
+		}
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\n")
+		reader := bufio.NewReader(machine)
+		line, _ := reader.ReadString('\n')
+		if line != "M5\n" {
+			t.Errorf("semicolon comment output = %q", line)
+		}
+		io.WriteString(machine, "ok\n")
+		line, _ = reader.ReadString('\n')
+		if line != "G0 X1\n" {
+			t.Errorf("parenthetical comment output = %q", line)
+		}
+		io.WriteString(machine, "ok\n")
+		var status [1]byte
+		reader.Read(status[:])
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\n")
+	}()
+	if err := Stream(context.Background(), client, "M5 ; ? comment\nG0 X1 (note ! laser)", nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateRejectsMalformedCommentsAndRealtimeProgramBytes(t *testing.T) {
+	for _, program := range []string{"G0 X1 (nested (bad))", "G0 X1 (unclosed", "G0 X1 )", "G0 X1 ?"} {
+		if _, err := Validate(program); err == nil {
+			t.Errorf("Validate(%q) succeeded", program)
+		}
 	}
 }
