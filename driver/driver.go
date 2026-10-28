@@ -38,6 +38,18 @@ func Stream(ctx context.Context, conn io.ReadWriteCloser, program string, onProg
 // after a Pause or Resume realtime byte is successfully written. It closes conn
 // when it returns.
 func StreamControlled(ctx context.Context, conn io.ReadWriteCloser, program string, commands <-chan Command, onProgress func(acked, total int), onState func(string), onApplied ...func(Command)) (resultErr error) {
+	return streamControlled(ctx, conn, program, commands, onProgress, onState, nil, onApplied...)
+}
+
+// StreamObserved behaves like StreamControlled and additionally reports each
+// fresh parsed GRBL status response. Coordinates are in the controller's
+// configured reporting units; callers must not compare them with millimetre
+// paths unless those units have been confirmed.
+func StreamObserved(ctx context.Context, conn io.ReadWriteCloser, program string, commands <-chan Command, onProgress func(acked, total int), onState func(string), onStatus func(StatusReport), onApplied ...func(Command)) (resultErr error) {
+	return streamControlled(ctx, conn, program, commands, onProgress, onState, onStatus, onApplied...)
+}
+
+func streamControlled(ctx context.Context, conn io.ReadWriteCloser, program string, commands <-chan Command, onProgress func(acked, total int), onState func(string), onStatus func(StatusReport), onApplied ...func(Command)) (resultErr error) {
 	if conn == nil {
 		return fmt.Errorf("driver: nil connection")
 	}
@@ -111,6 +123,7 @@ func StreamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 	queryOutstanding, querySentAt := false, time.Time{}
 	queryRole, nextQueryRole := "", ""
 	lastQueryWrite := time.Time{}
+	var lastWorkOffset *Vector
 	var appliedCallback func(Command)
 	if len(onApplied) > 0 {
 		appliedCallback = onApplied[0]
@@ -324,7 +337,13 @@ func StreamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 				continue
 			}
 			if strings.HasPrefix(line, "<") && strings.HasSuffix(line, ">") {
-				state := strings.SplitN(line[1:len(line)-1], "|", 2)[0]
+				report, reportErr := ParseStatusReport(line)
+				state := ""
+				if reportErr == nil {
+					state = report.State
+				} else {
+					state = strings.SplitN(line[1:len(line)-1], "|", 2)[0]
+				}
 				responseRole := "unsolicited"
 				if queryOutstanding {
 					responseRole = queryRole
@@ -362,6 +381,25 @@ func StreamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 				}
 				if onState != nil && (fresh || (phase == "initial" && responseRole == "initial")) {
 					onState(state)
+				}
+				if fresh && onStatus != nil && reportErr == nil {
+					if report.WorkOffset != nil {
+						offset := *report.WorkOffset
+						lastWorkOffset = &offset
+					}
+					if report.MachinePosition != nil && lastWorkOffset != nil {
+						machine := *report.MachinePosition
+						offset := *lastWorkOffset
+						work := Vector{X: machine.X - offset.X, Y: machine.Y - offset.Y, Z: machine.Z - offset.Z, A: machine.A - offset.A}
+						report.WorkPosition = &work
+					}
+					if report.WorkPosition != nil && lastWorkOffset != nil {
+						work := *report.WorkPosition
+						offset := *lastWorkOffset
+						machine := Vector{X: work.X + offset.X, Y: work.Y + offset.Y, Z: work.Z + offset.Z, A: work.A + offset.A}
+						report.MachinePosition = &machine
+					}
+					onStatus(report)
 				}
 				if phase == "initial" {
 					if responseRole != "initial" {
