@@ -931,6 +931,11 @@ footer {
   vector-effect: non-scaling-stroke;
 }
 
+.preview-wrap .engrave-path.out-of-bounds {
+  stroke: var(--warning);
+  stroke-dasharray: 7 4;
+}
+
 .preview-wrap .approach-point {
   fill: var(--surface-control);
   stroke: var(--warning);
@@ -941,6 +946,25 @@ footer {
 .preview-wrap text {
   fill: var(--text-secondary);
   font: var(--type-xs) var(--mono);
+}
+
+.preview-annotations {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-2) var(--space-1);
+}
+
+.preview-annotation,
+.preview-annotations p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.preview-annotations #preview-approach-label {
+  color: var(--warning);
 }
 
 .form-validation {
