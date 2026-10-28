@@ -6,7 +6,7 @@ Simulator and software checks do not qualify a physical machine. See
 
 ## Available
 
-- Persistent G-code library, explicit dispatch, controller acknowledgements,
+- Persistent G-code library, explicit dispatch, controller acknowledgments,
   pause/resume on capable workers, cancellation, and failure reporting.
 - Simulator, GRBL serial and TCP transports, and distributed workers using
   sessions and single-execution leases. Active jobs interrupted by server restart
@@ -75,11 +75,18 @@ unsupported milestone.
   The server and Go worker negotiate protocol 2 for immutable, 4 MiB-bounded
   programs transferred in lease-bound 64 KiB ranges; the worker verifies the
   complete size, SHA-256, and G-code before opening the controller. Protocol 1
-  whole-program assignments remain compatible. A portable C prototype adds
-  bounded device-side staging, size/framing/digest/G-code validation, immutable
+  whole-program assignments remain compatible. A portable C host prototype
+  adds bounded staging, size/framing/digest/G-code validation, immutable
   verified storage, and a UART output gate that emits no bytes before
-  verification. Remaining work is the integrated MCU network/session/lease
-  lifecycle, an end-to-end fake HTTP and UART worker-flow test, and physical
+  verification. Its injected controller adapter can poll the same session,
+  job, and lease while streaming; host cycle tests cover repeated monotonic
+  progress, cancel, failed-poll receipts with controller-state preservation,
+  lease binding, and terminal gating.
+  The callback cadence is not timer-enforced, and these tests do not implement
+  a real HTTP client or demonstrate Go-worker compatibility through an
+  integrated fake HTTP/UART flow. Remaining work includes real session and
+  credential adapters, measured heartbeat cadence, lost/duplicate receipt
+  handling, integrated Go compatibility tests, ESP-IDF firmware, and physical
   firmware/board qualification under #3. The C prototype is not deployable
   firmware and does not qualify hardware.
 - [x] [#4: Browser-based laser job designer](https://github.com/constructorfleet/emberdeck/issues/4).

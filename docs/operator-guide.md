@@ -182,8 +182,8 @@ before using the profile. **Start** refuses a generated job unless the selected
 driver's controller reports the same `$30`, `$31`, and `$32` (see
 [Controller settings check](#controller-settings-check)). Work coordinates are
 not verified.
-See the official [GRBL settings reference](https://github.com/gnea/grbl/blob/master/doc/markdown/settings.md)
-and [laser mode reference](https://github.com/gnea/grbl/blob/master/doc/markdown/laser_mode.md).
+See the official [GRBL 1.1 settings reference at commit `bfb67f0`](https://github.com/gnea/grbl/blob/bfb67f0c7963fe3ce4aaf8a97f9009ea5a8db36e/doc/markdown/settings.md)
+and [laser mode reference at the same commit](https://github.com/gnea/grbl/blob/bfb67f0c7963fe3ce4aaf8a97f9009ea5a8db36e/doc/markdown/laser_mode.md).
 The commanded S percentage is not a measurement of optical output.
 
 ![Declared GRBL profile with the work envelope and spindle/feed limits](assets/screenshots/designer-profile.png)
@@ -343,7 +343,7 @@ unknown. Acknowledged lines are never treated as proof of completed motion.
 ## Pause and resume
 
 A held status reports motion, not laser output. Follow the controller's
-[laser-mode requirements](https://github.com/gnea/grbl/wiki/Grbl-v1.1-Laser-Mode)
+[laser-mode requirements in GRBL's 1.1 laser mode documentation](https://github.com/gnea/grbl/blob/bfb67f0c7963fe3ce4aaf8a97f9009ea5a8db36e/doc/markdown/laser_mode.md)
 and keep physical interlocks and emergency stops independent of software hold.
 
 Select **Pause** while a capable assigned driver is running the program. Pause
@@ -415,7 +415,7 @@ deleted until retention removes it. The server keeps at most
 ## Local browser walkthrough
 
 The Playwright browser suite runs the console against an isolated local server
-and GRBL simulator. It verifies controller acknowledgements and progress
+and GRBL simulator. It verifies controller acknowledgments and progress
 behavior; the simulator does not qualify physical machine safety. See
 [Browser console tests](browser-tests.md) for the command and scope.
 

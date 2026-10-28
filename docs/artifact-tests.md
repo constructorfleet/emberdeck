@@ -11,7 +11,7 @@ The smoke checks the reported version, `pause_resume` discovery, acknowledged
 source-line totals, live paused heartbeats, and the actual realtime `!` and `~`
 bytes. It verifies the job stays assigned at `Hold:0`, resumes on the same
 connection, finishes only after a fresh `Idle`, and does not replay source or
-cleanup G-code. This models GRBL's distinction between an `ok` acknowledgement
+cleanup G-code. This models GRBL's distinction between an `ok` acknowledgment
 and the end of physical motion. It does not connect to physical hardware or
 certify machine safety.
 

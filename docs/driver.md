@@ -1,31 +1,93 @@
 # GRBL driver package
 
-`driver.Validate(program)` checks the full program and returns its executable line count. `driver.Stream(ctx, conn, program, onProgress)` streams without interactive controls. `driver.StreamControlled(ctx, conn, program, commands, onProgress, onState)` also accepts `driver.Pause` and `driver.Resume` through a command channel. Both APIs send one source line at a time, wait for its acknowledgement, report acknowledged line counts, and send and acknowledge an injected `M5` cleanup command before waiting for `<Idle...>`. Progress counts uploaded executable lines; cleanup is excluded. After its program and context validate, the stream owns and closes the connection when it returns, including successful completion, so the read pump can always be joined. Invalid arguments return before ownership transfers.
+## API and program input
 
-`onState` receives exact GRBL state fields from status reports matched to a current status query (for example `Idle`, `Run`, `Hold:1`, or `Hold:0`); stale reports from a query already in flight when a control arrives are not reported as confirmation. An optional final `onApplied` callback reports when `!` or `~` has actually been written. This is an application receipt, not controller confirmation: workers must wait for a later fresh status before reporting paused or resumed. Stale and unsolicited statuses cannot satisfy that confirmation. A queued Pause gates source lines even during an outstanding acknowledgement. The driver sends `!`, allows one status query at a time at no more than 5 Hz, and remains gated through `Hold:1`; it treats a fresh `Hold:0` or `Idle` after the pause request as confirmation. Resume sends `~` only after a confirmed hold and keeps source output gated until a fresh `Run` or `Idle` report. A newly applied Pause cancels any pending or unconfirmed Resume, so another explicit Resume is required. An externally observed Hold also gates output and is never resumed automatically. No source line or injected `M5` is sent during a hold. A valid paused status can continue indefinitely, including while an in-flight line acknowledgement remains pending. The 30-second acknowledgement deadline resumes after a fresh post-resume `Run` or `Idle` status; missing status reports time out after 30 seconds, and a hold or resume transition must complete within 30 seconds. In final cleanup, a held job cannot complete on `Idle` until explicitly resumed and a fresh post-resume status confirms the controller's state.
+### Public streaming API
 
-The program is validated in full before any bytes are sent. Input must be ASCII; GRBL realtime characters (`!`, `?`, `~`, Ctrl-X) in executable text are rejected. Semicolon and parenthetical comments are stripped safely; nested or unterminated parenthetical comments are rejected. Lines are trimmed, blank lines are skipped, CRLF is accepted, and executable lines may contain at most 79 bytes, matching GRBL's 80-byte line buffer including its terminator.
+| Signature | Purpose | Connection ownership |
+| --- | --- | --- |
+| `func Validate(program string) (int, error)` | Validate the complete program and return its executable line count. | Does not use a connection. |
+| `func Stream(ctx context.Context, conn io.ReadWriteCloser, program string, onProgress func(acked, total int)) error` | Stream a validated program without interactive controls. | Takes ownership after program and context validation; closes the connection on return. |
+| `func StreamControlled(ctx context.Context, conn io.ReadWriteCloser, program string, commands <-chan Command, onProgress func(acked, total int), onState func(string), onApplied ...func(Command)) error` | Stream while accepting `Pause` and `Resume` commands. | Takes ownership after program and context validation; closes the connection on return. |
+| `func StreamObserved(ctx context.Context, conn io.ReadWriteCloser, program string, commands <-chan Command, onProgress func(acked, total int), onState func(string), onStatus func(StatusReport), onApplied ...func(Command)) error` | Stream while also reporting parsed status reports. | Same ownership rule as `StreamControlled`. |
+| `func StreamWithOptions(ctx context.Context, conn io.ReadWriteCloser, program string, opts Options) error` | Stream with controls and callbacks from `Options`, including configurable `Timeouts`. | Same ownership rule as `StreamControlled`. |
+| `func DefaultTimeouts() Timeouts` | Return the default response and liveness bounds. | No connection. |
+| `func ReadSettings(ctx context.Context, conn io.ReadWriteCloser, timeout time.Duration) (Settings, error)` | Read settings from an idle controller without streaming a job. | Caller retains ownership; this function does not close the connection. |
 
-A controller error or unexpected response returns an error. A line acknowledgement normally must arrive within the 30-second response bound; a healthy confirmed hold suspends that deadline until resume is confirmed. The initial status handshake fails closed on a GRBL `Grbl ` startup banner, busy state, alarm, or any other non-Idle state. A startup banner means the controller reset: the job is refused before any source-program bytes are sent, and the operator must re-verify work coordinates before starting another job. A banner during streaming also fails the job. On cancellation or a streaming error after controller interaction, the driver makes a bounded best-effort feed-hold and soft-reset write, then closes the connection to interrupt pending I/O. This is a software request only; it is not an emergency stop and does not guarantee that motion has stopped. Keep physical emergency stops and enclosure interlocks independent.
+All streaming APIs validate the full input before sending bytes. They send one source line at a time, wait for its acknowledgment, report acknowledged executable line counts, then send and acknowledge an injected `M5` before waiting for `<Idle...>`. The cleanup line is excluded from progress. Invalid arguments return before connection ownership transfers.
 
-The wire boundary is `io.ReadWriteCloser`, so a serial adapter and simulator can provide the same interface. `driver.NewSimulator()` returns an in-memory endpoint that acknowledges commands and reports `Hold:1` followed by `Hold:0`; it supports resume and reset for development and tests. It answers `$$` with `driver.SimulatorSettings` (`$30=1000`, `$31=0`, `$32=1`, `$20=0`, `$130=300`, `$131=200`). It does not model physical motion. The package does not open a serial port or manage job persistence. Tests exercise the public wire protocol with both `net.Pipe` and the simulator.
+### Program validation
 
-Protocol basis: [gnea/grbl interface documentation](https://github.com/gnea/grbl/blob/master/doc/markdown/interface.md) and [realtime commands](https://github.com/gnea/grbl/blob/master/doc/markdown/commands.md).
+- Input must be ASCII. Executable text containing GRBL realtime characters (`!`, `?`, `~`, or Ctrl-X) is rejected.
+- Semicolon and parenthetical comments are stripped safely; nested or unterminated parenthetical comments are rejected.
+- Lines are trimmed, blank lines are skipped, and CRLF is accepted.
+- An executable line may contain at most 79 bytes, matching GRBL's 80-byte line buffer including its terminator.
 
-## Long moves and controller liveness
+The wire boundary is `io.ReadWriteCloser`, so a serial adapter and simulator can provide the same interface. Tests exercise this public wire protocol with both `net.Pipe` and the simulator.
 
-GRBL withholds `ok` while its planner buffer is full, so a slow, long move can keep one line unacknowledged for much longer than 30 seconds while the machine is working normally. While an acknowledgement is outstanding, each fresh `Run` status report whose position (`MPos` or `WPos`) or planner block count (`Bf`) differs from the previous fresh report extends that line's deadline to at least 30 seconds after the report (the liveness bound). A line therefore has no fixed maximum duration while the controller keeps reporting progress.
+## Controller protocol
 
-The driver still fails closed, with the bounded best-effort feed hold and soft reset described above, when evidence of progress stops:
+### Readiness and controller settings
 
-- A controller that stops answering status queries fails within 30 seconds of the unanswered query (status queries are sent at up to 5 Hz).
-- A controller that sends no acknowledgement and no progress after a line fails 30 seconds after the line was sent.
-- A controller that keeps reporting `Run` with an unchanged position and planner count fails 30 seconds after its last progress report, or 30 seconds after the line was sent if that is later.
+The initial status handshake fails closed on a GRBL `Grbl ` startup banner, a busy state, an alarm, or any state other than `Idle`. A startup banner means the controller reset: the job is refused before source-program bytes are sent, and the operator must re-verify work coordinates before another job. A banner during streaming also fails the job.
 
-Progress is judged at the controller's reporting resolution. A move slow enough that neither its reported position nor its planner count changes for 30 seconds is treated as stalled. `driver.DefaultTimeouts()` returns these bounds. `driver.StreamWithOptions(ctx, conn, program, driver.Options{...})` accepts the same commands and callbacks as `StreamObserved` plus a `Timeouts` value with `Response` and `Liveness` durations; zero fields use the defaults and negative values are rejected. Bounds should stay well above the 200 ms status polling interval. `Stream`, `StreamControlled`, `StreamObserved`, and the worker use the defaults.
+Set `driver.Options.OnSettings` to read settings during readiness. After the initial status query returns `Idle`, the stream sends the read-only `$$` command and collects `$N=value` lines until `ok`. It parses `$20` (soft limits), `$30` and `$31` (spindle range), `$32` (laser mode), and `$130`/`$131` (X/Y max travel), ignoring other settings, status reports, and messages. The callback runs only after the complete reply and before any program byte; a non-nil return refuses the job.
 
-## Controller settings
+Malformed values for those settings, `error:`, `ALARM:`, a `Grbl ` startup banner, or no `ok` within the response timeout fail the job before streaming. The settings read never writes `$` settings. A refusal sends no feed hold or soft reset because no program byte was sent. A Pause queued during readiness gates the stream as usual and is applied when streaming would start.
 
-Set `driver.Options.OnSettings` to read the controller's settings during readiness. After the initial status query returns `Idle`, the stream sends GRBL's read-only `$$` command and collects its `$N=value` lines until `ok`. It parses `$20` (soft limits), `$30` and `$31` (spindle range), `$32` (laser mode), and `$130`/`$131` (X/Y max travel) into a `driver.Settings` value, ignoring other settings, status reports, and messages. The callback runs only after the complete reply and before any program byte; a non-nil return refuses the job. A malformed value of one of these settings, `error:`, `ALARM:`, a `Grbl ` startup banner, or no `ok` within the response timeout also fails the job before streaming. The settings read never writes `$` settings, and a refusal sends no feed hold or soft reset because no program byte was sent. A Pause queued during readiness gates the stream as before; the hold is applied when streaming would start.
+`Settings.Mismatches(expected)` compares every non-nil expected value and returns one description per differing or unreported setting, for example `$30 (maximum spindle): controller 255, profile 1000`.
 
-`Settings.Mismatches(expected)` compares every non-nil expected value and returns one description per differing or unreported setting, for example `$30 (maximum spindle): controller 255, profile 1000`. `driver.ReadSettings(ctx, conn, timeout)` performs the same `$$` read on its own, for an idle probe, and does not close the connection.
+### Pause and resume
+
+`onState` receives exact GRBL state fields from status reports matched to a current status query, such as `Idle`, `Run`, `Hold:1`, or `Hold:0`. Stale reports from a query already in flight when a control arrives are not reported as confirmation. An optional final `onApplied` callback reports when `!` or `~` has actually been written. This is an application receipt, not controller confirmation: workers must wait for a later fresh status before reporting paused or resumed. Stale and unsolicited statuses cannot satisfy that confirmation.
+
+| Event | Driver behavior | Confirmation |
+| --- | --- | --- |
+| Pause requested | Gate source lines, including when a line acknowledgment is pending; send `!`. | Fresh `Hold:1` means pausing. Fresh `Hold:0` or `Idle` after the request confirms paused. |
+| Resume requested | Accept only after a confirmed hold; send `~` and keep source output gated. | Fresh `Run` or `Idle` after the command confirms resumed. |
+| New Pause while Resume is pending | Cancel the pending or unconfirmed Resume. | The operator must request Resume again. |
+| External Hold observed | Gate source output. | Never resume automatically. |
+
+The driver allows one status query at a time, at no more than 5 Hz. No source line or injected `M5` is sent during a hold. A valid paused status can continue indefinitely, including while an in-flight line acknowledgment remains pending. In final cleanup, a held job cannot complete on `Idle` until explicitly resumed and a fresh post-resume status confirms the controller state.
+
+```text
+  Run ──Pause──> Pausing ──fresh Hold:0 or Idle──> Paused
+   ^                                                │
+   │                                                │ Resume (confirmed hold)
+   │                                                v
+   └────────────── fresh Run or Idle ─────────── Resuming
+
+Fresh Hold:1 reports the pausing transition; fresh Hold:0/Idle confirms Paused.
+Fresh Run/Idle after Resume confirms the controller has resumed.
+A new Pause cancels a pending Resume; a fresh explicit Resume is required.
+```
+
+### Timeouts and long moves
+
+`driver.DefaultTimeouts()` returns the default response and liveness bounds. `driver.StreamWithOptions(ctx, conn, program, driver.Options{...})` accepts a `Timeouts` value with `Response` and `Liveness` durations. Zero fields use defaults; negative values are rejected. Bounds should stay well above the 200 ms status polling interval. `Stream`, `StreamControlled`, `StreamObserved`, and the worker use defaults.
+
+| Condition | Default behavior |
+| --- | --- |
+| Line acknowledgment | Must normally arrive within 30 seconds. A healthy confirmed hold suspends the deadline until resume is confirmed. |
+| Missing status response | Fails within 30 seconds of the unanswered query; status queries are sent at up to 5 Hz. |
+| No acknowledgment and no progress after a line | Fails 30 seconds after the line was sent. |
+| `Run` status with no reported progress | Fails 30 seconds after the last progress report, or 30 seconds after the line was sent if later. |
+| Pause or resume transition | Must complete within 30 seconds. |
+
+GRBL withholds `ok` while its planner buffer is full, so a slow, long move can keep one line unacknowledged for much longer than 30 seconds while the machine works normally. While an acknowledgment is outstanding, each fresh `Run` status report whose position (`MPos` or `WPos`) or planner block count (`Bf`) differs from the previous fresh report extends that line's deadline to at least 30 seconds after the report. A line therefore has no fixed maximum duration while the controller keeps reporting progress.
+
+Progress is judged at the controller's reporting resolution. A move slow enough that neither its reported position nor planner count changes for 30 seconds is treated as stalled.
+
+### Errors and physical stop limits
+
+A controller error or unexpected response returns an error. On cancellation or a streaming error after controller interaction, the driver makes a bounded best-effort feed-hold and soft-reset write, then closes the connection to interrupt pending I/O. This is a software request only; it is not an emergency stop and does not guarantee motion has stopped. Keep physical emergency stops and enclosure interlocks independent.
+
+## Development and references
+
+### Simulator
+
+`driver.NewSimulator()` returns an in-memory endpoint that acknowledges commands and reports `Hold:1` followed by `Hold:0`; it supports resume and reset for development and tests. It answers `$$` with `driver.SimulatorSettings` (`$30=1000`, `$31=0`, `$32=1`, `$20=0`, `$130=300`, `$131=200`). It does not model physical motion. The package does not open a serial port or manage job persistence.
+
+### Protocol references
+
+The driver behavior is based on GRBL's [interface documentation at commit `bfb67f0`](https://github.com/gnea/grbl/blob/bfb67f0c7963fe3ce4aaf8a97f9009ea5a8db36e/doc/markdown/interface.md) and [realtime commands at the same commit](https://github.com/gnea/grbl/blob/bfb67f0c7963fe3ce4aaf8a97f9009ea5a8db36e/doc/markdown/commands.md).

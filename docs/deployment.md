@@ -110,11 +110,12 @@ curl --fail-with-body -X POST https://emberdeck.example.net/api/v1/credentials \
 ```
 
 Set the returned secret as the driver's `EMBERDECK_API_KEY`; keep the admin key
-on the server/operator side. The server listens on loopback by default; the
-examples below bind all interfaces. Expose it only on a trusted network or
-behind a TLS reverse proxy. Remote workers should use HTTPS or a trusted TLS
-tunnel. A raw TCP controller connection is separate from the worker's
-authenticated HTTP connection. See
+on the server/operator side. The server listens on loopback by default. The
+Docker Compose and systemd examples bind all host interfaces; the macOS and
+Windows examples bind loopback. Expose a non-loopback listener only on a trusted
+network or behind a TLS reverse proxy. Remote workers should use HTTPS or a
+trusted TLS tunnel. A raw TCP controller connection is separate from the
+worker's authenticated HTTP connection. See
 [the API credential contract](api.md#credential-roles-and-lifecycle) for roles,
 rotation, revocation, and recovery.
 
@@ -210,9 +211,10 @@ published release image, replace the Compose service's `build: .` with:
 image: ghcr.io/constructorfleet/emberdeck:vX.Y.Z
 ```
 
-The v0.1.0 release verified native assets, GitHub Pages, and anonymous image
-manifest access for all three container architectures. Physical machine and
-platform installation qualification remain separate from these software checks.
+The v0.11.0 release workflow verified native assets, GitHub Pages, and anonymous
+image manifest access for the supported container architectures. Physical
+machine and platform installation qualification remain separate from these
+software checks.
 
 ## Linux server or Raspberry Pi
 

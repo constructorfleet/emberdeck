@@ -47,7 +47,7 @@ reconnect or replay an interrupted lease.
 
 Every job's readiness phase reads the controller's settings with GRBL's
 read-only `$$` command after the initial `Idle` status and before the first
-program line (see [driver controller settings](driver.md#controller-settings)).
+program line (see [driver controller settings](driver.md#readiness-and-controller-settings)).
 When the assignment carries `expected_settings` (a designer-generated job's
 profile snapshot), the worker compares `$30`, `$31`, and `$32` and fails the job
 with each differing field before streaming. Uploaded jobs have no expectation;
