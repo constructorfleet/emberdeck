@@ -24,7 +24,10 @@ async function startJob(page, row) {
   await page.locator('#operator-confirmation').check();
   const boundsOverride = row.getByRole('checkbox', { name: /Override .* bounds review/ });
   if (await boundsOverride.count()) await boundsOverride.check();
-  await row.getByRole('button', { name: 'Start' }).click();
+  await row.getByRole('button', { name: /^Start / }).click();
+  const dialog = page.getByRole('dialog', { name: /^Start .*\?$/ });
+  await dialog.getByRole('button', { name: 'Start on simulator' }).click();
+  await expect(dialog).toBeHidden();
 }
 
 test('job list shows run times and the job view shows the event history', async ({ page }) => {
@@ -41,7 +44,7 @@ test('job list shows run times and the job view shows the event history', async 
   await expect(times).toContainText(/Duration \d/);
   await expect(times.locator('time')).toHaveCount(2);
 
-  await row.getByRole('button', { name: 'View', exact: true }).click();
+  await row.getByRole('button', { name: `View ${name}` }).click();
   const history = page.getByRole('list', { name: 'Job event history' });
   await expect(history).toBeVisible();
   const entries = history.getByRole('listitem');
@@ -67,7 +70,7 @@ test('job list shows run times and the job view shows the event history', async 
     const list = await (await fetch(`/api/v1/jobs?name=${encodeURIComponent(jobName)}`, { headers: { Authorization: `Bearer ${key}` } })).json();
     return list.jobs[0].id;
   }, { key: apiKey, jobName: name });
-  await row.getByRole('button', { name: /Delete/ }).click();
+  await row.getByRole('button', { name: `Delete ${name}` }).click();
   await expect(page.locator('#notice')).toHaveText('Program deleted.');
   const deleted = await page.evaluate(async ({ key, jobID }) => {
     const response = await fetch(`/api/v1/jobs/${jobID}/events`, { headers: { Authorization: `Bearer ${key}` } });
@@ -81,7 +84,7 @@ test('event history fits a narrow screen', async ({ page }) => {
   await connect(page);
   const name = `history-narrow-${test.info().retry}.gcode`;
   const row = await uploadJob(page, name, 1);
-  await row.getByRole('button', { name: 'View', exact: true }).click();
+  await row.getByRole('button', { name: `View ${name}` }).click();
   const history = page.getByRole('list', { name: 'Job event history' });
   await expect(history.getByRole('listitem')).toHaveCount(1);
   await expect(history.getByRole('listitem').first()).toContainText('Uploaded');
