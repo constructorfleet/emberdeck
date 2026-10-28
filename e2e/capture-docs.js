@@ -186,7 +186,7 @@ async function main() {
     await page.locator('#close-vector-project').click();
     await page.getByRole('button', { name: 'New vector project' }).click();
     await page.locator('#vector-name').fill('Imported SVG paths');
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="90mm" height="55mm" viewBox="0 0 90 55"><path d="M10 45 L35 45 L35 25 L10 25 Z"/><polyline points="50,45 65,30 80,45"/></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="90mm" height="55mm" viewBox="0 0 90 55"><path d="M10 45 L35 45 L35 25 L10 25 Z"/><path d="M50 45 C58 25 72 25 80 45"/></svg>`;
     await page.locator('#vector-svg-file').setInputFiles({ name: 'imported-shapes.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(svg) });
     await expect(page.locator('#designer-status')).toContainText('Imported 2 editable SVG paths');
     await expect(page.locator('#vector-object-list li')).toHaveCount(2);

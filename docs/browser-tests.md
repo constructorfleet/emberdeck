@@ -28,8 +28,10 @@ profile-aware preview, and saves/reopens the project. It verifies that generatio
 creates a queued job with per-layer provenance but sends no start request, then
 uses the existing confirmation/Start flow to complete on the simulator. A
 generic multi-subpath imported path fixture verifies that resizing preserves
-kind and all subpaths. Tests use the rendered UI and real HTTP API rather than
-mocking storage.
+kind and all subpaths. The SVG import workflow also imports a quadratic Bezier,
+keeps it editable and unassigned, assigns its operation, saves/reopens the
+project, and generates a job without dispatch until explicit confirmation.
+Tests use the rendered UI and real HTTP API rather than mocking storage.
 
 ## Run locally
 

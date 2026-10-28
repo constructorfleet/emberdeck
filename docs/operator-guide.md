@@ -135,13 +135,15 @@ red dashed outlines for cutting, and gray dotted paths for unassigned geometry.
 ![Multi-path designer with editable shapes, ordered engraving and cutting layers, and profile-aware preview](assets/screenshots/designer-vector-project.png)
 
 Choose **Import SVG** inside an open vector project to add static geometry. The
-first importer supports straight path commands (M/L/H/V/Z), lines, polylines,
-polygons, rectangles, circles, and ellipses. Circle and ellipse outlines are
-converted to editable 32-point paths; element-level affine transforms are
-applied during import. Nested groups, curves, styles, text, external resources,
-and active content are rejected with an error. Imported shapes appear
-unassigned: inspect the preview and workspace bounds, select each shape, and
-assign its engraving or cutting layer before generating. Save and reopen the
+importer supports straight path commands (M/L/H/V/Z), cubic and quadratic
+Bezier commands (C/c/Q/q), lines, polylines, polygons, rectangles, circles, and
+ellipses. Curves become line segments with at most 0.05 mm chord deviation after
+SVG and element transforms; imports that exceed the 16-level subdivision or
+4,000-point import limits are rejected. Circle and ellipse outlines become
+editable 32-point paths. Nested groups, smooth or arc commands, styles, text,
+external resources, and active content are rejected with an error. Imported
+shapes appear unassigned: inspect the preview and workspace bounds, select each
+shape, and assign its engraving or cutting layer before generating. Save and reopen the
 project through the same project controls.
 
 ![Imported static SVG paths as editable, unassigned vector geometry](assets/screenshots/designer-svg-import.png)
@@ -218,11 +220,12 @@ Regenerate the screenshots from the current console and simulator with
 ## Requested UI that is not available yet
 
 The current designer does not have multi-selection, rotation/alignment, text
-import, undo/redo, or raster engraving. SVG import supports a bounded static
-subset; curved paths and nested SVG groups are not available. Live path correlation currently
-covers supported linear XY moves; arcs and unsupported coordinate modes are
-reported as warnings, and the view does not show declared machine bounds. The
-console also has no driver-adapter or importer-plugin configuration screens.
+import, undo/redo, or raster engraving. SVG import supports straight paths and
+C/c/Q/q Bezier curves; nested groups, S/s/T/t smooth commands, and A/a arcs are
+not available. Live path correlation currently covers supported linear XY
+moves; arcs and unsupported coordinate modes are reported as warnings, and the
+view does not show declared machine bounds. The console also has no driver-adapter
+or importer-plugin configuration screens.
 Existing plugins are trusted preflight
 processes; they are not machine drivers or file converters. See the [designer
 plan](research/designer-architecture.md),

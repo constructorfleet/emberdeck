@@ -14,9 +14,9 @@ Simulator and software checks do not qualify a physical machine. See
 - Declared GRBL machine profiles, saved rectangle and multi-path vector projects,
   and separate queued G-code generation for review and explicit dispatch. The
   editor supports vector cutting and engraving and a bounded static SVG importer
-  for line paths, basic shapes, and element transforms. Curved/grouped paths,
-  text import, editor transforms, undo/redo, and raster engraving remain future
-  work.
+  for line/Bezier paths, basic shapes, and element transforms. Nested groups,
+  smooth/arc commands, text import, editor transforms, undo/redo, and raster
+  engraving remain future work.
 - Uploaded-job review against a selected machine profile, including upload-time
   line validation, known or unknown path bounds, unsupported/incomplete-motion
   warnings, a static envelope preview, and an explicit override before dispatch
@@ -35,7 +35,7 @@ Simulator and software checks do not qualify a physical machine. See
   incremental or machine-coordinate moves, offset writes, and programs without a
   known initial head position are reported as unknown rather than guessed, so a
   review may still require an explicit bounds override.
-- SVG/text import, arbitrary path editing, rotation/alignment, raster engraving,
+- SVG text import, arbitrary path editing, rotation/alignment, raster engraving,
   and automatic design-to-machine configuration.
 - Universal Wi-Fi, proprietary DSP/Ruida controllers, or OctoPrint plugin
   compatibility.
@@ -70,10 +70,10 @@ designer's remaining capabilities are delivered.
   schema-v2 multi-path editor with rectangle/ellipse/line primitives, ordered
   vector engrave/cut layers, profile preview, immutable generated jobs, and
   explicit dispatch. [Source review and remaining architecture](research/designer-architecture.md)
-  track the remaining rotation/alignment, multi-selection/transforms, curved or
-  grouped SVG paths, text import, arbitrary path editing, and raster evaluation.
-  A bounded static SVG importer now converts basic shapes and line paths into
-  editable, unassigned geometry. The full issue stays open.
+  track the remaining rotation/alignment, multi-selection/transforms, nested
+  SVG groups, smooth/arc commands, text import, arbitrary path editing, and raster
+  evaluation. A bounded static SVG importer now converts basic shapes and
+  line/Bezier paths into editable, unassigned geometry. The full issue stays open.
 - [ ] [#7: Live completed/remaining toolpath progress](https://github.com/constructorfleet/emberdeck/issues/7).
   Implement camera-independent execution monitoring for supported uploaded G-code
   as well as designer-generated jobs. Share the coordinate/toolpath renderer

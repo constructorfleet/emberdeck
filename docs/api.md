@@ -195,13 +195,19 @@ project endpoints. The root SVG must declare physical `width`, `height`, and
 The viewport is mapped to lower-left-origin millimetres. A mismatched aspect ratio
 requires explicit `preserveAspectRatio="none"`.
 
-The static subset supports direct-child paths made from M/L/H/V/Z line commands,
-lines, polylines, polygons, rectangles, circles, ellipses, and element-level
-affine transforms. Circles and ellipses are represented by 32-point editable
-polylines. Group nesting, CSS/style, text, curves, animation, DTD/entities,
-external references, and active content are rejected. Fill, stroke, colors, and
-SVG metadata never become laser operations. Imported geometry starts unassigned;
-assign each object to an explicit operation layer before generating a job.
+The static subset supports direct-child paths made from M/L/H/V/Z line commands
+and C/c/Q/q cubic and quadratic Bezier commands, plus lines, polylines, polygons,
+rectangles, circles, ellipses, and element-level affine transforms. Curves are
+flattened deterministically to editable line segments with a maximum 0.05 mm
+chord deviation in final imported millimetre coordinates. Flattening rejects
+curves that cannot meet that tolerance within 16 subdivision levels or the
+4,000-point import limit. Circles and ellipses are represented by 32-point
+editable polylines.
+Smooth curve commands (S/s/T/t), elliptical arcs (A/a), group nesting, CSS/style,
+text, animation, DTD/entities, external references, and active content are
+rejected. Fill, stroke, colors, and SVG metadata never become laser operations.
+Imported geometry starts unassigned; assign each object to an explicit operation
+layer before generating a job.
 
 ## Editable design projects
 
@@ -238,11 +244,12 @@ Version 2 geometry is an ordered list of objects, each with an ID, a `kind`
 (`rectangle`, `ellipse`, `line`, or generic `path`), and one or more subpaths.
 A subpath is a list of `{x_mm,y_mm}` points plus a `closed` boolean. Paths are
 already in absolute work coordinates; SVG element transforms are applied at
-import time, while styling and machine operation settings are not inferred. Operations are ordered independently
-from the objects. Each object names its operation with `operation_id`; saving
-an unassigned path is allowed so future importers can preserve editable source,
-but generation requires every path to be assigned. An engraving path can be
-open or closed. A cutting path must be closed and enclose nonzero area.
+import time, while styling and machine operation settings are not inferred.
+Operations are ordered independently from the objects. Each object names its
+operation with `operation_id`; imported or newly drawn unassigned paths may be
+saved while they are reviewed, but generation requires every path to be
+assigned. An engraving path can be open or closed. A cutting path must be closed
+and enclose nonzero area.
 
 ```json
 {"schema_version":2,"name":"Mixed vector design","units":"mm","profile_id":"PROFILE_ID","profile_revision":1,"objects":[{"id":"outline","operation_id":"cut","subpaths":[{"points":[{"x_mm":10,"y_mm":10},{"x_mm":40,"y_mm":10},{"x_mm":40,"y_mm":30},{"x_mm":10,"y_mm":30}],"closed":true}]},{"id":"mark","operation_id":"engrave","subpaths":[{"points":[{"x_mm":15,"y_mm":15},{"x_mm":35,"y_mm":25}],"closed":false}]}],"operations":[{"id":"cut","type":"vector-cut","feed_mm_min":300,"power_percent":80},{"id":"engrave","type":"vector-engrave","feed_mm_min":600,"power_percent":25}]}

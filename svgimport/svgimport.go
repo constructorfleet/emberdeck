@@ -14,6 +14,14 @@ import (
 
 const MaxBytes = 1 << 20
 
+// CurveToleranceMM is the maximum supported deviation between an imported
+// Bezier curve and its editable polyline approximation.
+const CurveToleranceMM = 0.05
+
+const maxFlattenDepth = 16
+const maxPathPoints = 4000
+const roundingAllowanceMM = 0.001
+
 var transformToken = regexp.MustCompile(`([A-Za-z]+)\s*\(([^)]*)\)`)
 var numberToken = regexp.MustCompile(`[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?`)
 var pathToken = regexp.MustCompile(`[A-Za-z]|[-+]?(?:[0-9]*\.)?[0-9]+(?:[eE][-+]?[0-9]+)?`)
@@ -112,7 +120,15 @@ func Parse(source []byte) (Document, error) {
 				if err != nil {
 					return Document{}, err
 				}
-				subpaths, err = parsePath(values["d"])
+				transformSpec = values["transform"]
+				curveTransform, err := parseTransform(transformSpec)
+				if err != nil {
+					return Document{}, err
+				}
+				toMM := func(point Point) Point {
+					return importPoint(point, curveTransform, viewBox, sx, sy, height)
+				}
+				subpaths, err = parsePath(values["d"], toMM, maxPathPoints-totalPoints)
 				if err != nil {
 					return Document{}, err
 				}
@@ -238,9 +254,8 @@ func Parse(source []byte) (Document, error) {
 				path := &subpaths[i]
 				points := make([]Point, 0, len(path.Points))
 				for _, point := range path.Points {
-					transformed := affine.apply(point)
-					x := (transformed.XMM - viewBox[0]) * sx
-					y := height - (transformed.YMM-viewBox[1])*sy
+					transformed := importPoint(point, affine, viewBox, sx, sy, height)
+					x, y := transformed.XMM, transformed.YMM
 					if !finite(x) || !finite(y) || math.Abs(x) > 10000 || math.Abs(y) > 10000 {
 						return Document{}, errors.New("SVG point exceeds the 10000 mm import range")
 					}
@@ -390,7 +405,12 @@ func parseNumberList(source string, exact int) ([]float64, error) {
 func finite(value float64) bool     { return !math.IsNaN(value) && !math.IsInf(value, 0) }
 func roundMM(value float64) float64 { return math.Round(value*1000) / 1000 }
 
-func parsePath(source string) ([]Subpath, error) {
+func importPoint(point Point, transform affine, viewBox []float64, sx, sy, height float64) Point {
+	transformed := transform.apply(point)
+	return Point{XMM: (transformed.XMM - viewBox[0]) * sx, YMM: height - (transformed.YMM-viewBox[1])*sy}
+}
+
+func parsePath(source string, toMM func(Point) Point, maxPoints int) ([]Subpath, error) {
 	tokens := pathToken.FindAllString(source, -1)
 	if len(tokens) == 0 {
 		return nil, errors.New("path d must contain supported line commands")
@@ -408,6 +428,7 @@ func parsePath(source string) ([]Subpath, error) {
 	command := byte(0)
 	active := -1
 	closedSinceMove := false
+	emittedPoints := 0
 	index := 0
 	readNumber := func() (float64, error) {
 		if index >= len(tokens) || len(tokens[index]) == 1 && ((tokens[index][0] >= 'A' && tokens[index][0] <= 'Z') || (tokens[index][0] >= 'a' && tokens[index][0] <= 'z')) {
@@ -420,12 +441,24 @@ func parsePath(source string) ([]Subpath, error) {
 		}
 		return value, nil
 	}
+	appendPoint := func(point Point) error {
+		path := &subpaths[active]
+		if len(path.Points) > 0 && path.Points[len(path.Points)-1] == point {
+			return nil
+		}
+		if emittedPoints >= maxPoints {
+			return errors.New("SVG path exceeds remaining 4000-point import budget")
+		}
+		path.Points = append(path.Points, point)
+		emittedPoints++
+		return nil
+	}
 	for index < len(tokens) {
 		if len(tokens[index]) == 1 && isLetter(tokens[index][0]) {
 			command = tokens[index][0]
 			index++
-			if strings.ContainsRune("CcSsQqTtAa", rune(command)) {
-				return nil, fmt.Errorf("path command %c is not supported; use M/L/H/V/Z lines", command)
+			if strings.ContainsRune("SsTtAa", rune(command)) {
+				return nil, fmt.Errorf("path command %c is not supported; use M/L/H/V/C/Q/Z commands", command)
 			}
 		}
 		if command == 0 {
@@ -446,8 +479,8 @@ func parsePath(source string) ([]Subpath, error) {
 			command = 0
 			continue
 		}
-		if cmd != 'M' && cmd != 'L' && cmd != 'H' && cmd != 'V' {
-			return nil, fmt.Errorf("path command %c is not supported; use M/L/H/V/Z lines", command)
+		if cmd != 'M' && cmd != 'L' && cmd != 'H' && cmd != 'V' && cmd != 'C' && cmd != 'Q' {
+			return nil, fmt.Errorf("path command %c is not supported; use M/L/H/V/C/Q/Z commands", command)
 		}
 		if cmd != 'M' && closedSinceMove {
 			return nil, errors.New("a path needs a new M command after Z before drawing again")
@@ -488,20 +521,86 @@ func parsePath(source string) ([]Subpath, error) {
 					y += current.YMM
 				}
 				current.YMM = y
+			case 'Q':
+				if active < 0 {
+					return nil, errors.New("path curve command must follow a move")
+				}
+				controlX, err := readNumber()
+				if err != nil {
+					return nil, err
+				}
+				controlY, err := readNumber()
+				if err != nil {
+					return nil, err
+				}
+				x, err := readNumber()
+				if err != nil {
+					return nil, err
+				}
+				y, err := readNumber()
+				if err != nil {
+					return nil, err
+				}
+				if !upper {
+					controlX, controlY = controlX+previous.XMM, controlY+previous.YMM
+					x, y = x+previous.XMM, y+previous.YMM
+				}
+				control, endpoint := Point{XMM: controlX, YMM: controlY}, Point{XMM: x, YMM: y}
+				if !finitePoint(control) || !finitePoint(endpoint) {
+					return nil, errors.New("path curve coordinate overflow")
+				}
+				if err := flattenQuadratic(previous, control, endpoint, toMM, 0, func(point Point) error { return appendPoint(point) }); err != nil {
+					return nil, err
+				}
+				current = endpoint
+			case 'C':
+				if active < 0 {
+					return nil, errors.New("path curve command must follow a move")
+				}
+				values := [6]float64{}
+				for i := range values {
+					value, err := readNumber()
+					if err != nil {
+						return nil, err
+					}
+					values[i] = value
+				}
+				if !upper {
+					for i := range values {
+						if i%2 == 0 {
+							values[i] += previous.XMM
+						} else {
+							values[i] += previous.YMM
+						}
+					}
+				}
+				control1 := Point{XMM: values[0], YMM: values[1]}
+				control2 := Point{XMM: values[2], YMM: values[3]}
+				endpoint := Point{XMM: values[4], YMM: values[5]}
+				if !finitePoint(control1) || !finitePoint(control2) || !finitePoint(endpoint) {
+					return nil, errors.New("path curve coordinate overflow")
+				}
+				if err := flattenCubic(previous, control1, control2, endpoint, toMM, 0, func(point Point) error { return appendPoint(point) }); err != nil {
+					return nil, err
+				}
+				current = endpoint
 			}
 			if !finite(current.XMM) || !finite(current.YMM) {
 				return nil, errors.New("path coordinate overflow")
 			}
 			if cmd == 'M' && first {
-				subpaths = append(subpaths, Subpath{Points: []Point{current}})
+				subpaths = append(subpaths, Subpath{})
 				active, start = len(subpaths)-1, current
+				if err := appendPoint(current); err != nil {
+					return nil, err
+				}
 				closedSinceMove = false
-			} else {
+			} else if cmd != 'C' && cmd != 'Q' {
 				if active < 0 {
 					return nil, errors.New("path line command must follow a move")
 				}
-				if current != previous {
-					subpaths[active].Points = append(subpaths[active].Points, current)
+				if err := appendPoint(current); err != nil {
+					return nil, err
 				}
 			}
 			first = false
@@ -520,6 +619,67 @@ func parsePath(source string) ([]Subpath, error) {
 		}
 	}
 	return subpaths, nil
+}
+
+func finitePoint(point Point) bool { return finite(point.XMM) && finite(point.YMM) }
+
+func flattenQuadratic(start, control, end Point, toMM func(Point) Point, depth int, append func(Point) error) error {
+	if !finitePoint(toMM(start)) || !finitePoint(toMM(control)) || !finitePoint(toMM(end)) {
+		return errors.New("path curve coordinate overflow")
+	}
+	if distanceToSegment(toMM(control), toMM(start), toMM(end)) <= CurveToleranceMM-roundingAllowanceMM {
+		return append(end)
+	}
+	if depth >= maxFlattenDepth {
+		return errors.New("SVG curve cannot meet the 0.05 mm chord tolerance within the subdivision limit")
+	}
+	startControl := midpoint(start, control)
+	controlEnd := midpoint(control, end)
+	middle := midpoint(startControl, controlEnd)
+	if err := flattenQuadratic(start, startControl, middle, toMM, depth+1, append); err != nil {
+		return err
+	}
+	return flattenQuadratic(middle, controlEnd, end, toMM, depth+1, append)
+}
+
+func flattenCubic(start, control1, control2, end Point, toMM func(Point) Point, depth int, append func(Point) error) error {
+	mappedStart, mappedControl1 := toMM(start), toMM(control1)
+	mappedControl2, mappedEnd := toMM(control2), toMM(end)
+	if !finitePoint(mappedStart) || !finitePoint(mappedControl1) || !finitePoint(mappedControl2) || !finitePoint(mappedEnd) {
+		return errors.New("path curve coordinate overflow")
+	}
+	flatness := math.Max(distanceToSegment(mappedControl1, mappedStart, mappedEnd), distanceToSegment(mappedControl2, mappedStart, mappedEnd))
+	if flatness <= CurveToleranceMM-roundingAllowanceMM {
+		return append(end)
+	}
+	if depth >= maxFlattenDepth {
+		return errors.New("SVG curve cannot meet the 0.05 mm chord tolerance within the subdivision limit")
+	}
+	startControl1 := midpoint(start, control1)
+	control1Control2 := midpoint(control1, control2)
+	control2End := midpoint(control2, end)
+	leftControl2 := midpoint(startControl1, control1Control2)
+	rightControl1 := midpoint(control1Control2, control2End)
+	middle := midpoint(leftControl2, rightControl1)
+	if err := flattenCubic(start, startControl1, leftControl2, middle, toMM, depth+1, append); err != nil {
+		return err
+	}
+	return flattenCubic(middle, rightControl1, control2End, end, toMM, depth+1, append)
+}
+
+func midpoint(first, second Point) Point {
+	return Point{XMM: (first.XMM + second.XMM) / 2, YMM: (first.YMM + second.YMM) / 2}
+}
+
+func distanceToSegment(point, start, end Point) float64 {
+	dx, dy := end.XMM-start.XMM, end.YMM-start.YMM
+	lengthSquared := dx*dx + dy*dy
+	if lengthSquared == 0 {
+		return math.Hypot(point.XMM-start.XMM, point.YMM-start.YMM)
+	}
+	t := ((point.XMM-start.XMM)*dx + (point.YMM-start.YMM)*dy) / lengthSquared
+	t = math.Max(0, math.Min(1, t))
+	return math.Hypot(point.XMM-(start.XMM+t*dx), point.YMM-(start.YMM+t*dy))
 }
 
 func finiteNumber(source string) (float64, error) {

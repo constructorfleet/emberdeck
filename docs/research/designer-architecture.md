@@ -12,11 +12,11 @@ the operator reviews it and uses the existing explicit readiness/start controls.
 Profile revision changes require review and resave before generation.
 See the [API contract](../api.md) and [illustrated guide](../operator-guide.md).
 
-This milestone has one rectangle outline and one vector-engraving operation.
-It does not implement SVG import, text, multiple objects, rotation/alignment,
-cutting layers, or raster engraving. The remaining sections describe the broader
-design, not additional available controls. The static preview is not execution
-monitoring for [issue #7](https://github.com/constructorfleet/emberdeck/issues/7).
+This version 1 milestone has one rectangle outline and one vector-engraving
+operation. The separate version 2 milestone below adds multiple objects and a
+bounded SVG importer. Text, rotation/alignment, and raster engraving remain
+unavailable. The static preview is not execution monitoring for
+[issue #7](https://github.com/constructorfleet/emberdeck/issues/7).
 
 ## Implemented multi-path vector milestone
 
@@ -29,15 +29,20 @@ requires every path assigned; open cuts and closed zero-area cuts are rejected.
 Both operation types use GRBL dynamic laser mode (`M4`) so output is disabled
 when motion is stopped or held. This is a software contract, not physical
 qualification. Generated jobs carry immutable schema-v2 source/profile snapshots
-and use the existing explicit operator confirmation and dispatch path. Saved
-unassigned paths are available for a future importer to preserve source geometry
-without guessing machining settings.
+and use the existing explicit operator confirmation and dispatch path. The
+static SVG importer stores accepted geometry in this same editable path model;
+imported paths remain unassigned until an operator chooses an operation layer.
+No SVG style or machine setting is inferred.
 
-The v2 model does not yet support arbitrary SVG paths/curves, transforms,
-rotation, alignment, multi-selection, text, undo/redo, kerf compensation, tabs,
-passes, or raster engraving. The current editor creates polygonal ellipses and
-does not claim live execution progress. Version 1 projects and `rectangle-v1`
-jobs remain supported with their original data and G-code.
+SVG `C/c` cubic and `Q/q` quadratic curves are flattened to editable
+millimetre polylines with a 0.05 mm chord tolerance after element transforms and
+viewport scaling, capped at 4,000 points and 16 subdivision levels. The importer
+rejects nested groups, `S/s` and `T/t` smooth commands, `A/a` arcs, styles, text,
+and active or external content. The v2 model does not provide arbitrary path-node
+editing, rotation, alignment, multi-selection, text, undo/redo, kerf
+compensation, tabs, passes, or raster engraving. Ellipses are polygonal and the
+editor does not claim live execution progress. Version 1 projects and
+`rectangle-v1` jobs remain supported with their original data and G-code.
 
 ## Pre-designer baseline
 
@@ -60,9 +65,9 @@ Keep the UI in the existing Go binary's embedded HTML/CSS/JavaScript assets. Def
 
 Make model geometry device-independent and in millimetres. Treat the design origin as the lower-left of the machine work area; the canvas is a view transform only (screen Y down, model Y up), and must never alter coordinates in the document. Define one profile transform from model coordinates to configured machine coordinates, including work-area width/height and any explicit machine origin offset. A profile warning is required for any transformed geometry outside the envelope; generation is blocked until corrected or explicitly resolved through a documented policy. Do not infer physical origin, homing, travel limits, or safe focus from the viewport.
 
-Suggested starter objects are rectangle, circle/ellipse, line, polyline/path, and text. Text should be converted to vector outlines at generation and save the resolved font/outline in the project so another host does not silently substitute fonts. SVG import should accept a documented static subset (paths, lines, polygons, rectangles, circles/ellipses, groups and affine transforms; optionally text only when outlined). Reject scripts, event attributes, foreign objects, external URLs/references, embedded raster images, CSS imports, animation, and unsupported filters; impose file-size, element-count, nesting, numeric-range, and path-segment limits. Parse without network fetches and normalize accepted geometry into the same internal model. Import can report unsupported elements instead of silently dropping them.
+Suggested starter objects are rectangle, circle/ellipse, line, polyline/path, and text. Text should be converted to vector outlines at generation and save the resolved font/outline in the project so another host does not silently substitute fonts. The implemented static SVG importer accepts line commands, cubic/quadratic Bezier paths, lines, polylines, polygons, rectangles, circles/ellipses, and element transforms. It rejects scripts, event attributes, foreign objects, external URLs/references, embedded raster images, CSS imports, animation, and unsupported filters; it imposes file-size, numeric-range, point-count, and curve-subdivision limits. Nested groups and text remain future work. Parse without network fetches and normalize accepted geometry into the same editable millimetre path model.
 
-Represent operations explicitly and independently of SVG stroke styling: initial milestones are **vector cutting** (closed/open paths only under an explicit policy; cutting settings validated against profile material bounds) and **vector engraving** (line-following paths with separate power/speed bounds). An operation layer owns order, tool mode, speed, power, and optional pass count; define whether duplicated/overlapping paths are intentional and warn on exact duplicates. Flatten Bézier curves/arcs adaptively to a documented chord tolerance in millimetres, cap segments, and validate every emitted move and rapid against the work envelope. Toolpath preview must distinguish powered vector motion from laser-off travel and display travel/order. Raster engraving is a later independent investigation: it needs image decoding, dithering/scan strategy, power modulation, and hardware-specific validation, and is not available in this proposal.
+Represent operations explicitly and independently of SVG stroke styling: initial milestones are **vector cutting** (closed/open paths only under an explicit policy; cutting settings validated against profile material bounds) and **vector engraving** (line-following paths with separate power/speed bounds). An operation layer owns order, tool mode, speed, power, and optional pass count; define whether duplicated/overlapping paths are intentional and warn on exact duplicates. The implemented importer adaptively flattens cubic and quadratic Bezier curves to a 0.05 mm chord tolerance in millimetres, caps path points and subdivision depth, and validates emitted geometry against the work envelope. Elliptical arcs remain unsupported. Toolpath preview must distinguish powered vector motion from laser-off travel and display travel/order. Raster engraving is a later independent investigation: it needs image decoding, dithering/scan strategy, power modulation, and hardware-specific validation, and is not available in this proposal.
 
 Initial input: native versioned EmberDeck project JSON and the bounded SVG subset. Initial output: generated plain-text G-code compatible only with the implemented GRBL 1.1 streaming contract; optionally provide a downloadable project and G-code file. Reject unsupported controller commands/features rather than claiming generic CNC or Ruida support. Generation should be a public pure seam, for example `POST /api/v1/projects/{id}/generate` with a profile ID/revision returning a validation report and immutable job ID; geometry normalization and toolpath generation should also have public Go package APIs. Dispatch remains the existing `/jobs/{id}/start` path with the existing explicit confirmation, readiness check, preflight plugins, and worker lease behavior. Do not auto-dispatch on save or generation.
 
