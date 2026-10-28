@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.16.0](https://github.com/constructorfleet/emberdeck/compare/v0.15.0...v0.16.0) (2026-10-28)
+
+
+### Features
+
+* show declared bounds in generated live previews ([#144](https://github.com/constructorfleet/emberdeck/issues/144)) ([3a641f8](https://github.com/constructorfleet/emberdeck/commit/3a641f8b08114ac99ba0e48634ebdb57f508af4e))
+
+
+### Bug Fixes
+
+* hide stale toolpath marker after interruption ([#137](https://github.com/constructorfleet/emberdeck/issues/137)) ([12d31e0](https://github.com/constructorfleet/emberdeck/commit/12d31e04a2902768e238866ba68fe1b143131a68))
+
 ## [0.15.0](https://github.com/constructorfleet/emberdeck/compare/v0.14.0...v0.15.0) (2026-10-28)
 
 
