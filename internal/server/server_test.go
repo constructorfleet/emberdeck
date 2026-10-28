@@ -59,3 +59,37 @@ func TestUploadedJobSurvivesServerRestart(t *testing.T) {
 		t.Fatalf("lost job: %+v", job)
 	}
 }
+
+func TestInvalidUploadsDoNotEnterLibrary(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		`{}`, `{"name":"x","gcode":" "}`, `{"name":"x","gcode":"G0","extra":true}`,
+		`{"name":"x","gcode":"G0"} {}`, `{"name":"x","gcode":"G0\u0000"}`,
+		`{"name":"x","gcode":"G0\u0018"}`,
+	} {
+		w := request(t, s, "POST", "/api/v1/jobs", body, "test-key")
+		if w.Code != 400 {
+			t.Errorf("accepted invalid upload %s: %d", body, w.Code)
+		}
+	}
+	w := request(t, s, "GET", "/api/v1/jobs", "", "test-key")
+	if w.Code != 200 || w.Body.String() != "[]\n" {
+		t.Fatalf("invalid jobs persisted: %s", w.Body.String())
+	}
+}
+
+func TestJobLibraryRequiresAuthentication(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"", "wrong-key"} {
+		w := request(t, s, "GET", "/api/v1/jobs", "", key)
+		if w.Code != 401 {
+			t.Fatalf("unauthenticated request returned %d", w.Code)
+		}
+	}
+}
