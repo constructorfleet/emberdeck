@@ -209,7 +209,7 @@ console also has no driver-adapter or importer-plugin configuration screens.
 Existing plugins are trusted preflight
 processes; they are not machine drivers or file converters. See the [designer
 plan](research/designer-architecture.md),
-[feature roadmap](roadmap.md#feature-requests), and the open requests for
+[product status](roadmap.md), and the open requests for
 [#4](https://github.com/ConstructorFleet/emberdeck/issues/4),
 [#7](https://github.com/ConstructorFleet/emberdeck/issues/7),
 [#15](https://github.com/ConstructorFleet/emberdeck/issues/15), and

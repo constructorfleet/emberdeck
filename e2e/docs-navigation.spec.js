@@ -17,10 +17,10 @@ test('rendered documentation has grouped, current, keyboard accessible navigatio
   expect(pages).toContain('api-routes.html');
   expect(pages).toContain('cli.html');
   const expectedGroups = {
-    'Getting Started': [['Operator Guide', 'operator-guide.html'], ['Getting Started', 'index.html']],
-    'Deploy & Run': [['Deployment', 'deployment.html'], ['Serial', 'serial.html']],
-    'Develop & Extend': [['Contributing', 'CONTRIBUTING.html'], ['Architecture', 'architecture.html'], ['Plugins', 'plugins.html'], ['Browser Tests', 'browser-tests.html'], ['Artifact Tests', 'artifact-tests.html'], ['Roadmap', 'roadmap.html'], ['Designer Architecture', 'designer-architecture.html'], ['ESP32 Feasibility', 'esp32-feasibility.html']],
-    Reference: [['API', 'api.html'], ['API Routes', 'api-routes.html'], ['CLI', 'cli.html'], ['Driver', 'driver.html'], ['Worker', 'worker.html']],
+    'Getting Started': [['Overview', 'index.html'], ['Install', 'install.html'], ['Operator Guide', 'operator-guide.html']],
+    'Deploy & Run': [['Deployment', 'deployment.html'], ['Troubleshooting', 'troubleshooting.html'], ['Glossary', 'glossary.html'], ['Safety & Limitations', 'safety.html']],
+    'Develop & Extend': [['Contributing', 'CONTRIBUTING.html'], ['Architecture', 'architecture.html'], ['Plugins', 'plugins.html'], ['Browser Tests', 'browser-tests.html'], ['Artifact Tests', 'artifact-tests.html'], ['Roadmap', 'roadmap.html'], ['Designer Architecture', 'designer-architecture.html'], ['ESP32 Feasibility', 'esp32-feasibility.html'], ['GRBL Driver Package', 'driver.html'], ['Worker Package', 'worker.html'], ['Serial Transport Package', 'serial.html']],
+    Reference: [['API', 'api.html'], ['API Routes', 'api-routes.html'], ['CLI', 'cli.html']],
   };
 
   for (const pageName of pages) {
