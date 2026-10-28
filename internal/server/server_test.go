@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ConstructorFleet/emberdeck/driver"
 	"github.com/ConstructorFleet/emberdeck/internal/server"
 )
 
@@ -21,6 +22,19 @@ func request(t *testing.T, h http.Handler, method, path, body, key string) *http
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	return w
+}
+
+func TestUploadRejectsDriverInvalidProgramWithLineNumber(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	longLine := strings.Repeat("G", driver.MaxLineLength+1)
+	w := request(t, s, "POST", "/api/v1/jobs", `{"name":"too-long.gcode","gcode":"`+longLine+`"}`, "test-key")
+	if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "line 1") {
+		t.Fatalf("invalid program upload = %d %s; want 422 with line number", w.Code, w.Body.String())
+	}
 }
 
 func TestUploadedJobSurvivesServerRestart(t *testing.T) {

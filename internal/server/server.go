@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ConstructorFleet/emberdeck/driver"
 	"github.com/ConstructorFleet/emberdeck/plugin"
 	"github.com/ConstructorFleet/emberdeck/toolpath"
 	"github.com/gofrs/flock"
@@ -247,6 +248,10 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	input.Name = strings.TrimSpace(input.Name)
 	if input.Name == "" || len(input.Name) > 200 || strings.TrimSpace(input.Gcode) == "" || strings.ContainsFunc(input.Gcode, func(r rune) bool { return (r < 32 && r != '\n' && r != '\r' && r != '\t') || r == 127 }) {
 		fail(w, 400, "name and text G-code are required")
+		return
+	}
+	if _, err := driver.Validate(input.Gcode); err != nil {
+		fail(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	id := make([]byte, 16)
