@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"regexp"
 	"time"
+
+	"github.com/ConstructorFleet/emberdeck/toolpath"
 )
 
 const driverTTL = 10 * time.Second
@@ -45,6 +47,7 @@ func (s *Server) recoverInterrupted() error {
 			j.State = "interrupted"
 			j.Error = "server restarted; inspect machine before creating a new job"
 			j.Lease = ""
+			j.Execution = markExecutionUnknown(j.Execution)
 			jobs[id] = j
 			changed = true
 		}
@@ -67,6 +70,7 @@ func (s *Server) expire() error {
 					j.State = "interrupted"
 					j.Error = "driver heartbeat expired; inspect machine"
 					j.Lease = ""
+					j.Execution = markExecutionUnknown(j.Execution)
 					jobs[jid] = j
 					changed = true
 				}
@@ -187,15 +191,16 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Capabilities    []string `json:"capabilities"`
-		ControllerState string   `json:"controller_state"`
-		Session         string   `json:"session"`
-		JobID           string   `json:"job_id"`
-		Lease           string   `json:"lease"`
-		State           string   `json:"state"`
-		Acked           int      `json:"acked"`
-		Total           int      `json:"total"`
-		Error           string   `json:"error"`
+		Capabilities    []string            `json:"capabilities"`
+		ControllerState string              `json:"controller_state"`
+		Session         string              `json:"session"`
+		JobID           string              `json:"job_id"`
+		Lease           string              `json:"lease"`
+		State           string              `json:"state"`
+		Acked           int                 `json:"acked"`
+		Total           int                 `json:"total"`
+		Error           string              `json:"error"`
+		Execution       *toolpath.Execution `json:"execution"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -251,6 +256,10 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 				fail(w, 400, "invalid progress")
 				return
 			}
+			if in.Execution != nil && !validExecution(*in.Execution, j.Gcode, j.Execution, in.State) {
+				fail(w, 400, "invalid execution telemetry")
+				return
+			}
 			switch in.State {
 			case "pausing", "resuming":
 				if !hasCapability(d, "pause_resume") {
@@ -291,6 +300,10 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 			j.Acked = in.Acked
 			j.Total = in.Total
 			j.Error = in.Error
+			if in.Execution != nil {
+				execution := *in.Execution
+				j.Execution = &execution
+			}
 			if len(j.Error) > 1000 {
 				j.Error = j.Error[:1000]
 			}

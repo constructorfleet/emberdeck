@@ -68,6 +68,43 @@ func TestUploadedJobSurvivesServerRestart(t *testing.T) {
 	}
 }
 
+func TestJobToolpathEndpointParsesUploadedProgramWithoutChangingIt(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	w := request(t, s, "POST", "/api/v1/jobs", `{"name":"panel.gcode","gcode":"G21 G90\nG0 X0 Y0\nM4 S500\nG1 X10 Y0 F300\nM5"}`, "test-key")
+	var job struct{ ID string }
+	if err := json.Unmarshal(w.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	w = request(t, s, "GET", "/api/v1/jobs/"+job.ID+"/toolpath", "", "test-key")
+	if w.Code != http.StatusOK {
+		t.Fatalf("toolpath: %d %s", w.Code, w.Body.String())
+	}
+	var path struct {
+		Supported bool `json:"supported"`
+		Complete  bool `json:"complete"`
+		Segments  []struct {
+			SourceLine int  `json:"source_line"`
+			LaserOn    bool `json:"laser_on"`
+			Rapid      bool `json:"rapid"`
+		} `json:"segments"`
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &path); err != nil {
+		t.Fatal(err)
+	}
+	if !path.Supported || path.Complete || len(path.Segments) != 1 || path.Segments[0].SourceLine != 4 || !path.Segments[0].LaserOn || path.Segments[0].Rapid || len(path.Warnings) == 0 {
+		t.Fatalf("toolpath does not describe supported geometry and its unknown start honestly: %s", w.Body.String())
+	}
+	w = request(t, s, "GET", "/api/v1/jobs/not-found/toolpath", "", "test-key")
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("unknown job toolpath: %d", w.Code)
+	}
+}
+
 func TestInvalidUploadsDoNotEnterLibrary(t *testing.T) {
 	s, err := server.Open(t.TempDir(), "test-key")
 	if err != nil {

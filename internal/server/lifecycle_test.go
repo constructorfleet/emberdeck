@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestOperatorDispatchesToRegisteredDriverAndMonitorsCompletion(t *testing.T) {
@@ -77,6 +78,52 @@ func TestDriverCannotClaimAnotherSessionOrForgeProgress(t *testing.T) {
 	w = request(t, s, "POST", "/api/v1/drivers/bench/poll", `{"session":"owner","job_id":"made-up","lease":"forged","state":"completed","acked":1,"total":1}`, "test-key")
 	if w.Code != 409 {
 		t.Fatalf("forged progress: %d", w.Code)
+	}
+}
+
+func TestWorkerPersistsControllerPositionSeparatelyFromAcknowledgedLines(t *testing.T) {
+	s := openServer(t)
+	w := request(t, s, "POST", "/api/v1/jobs", `{"name":"path.gcode","gcode":"G21 G90\nG0 X0 Y0\nM4 S100\nG1 X10 Y0 F300"}`, "test-key")
+	var job struct{ ID string }
+	if err := json.Unmarshal(w.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	request(t, s, "POST", "/api/v1/drivers/bench/poll", `{"session":"session-a"}`, "test-key")
+	w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true}`, "test-key")
+	if w.Code != http.StatusOK {
+		t.Fatalf("start: %d %s", w.Code, w.Body.String())
+	}
+	w = request(t, s, "POST", "/api/v1/drivers/bench/poll", `{"session":"session-a"}`, "test-key")
+	var assignment struct {
+		Lease string `json:"lease"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &assignment); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"session":"session-a","job_id":"` + job.ID + `","lease":"` + assignment.Lease + `","state":"running","acked":4,"total":4,"execution":{"work_position":{"x":5,"y":0},"position_units":"assumed-mm","position_reported_at":"` + time.Now().UTC().Format(time.RFC3339Nano) + `","path_progress":{"completed":0,"total":1,"active":0,"confidence":"estimated"}}}`
+	w = request(t, s, "POST", "/api/v1/drivers/bench/poll", body, "test-key")
+	if w.Code != http.StatusOK {
+		t.Fatalf("progress: %d %s", w.Code, w.Body.String())
+	}
+	w = request(t, s, "GET", "/api/v1/jobs/"+job.ID, "", "test-key")
+	var stored struct {
+		Acked     int `json:"acked"`
+		Execution struct {
+			WorkPosition struct {
+				X float64 `json:"x"`
+			} `json:"work_position"`
+			Progress struct {
+				Completed  int    `json:"completed"`
+				Active     *int   `json:"active"`
+				Confidence string `json:"confidence"`
+			} `json:"path_progress"`
+		} `json:"execution"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Acked != 4 || stored.Execution.WorkPosition.X != 5 || stored.Execution.Progress.Completed != 0 || stored.Execution.Progress.Active == nil || *stored.Execution.Progress.Active != 0 || stored.Execution.Progress.Confidence != "estimated" {
+		t.Fatalf("acknowledged lines were confused with path execution: %s", w.Body.String())
 	}
 }
 
