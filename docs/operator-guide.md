@@ -53,6 +53,15 @@ and the machine must be homed again before position-dependent work. Stay at the
 machine and supervise. The panel cannot replace physical interlocks or an
 emergency stop.
 
+If a controller command may have been only partly written, jog cancel and feed
+hold cannot clear GRBL's buffered line. EmberDeck soft-resets the controller and
+requires its restart banner plus a terminal **Idle** or **Alarm** status. The
+machine may need re-homing. If reset cannot be confirmed, EmberDeck records a
+driver quarantine that survives server restarts and blocks jobs and manual
+actions. The worker retries reset confirmation; if the controller is
+unreachable, inspect or power-cycle it at the machine, then wait for the worker
+to confirm the reset before releasing the lease or starting work.
+
 A queued manual request reserves the driver separately from the job queue. If
 worker support is unavailable, no action capability is advertised and the
 controls remain disabled. Use **Release manual control** only after inspecting

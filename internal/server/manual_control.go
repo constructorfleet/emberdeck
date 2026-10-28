@@ -52,6 +52,7 @@ type manualControlLease struct {
 	ExpiresAt          time.Time        `json:"expires_at"`
 	Session            string           `json:"-"`
 	RequireFreshStatus bool             `json:"-"`
+	RequireParserReset bool             `json:"-"`
 }
 
 type manualControlAssignment struct {
@@ -146,6 +147,10 @@ func (s *Server) createManualControl(w http.ResponseWriter, r *http.Request) {
 	d, online := s.drivers[id]
 	if !online {
 		fail(w, http.StatusConflict, "driver is offline")
+		return
+	}
+	if s.parserQuarantine[id] != "" {
+		fail(w, http.StatusConflict, "controller parser reset is unconfirmed; worker recovery or physical controller inspection is required")
 		return
 	}
 	if d.Busy || (s.manualControls[id] != nil && manualAssignmentActive(s.manualControls[id].State)) {
@@ -243,6 +248,10 @@ func (s *Server) releaseManualControl(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.parserQuarantine[id] != "" {
+		fail(w, http.StatusConflict, "controller parser reset is unconfirmed; worker recovery or physical controller inspection is required")
+		return
+	}
 	record := s.manualControls[id]
 	if record == nil {
 		fail(w, http.StatusNotFound, "manual-control assignment not found")
@@ -260,6 +269,10 @@ func (s *Server) releaseManualControl(w http.ResponseWriter, r *http.Request) {
 		d.Busy = true
 		s.drivers[id] = d
 		respond(w, http.StatusAccepted, record)
+		return
+	}
+	if record.State == manualStateInterrupted && record.RequireParserReset {
+		fail(w, http.StatusConflict, "controller parser reset was not confirmed; inspect or restart the controller before releasing its manual-control lease")
 		return
 	}
 	if record.State == manualStateInterrupted && (record.RequireFreshStatus || d.ControllerState != "Idle") {

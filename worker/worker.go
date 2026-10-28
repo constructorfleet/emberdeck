@@ -97,10 +97,11 @@ type assignment struct {
 	Command string `json:"command"`
 	Lease   string `json:"lease"`
 	// ReadSettings asks an idle worker to probe the controller with `$$`.
-	ReadSettings bool              `json:"read_settings"`
-	ReadStatus   bool              `json:"read_status"`
-	Manual       *manualAssignment `json:"manual,omitempty"`
-	Job          struct {
+	ReadSettings    bool              `json:"read_settings"`
+	ReadStatus      bool              `json:"read_status"`
+	ReadParserReset bool              `json:"read_parser_reset"`
+	Manual          *manualAssignment `json:"manual,omitempty"`
+	Job             struct {
 		ID      string                `json:"id"`
 		GCode   string                `json:"gcode"`
 		Total   int                   `json:"total"`
@@ -122,16 +123,17 @@ type progress struct {
 	Execution       *toolpath.Execution `json:"execution,omitempty"`
 }
 type pollRequest struct {
-	Session               string           `json:"session"`
-	Capabilities          []string         `json:"capabilities"`
-	ControllerSettings    *driver.Settings `json:"controller_settings,omitempty"`
-	SettingsReadAt        *time.Time       `json:"settings_read_at,omitempty"`
-	SettingsError         string           `json:"settings_error,omitempty"`
-	ControllerState       string           `json:"controller_state,omitempty"`
-	ControllerStatusFresh bool             `json:"controller_status_fresh,omitempty"`
-	ManualLease           string           `json:"manual_lease,omitempty"`
-	ManualState           string           `json:"manual_state,omitempty"`
-	ManualError           string           `json:"manual_error,omitempty"`
+	Session                    string           `json:"session"`
+	Capabilities               []string         `json:"capabilities"`
+	ControllerSettings         *driver.Settings `json:"controller_settings,omitempty"`
+	SettingsReadAt             *time.Time       `json:"settings_read_at,omitempty"`
+	SettingsError              string           `json:"settings_error,omitempty"`
+	ControllerState            string           `json:"controller_state,omitempty"`
+	ControllerStatusFresh      bool             `json:"controller_status_fresh,omitempty"`
+	ControllerParserResetFresh bool             `json:"controller_parser_reset_fresh,omitempty"`
+	ManualLease                string           `json:"manual_lease,omitempty"`
+	ManualState                string           `json:"manual_state,omitempty"`
+	ManualError                string           `json:"manual_error,omitempty"`
 	*progress
 }
 
@@ -372,6 +374,30 @@ func run(ctx context.Context, serverURL, key, id string, connect Connector, regi
 		}
 		switch assignment.Command {
 		case "idle":
+			if assignment.ReadParserReset {
+				if registration != nil {
+					return errors.New("worker: parser reset recovery is unsupported by the registered adapter")
+				}
+				conn, err := connect(ctx)
+				if err == nil && conn == nil {
+					err = errors.New("connector returned nil connection")
+				}
+				if err == nil {
+					var status driver.StatusReport
+					status, err = driver.ResetParser(ctx, conn, 5*time.Second)
+					_ = conn.Close()
+					if err == nil {
+						report.setParserResetFresh(status.State)
+					}
+				}
+				if err != nil {
+					options.Logf("worker %s: controller parser reset remains unconfirmed: %v", id, err)
+					if err := wait(ctx, pollInterval); err != nil {
+						return err
+					}
+				}
+				continue
+			}
 			if assignment.ReadStatus && registration == nil {
 				report.probeStatus(ctx, connect)
 				if ctx.Err() != nil {

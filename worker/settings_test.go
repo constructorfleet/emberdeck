@@ -21,14 +21,72 @@ const profileSnapshot = `{"$30":1000,"$31":0,"$32":1}`
 
 func TestControllerFreshStatusIsReportedOnce(t *testing.T) {
 	var report controllerReport
-	report.setFreshControllerState("Idle")
+	report.setParserResetFresh("Idle")
 	first := report.poll("session", nil)
-	if first.ControllerState != "Idle" || !first.ControllerStatusFresh {
-		t.Fatalf("fresh status poll = %#v; want fresh Idle", first)
+	if first.ControllerState != "Idle" || !first.ControllerStatusFresh || !first.ControllerParserResetFresh {
+		t.Fatalf("fresh reset status poll = %#v; want parser-reset-confirmed Idle", first)
 	}
 	second := report.poll("session", nil)
-	if second.ControllerStatusFresh {
-		t.Fatalf("fresh status marker was repeated: %#v", second)
+	if second.ControllerStatusFresh || second.ControllerParserResetFresh {
+		t.Fatalf("fresh reset markers were repeated: %#v", second)
+	}
+}
+
+func TestWorkerPerformsAndReportsRequestedParserReset(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var polls int
+	secondReport := make(chan pollRequest, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var report pollRequest
+		if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
+			t.Errorf("decode poll: %v", err)
+			return
+		}
+		polls++
+		if polls == 1 {
+			io.WriteString(w, `{"command":"idle","read_parser_reset":true}`)
+			return
+		}
+		secondReport <- report
+		io.WriteString(w, `{"command":"idle"}`)
+		cancel()
+	}))
+	defer server.Close()
+	wire := make(chan byte, 2)
+	connect := func(context.Context) (io.ReadWriteCloser, error) {
+		client, machine := net.Pipe()
+		go func() {
+			defer machine.Close()
+			r := bufio.NewReader(machine)
+			b, _ := r.ReadByte()
+			wire <- b
+			io.WriteString(machine, "Grbl 1.1h ['$' for help]\r\n")
+			b, _ = r.ReadByte()
+			wire <- b
+			io.WriteString(machine, "<Alarm|MPos:0,0,0>\r\n")
+		}()
+		return client, nil
+	}
+	done := make(chan error, 1)
+	go func() { done <- RunWithOptions(ctx, server.URL, "key", "laser", connect, fastOptions(nil)) }()
+	select {
+	case report := <-secondReport:
+		if !report.ControllerStatusFresh || !report.ControllerParserResetFresh || report.ControllerState != "Alarm" {
+			t.Fatalf("reset proof poll = %#v; want fresh Alarm parser-reset confirmation", report)
+		}
+	case <-ctx.Done():
+		t.Fatal("worker did not report parser reset confirmation")
+	}
+	if got := <-wire; got != 0x18 {
+		t.Fatalf("first controller byte = 0x%02x; want Ctrl-X", got)
+	}
+	if got := <-wire; got != '?' {
+		t.Fatalf("post-reset query = 0x%02x; want ?", got)
+	}
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("worker exit = %v; want context cancellation", err)
 	}
 }
 

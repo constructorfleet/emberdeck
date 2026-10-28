@@ -106,7 +106,7 @@ func TestJogSendsBoundedIncrementalCommandAndCancelsOnDeadline(t *testing.T) {
 	}
 }
 
-func TestJogShortCommandWriteCancelsAndConfirmsIdle(t *testing.T) {
+func TestJogShortCommandWriteResetsParserAndConfirmsTerminalState(t *testing.T) {
 	rawClient, machine := net.Pipe()
 	client := &partialWriteConn{Conn: rawClient, prefix: "$J=", count: 3}
 	defer client.Close()
@@ -125,19 +125,20 @@ func TestJogShortCommandWriteCancelsAndConfirmsIdle(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			readByte() // partial $J= command bytes
 		}
-		if readByte() != 0x85 {
+		if readByte() != 0x18 {
 			return
 		}
+		io.WriteString(machine, "Grbl 1.1h ['$' for help]\r\n")
 		readByte()
-		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+		io.WriteString(machine, "<Alarm|MPos:0,0,0>\r\n")
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	err := Jog(ctx, client, JogRequest{Axis: "X", DistanceMM: 5, FeedMMMin: 300, Confirmed: true})
-	if err == nil || !strings.Contains(err.Error(), "short write") {
-		t.Fatalf("partial jog write error = %v; want short-write failure after stop confirmation", err)
+	if err == nil || !strings.Contains(err.Error(), "parser reset cleared") || !strings.Contains(err.Error(), "re-home") {
+		t.Fatalf("partial jog write error = %v; want confirmed parser reset and re-home warning", err)
 	}
-	want := []string{"?", "M5\n", "?", "$", "J", "=", "\x85", "?"}
+	want := []string{"?", "M5\n", "?", "$", "J", "=", "\x18", "?"}
 	for i, expected := range want {
 		if got := <-wire; got != expected {
 			t.Fatalf("wire command %d = %q; want %q", i+1, got, expected)
@@ -464,7 +465,7 @@ func TestManualFrameWaitsForEveryGCodeAcknowledgement(t *testing.T) {
 	}
 }
 
-func TestManualFrameShortWriteFeedsHoldAndConfirmsStopped(t *testing.T) {
+func TestManualFrameShortWriteResetsParserAndConfirmsTerminalState(t *testing.T) {
 	rawClient, machine := net.Pipe()
 	client := &partialWriteConn{Conn: rawClient, prefix: "G90 G21\n", count: 3}
 	defer client.Close()
@@ -483,22 +484,84 @@ func TestManualFrameShortWriteFeedsHoldAndConfirmsStopped(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			readByte()
 		}
-		if readByte() != '!' {
+		if readByte() != 0x18 {
 			return
 		}
+		io.WriteString(machine, "Grbl 1.1h ['$' for help]\r\n")
 		readByte()
-		io.WriteString(machine, "<Hold:0|MPos:0,0,0>\r\n")
+		io.WriteString(machine, "<Alarm|MPos:0,0,0>\r\n")
 	}()
 	bounds := toolpath.Bounds{Min: toolpath.Point{X: 0, Y: 0}, Max: toolpath.Point{X: 2, Y: 2}}
 	err := ManualCommand(context.Background(), client, ManualCommandRequest{Action: "frame", Confirmed: true, Bounds: bounds})
-	if err == nil || !strings.Contains(err.Error(), "short write") {
-		t.Fatalf("partial frame write error = %v; want short-write failure after feed-hold confirmation", err)
+	if err == nil || !strings.Contains(err.Error(), "parser reset cleared") || !strings.Contains(err.Error(), "re-home") {
+		t.Fatalf("partial frame write error = %v; want confirmed parser reset and re-home warning", err)
 	}
-	want := []string{"?", "M5\n", "?", "G", "9", "0", "!", "?"}
+	want := []string{"?", "M5\n", "?", "G", "9", "0", "\x18", "?"}
 	for i, expected := range want {
 		if got := <-wire; got != expected {
 			t.Fatalf("wire command %d = %q; want %q", i+1, got, expected)
 		}
+	}
+}
+
+func TestSetZeroShortWriteResetsParserBeforeAnyLaterCommand(t *testing.T) {
+	rawClient, machine := net.Pipe()
+	client := &partialWriteConn{Conn: rawClient, prefix: "G10", count: 3}
+	defer client.Close()
+	defer machine.Close()
+	wire := make(chan string, 8)
+	go func() {
+		r := bufio.NewReader(machine)
+		readByte := func() byte { b, _ := r.ReadByte(); wire <- string([]byte{b}); return b }
+		readByte()
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+		for i := 0; i < 3; i++ {
+			readByte()
+		}
+		if readByte() != 0x18 {
+			return
+		}
+		io.WriteString(machine, "Grbl 1.1h ['$' for help]\r\n")
+		readByte()
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+	}()
+	err := ManualCommand(context.Background(), client, ManualCommandRequest{Action: "set_zero", Confirmed: true})
+	if err == nil || !strings.Contains(err.Error(), "parser reset cleared") {
+		t.Fatalf("partial zero write error = %v; want confirmed parser reset", err)
+	}
+	want := []string{"?", "G", "1", "0", "\x18", "?"}
+	for i, expected := range want {
+		if got := <-wire; got != expected {
+			t.Fatalf("wire command %d = %q; want %q", i+1, got, expected)
+		}
+	}
+	// No newline or additional G-code is sent after the partial G10 prefix. The
+	// soft reset is the only operation that can clear that prefix in GRBL.
+}
+
+func TestResetParserRequiresRestartBannerAndTerminalStatus(t *testing.T) {
+	client, machine := net.Pipe()
+	defer client.Close()
+	defer machine.Close()
+	wire := make(chan string, 2)
+	go func() {
+		r := bufio.NewReader(machine)
+		b, _ := r.ReadByte()
+		wire <- string([]byte{b})
+		io.WriteString(machine, "Grbl 1.1h ['$' for help]\r\n")
+		b, _ = r.ReadByte()
+		wire <- string([]byte{b})
+		io.WriteString(machine, "<Alarm|MPos:0,0,0>\r\n")
+	}()
+	status, err := ResetParser(context.Background(), client, time.Second)
+	if err != nil || status.State != "Alarm" {
+		t.Fatalf("ResetParser = %#v, %v; want confirmed Alarm", status, err)
+	}
+	if got := <-wire; got != "\x18" {
+		t.Fatalf("reset wire byte = %q; want Ctrl-X", got)
+	}
+	if got := <-wire; got != "?" {
+		t.Fatalf("reset status query = %q; want ?", got)
 	}
 }
 

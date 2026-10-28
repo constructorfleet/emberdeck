@@ -91,6 +91,9 @@ func Jog(ctx context.Context, conn io.ReadWriteCloser, request JogRequest) error
 		}
 		return err
 	}
+	resetAfterAmbiguousWrite := func(cause error) error {
+		return resetManualParser(write, lines, readErrors, cause)
+	}
 	stopJog := func(cause error) error {
 		if err := write("\x85"); err != nil {
 			return fmt.Errorf("%w; driver: jog stop was not confirmed: could not send cancel: %v", cause, err)
@@ -172,7 +175,7 @@ func Jog(ctx context.Context, conn io.ReadWriteCloser, request JogRequest) error
 		return fmt.Errorf("driver: jogging requires an Idle controller; got %s", status.State)
 	}
 	if err := write("M5\n"); err != nil {
-		return fmt.Errorf("driver: turn laser off before jog: %w", err)
+		return resetAfterAmbiguousWrite(fmt.Errorf("driver: turn laser off before jog: %w", err))
 	}
 	for {
 		line, err := awaitLine(manualResponse)
@@ -198,7 +201,7 @@ func Jog(ctx context.Context, conn io.ReadWriteCloser, request JogRequest) error
 	}
 	command := fmt.Sprintf("$J=G91 G21 %s%s F%s\n", request.Axis, strconv.FormatFloat(request.DistanceMM, 'f', -1, 64), strconv.FormatFloat(request.FeedMMMin, 'f', -1, 64))
 	if err := write(command); err != nil {
-		return stopJog(fmt.Errorf("driver: send jog: %w", err))
+		return resetAfterAmbiguousWrite(fmt.Errorf("driver: send jog: %w", err))
 	}
 	acked := false
 	statusTicker := time.NewTicker(manualPoll)
@@ -311,6 +314,9 @@ func ManualCommand(ctx context.Context, conn io.ReadWriteCloser, request ManualC
 		}
 		return e
 	}
+	resetAfterAmbiguousWrite := func(cause error) error {
+		return resetManualParser(write, lines, readErrors, cause)
+	}
 	read := func() (string, error) {
 		select {
 		case line := <-lines:
@@ -348,7 +354,7 @@ func ManualCommand(ctx context.Context, conn io.ReadWriteCloser, request ManualC
 	}
 	if moving {
 		if e = write("M5\n"); e != nil {
-			return e
+			return resetAfterAmbiguousWrite(e)
 		}
 		if e = awaitManualAck(read); e != nil {
 			return e
@@ -363,10 +369,7 @@ func ManualCommand(ctx context.Context, conn io.ReadWriteCloser, request ManualC
 	}
 	motionSent := moving
 	if e = write(command); e != nil {
-		if motionSent {
-			return stopManualMotion(request.Action, write, lines, readErrors, e)
-		}
-		return e
+		return resetAfterAmbiguousWrite(e)
 	}
 	ackCount := strings.Count(command, "\n")
 	if e = awaitManualAcks(read, ackCount); e != nil {
@@ -403,6 +406,51 @@ func ManualCommand(ctx context.Context, conn io.ReadWriteCloser, request ManualC
 		}
 	}
 	return nil
+}
+
+// resetManualParser handles a G-code line whose write may have delivered only
+// a prefix. Realtime stop and feed-hold leave GRBL's line parser buffer intact,
+// so only a confirmed soft reset is safe before the controller is reused.
+func resetManualParser(write func(string) error, lines <-chan string, readErrors <-chan error, cause error) error {
+	unconfirmed := func(reason string) error {
+		return fmt.Errorf("%w; driver: manual command parser reset was not confirmed: %s; inspect or restart the controller before releasing the lease", cause, reason)
+	}
+	if err := write("\x18"); err != nil {
+		return unconfirmed(fmt.Sprintf("could not send Ctrl-X: %v", err))
+	}
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	bannerSeen := false
+	for !bannerSeen {
+		select {
+		case line := <-lines:
+			bannerSeen = strings.HasPrefix(line, "Grbl ")
+		case err := <-readErrors:
+			return unconfirmed(fmt.Sprintf("controller read failed while waiting for reset banner: %v", err))
+		case <-deadline.C:
+			return unconfirmed("reset banner did not arrive within 2 seconds")
+		}
+	}
+	if err := write("?"); err != nil {
+		return unconfirmed(fmt.Sprintf("could not query reset state: %v", err))
+	}
+	for {
+		select {
+		case line := <-lines:
+			status, err := ParseStatusReport(line)
+			if err != nil {
+				continue
+			}
+			if status.State != "Alarm" && status.State != "Idle" {
+				continue
+			}
+			return fmt.Errorf("%w; driver: parser reset cleared the partial command; controller state is %s; position may be lost; re-home before further motion", cause, status.State)
+		case err := <-readErrors:
+			return unconfirmed(fmt.Sprintf("controller read failed while confirming reset state: %v", err))
+		case <-deadline.C:
+			return unconfirmed("terminal Idle or Alarm status did not arrive within 2 seconds")
+		}
+	}
 }
 
 // stopManualMotion uses the controller-specific stop behavior and waits for a

@@ -284,8 +284,12 @@ job G-code is not included.
 none exists. `DELETE /drivers/{id}/manual` requires `{"confirmed":true}`. A
 queued assignment is released immediately; a worker-owned assignment enters
 `canceling` and must report completion before the lease clears. An interrupted
-assignment requires a fresh Idle report before release. Manual control never
-starts automatically after a worker reconnects.
+assignment requires a fresh Idle report before release. If GRBL's parser reset
+cannot be confirmed after an ambiguous partial command write, a durable driver
+quarantine blocks job starts, manual assignments, and lease release across
+server restarts. The worker retries a soft reset and clears quarantine only
+after the GRBL restart banner and a terminal Idle or Alarm status are confirmed.
+Manual control never starts automatically after a worker reconnects.
 
 An administrator can configure a driver's optional HTTP
 camera source with `PUT /drivers/{id}/camera` and

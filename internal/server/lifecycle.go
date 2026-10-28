@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/ConstructorFleet/emberdeck/driver"
@@ -19,6 +21,27 @@ import (
 const driverTTL = 10 * time.Second
 
 var driverName = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+
+func (s *Server) updateParserQuarantine(id, reason string) error {
+	next := make(map[string]string, len(s.parserQuarantine)+1)
+	for key, value := range s.parserQuarantine {
+		next[key] = value
+	}
+	if reason == "" {
+		delete(next, id)
+	} else {
+		next[id] = reason
+	}
+	published, err := durableJSON(filepath.Join(s.dir, "parser-quarantine.json"), next)
+	if published && err != nil {
+		s.failStorage(err)
+	}
+	if err != nil {
+		return err
+	}
+	s.parserQuarantine = next
+	return nil
+}
 
 // Driver describes an online worker. Sessions prevent duplicate worker ownership.
 type Driver struct {
@@ -212,7 +235,15 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d, ok := s.drivers[in.DriverID]
-	if !ok || d.Busy {
+	if !ok {
+		fail(w, 409, "driver is offline or busy")
+		return
+	}
+	if s.parserQuarantine[d.ID] != "" {
+		fail(w, http.StatusConflict, "controller parser reset is unconfirmed; worker recovery or physical controller inspection is required")
+		return
+	}
+	if d.Busy {
 		fail(w, 409, "driver is offline or busy")
 		return
 	}
@@ -344,17 +375,18 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 
 // pollReport is one worker poll: session metadata plus optional job progress.
 type pollReport struct {
-	Capabilities          []string            `json:"capabilities"`
-	ControllerState       string              `json:"controller_state"`
-	ControllerStatusFresh bool                `json:"controller_status_fresh,omitempty"`
-	Session               string              `json:"session"`
-	JobID                 string              `json:"job_id"`
-	Lease                 string              `json:"lease"`
-	State                 string              `json:"state"`
-	Acked                 int                 `json:"acked"`
-	Total                 int                 `json:"total"`
-	Error                 string              `json:"error"`
-	Execution             *toolpath.Execution `json:"execution"`
+	Capabilities               []string            `json:"capabilities"`
+	ControllerState            string              `json:"controller_state"`
+	ControllerStatusFresh      bool                `json:"controller_status_fresh,omitempty"`
+	ControllerParserResetFresh bool                `json:"controller_parser_reset_fresh,omitempty"`
+	Session                    string              `json:"session"`
+	JobID                      string              `json:"job_id"`
+	Lease                      string              `json:"lease"`
+	State                      string              `json:"state"`
+	Acked                      int                 `json:"acked"`
+	Total                      int                 `json:"total"`
+	Error                      string              `json:"error"`
+	Execution                  *toolpath.Execution `json:"execution"`
 	// Controller settings read with `$$` (see controller_settings.go).
 	ControllerSettings *driver.Settings `json:"controller_settings"`
 	SettingsReadAt     *time.Time       `json:"settings_read_at"`
@@ -465,6 +497,24 @@ func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCa
 		return nil, false, false
 	}
 	manual := s.manualControls[id]
+	if in.ControllerParserResetFresh {
+		if !in.ControllerStatusFresh || (in.ControllerState != "Idle" && in.ControllerState != "Alarm") {
+			fail(w, http.StatusBadRequest, "parser reset confirmation requires a fresh terminal controller status")
+			return nil, false, false
+		}
+		if _, quarantined := s.parserQuarantine[id]; !quarantined {
+			fail(w, http.StatusConflict, "driver has no pending parser reset quarantine")
+			return nil, false, false
+		}
+		if err := s.updateParserQuarantine(id, ""); err != nil {
+			fail(w, http.StatusInternalServerError, "could not persist parser reset confirmation")
+			return nil, false, false
+		}
+		if manual != nil {
+			manual.RequireParserReset = false
+			manual.RequireFreshStatus = true
+		}
+	}
 	recordSettings(&d, in)
 	if in.Capabilities != nil {
 		if d.Busy && !sameCapabilities(d.Capabilities, in.Capabilities) {
@@ -499,7 +549,17 @@ func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCa
 				fail(w, http.StatusConflict, "manual-control cancellation was not requested")
 				return nil, false, false
 			}
-			if manualMotion(manual.Action) && in.ControllerState != "Idle" {
+			if strings.Contains(in.ManualError, "manual command parser reset was not confirmed") {
+				if err := s.updateParserQuarantine(id, in.ManualError); err != nil {
+					fail(w, http.StatusInternalServerError, "could not persist parser reset quarantine")
+					return nil, false, false
+				}
+				manual.State = manualStateInterrupted
+				manual.RequireFreshStatus = true
+				manual.RequireParserReset = true
+				d.ControllerState = ""
+				manual.Error = in.ManualError
+			} else if manualMotion(manual.Action) && in.ControllerState != "Idle" {
 				manual.State = manualStateInterrupted
 				manual.RequireFreshStatus = true
 				d.ControllerState = ""
@@ -629,6 +689,11 @@ func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCa
 		}
 		// Do not replay an assignment after a worker session changes. Keep the
 		// driver busy until the operator inspects and releases this lease.
+		return nil, false, true
+	}
+	if s.parserQuarantine[id] != "" {
+		d.Busy = true
+		s.drivers[id] = d
 		return nil, false, true
 	}
 	for _, j := range s.jobs {

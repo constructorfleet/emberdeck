@@ -59,6 +59,10 @@ func (s *Server) idleCommand(id string) map[string]any {
 	if !ok {
 		return response
 	}
+	if s.parserQuarantine[id] != "" {
+		response["read_parser_reset"] = true
+		return response
+	}
 	if manual := s.manualControls[id]; manual != nil && manual.State == manualStateInterrupted && (manual.RequireFreshStatus || d.ControllerState != "Idle") {
 		if d.statusRequested.IsZero() || time.Since(d.statusRequested) >= time.Second {
 			d.statusRequested = time.Now()
