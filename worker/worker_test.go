@@ -475,6 +475,10 @@ func TestRunStopsStreamWhenServerRequestsCancel(t *testing.T) {
 				return
 			}
 			io.WriteString(peer, "<Idle|MPos:0,0,0>\n")
+			if n, e = peer.Read(reader); e != nil || string(reader[:n]) != "$$\n" {
+				return
+			}
+			io.WriteString(peer, driver.SimulatorSettings)
 			n, e = peer.Read(reader)
 			if e != nil {
 				return
@@ -624,7 +628,19 @@ func TestRunInitialPauseSendsNoProgramUntilResumeAndReportsController(t *testing
 				return
 			}
 			io.WriteString(peer, "<Idle|MPos:0,0,0>\r\n")
-			if _, e = peer.Read(b); e != nil || string(b) != "!" {
+			settingsQuery := make([]byte, 3)
+			if _, e = io.ReadFull(peer, settingsQuery); e != nil || string(settingsQuery) != "$$\n" {
+				done <- fmt.Errorf("settings query %q: %v", settingsQuery, e)
+				return
+			}
+			io.WriteString(peer, driver.SimulatorSettings)
+			for {
+				if _, e = peer.Read(b); e != nil || string(b) != "?" {
+					break
+				}
+				io.WriteString(peer, "<Idle|MPos:0,0,0>\r\n")
+			}
+			if e != nil || string(b) != "!" {
 				done <- fmt.Errorf("feed hold %q: %v", b, e)
 				return
 			}
@@ -797,6 +813,8 @@ func TestRunReportsExternalHoldAndWaitsForExplicitResume(t *testing.T) {
 						return
 					}
 					switch line {
+					case "$$\n":
+						io.WriteString(peer, driver.SimulatorSettings)
 					case "G1 X1\n":
 						lineCount++
 						externalHoldAt = time.Now()

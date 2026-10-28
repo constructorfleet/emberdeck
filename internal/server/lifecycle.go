@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/ConstructorFleet/emberdeck/driver"
 	"github.com/ConstructorFleet/emberdeck/toolpath"
 )
 
@@ -25,6 +26,11 @@ type Driver struct {
 	Busy            bool      `json:"busy"`
 	Session         string    `json:"-"`
 	CredentialID    string    `json:"-"`
+	// Controller settings last read by the worker with `$$` (see controller_settings.go).
+	ControllerSettings *driver.Settings `json:"controller_settings,omitempty"`
+	SettingsReadAt     *time.Time       `json:"settings_read_at,omitempty"`
+	SettingsError      string           `json:"settings_error,omitempty"`
+	settingsRequested  time.Time
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -178,6 +184,10 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "driver is offline or busy")
 		return
 	}
+	if message := settingsBlock(j, d); message != "" {
+		fail(w, 409, message)
+		return
+	}
 	lease := make([]byte, 32)
 	if _, err := rand.Read(lease); err != nil {
 		fail(w, 500, "could not allocate lease")
@@ -245,7 +255,7 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if assignment == nil {
-		respond(w, 200, map[string]string{"command": "idle", "protocol": "1"})
+		respond(w, 200, s.idleCommand(id))
 		return
 	}
 	if needsProgram {
@@ -272,6 +282,10 @@ type pollReport struct {
 	Total           int                 `json:"total"`
 	Error           string              `json:"error"`
 	Execution       *toolpath.Execution `json:"execution"`
+	// Controller settings read with `$$` (see controller_settings.go).
+	ControllerSettings *driver.Settings `json:"controller_settings"`
+	SettingsReadAt     *time.Time       `json:"settings_read_at"`
+	SettingsError      string           `json:"settings_error"`
 }
 
 type pollAssignment struct {
@@ -317,6 +331,11 @@ func (s *Server) pollLocked(w http.ResponseWriter, id, credentialID string, in *
 			return nil, false, false
 		}
 	}
+	if !validSettingsReport(in) {
+		fail(w, 400, "invalid controller settings report")
+		return nil, false, false
+	}
+	recordSettings(&d, in)
 	if in.Capabilities != nil {
 		d.Capabilities = append([]string(nil), in.Capabilities...)
 	}
@@ -428,7 +447,7 @@ func (s *Server) pollLocked(w http.ResponseWriter, id, credentialID string, in *
 			// Only an assignment pickup (not a progress report for this job)
 			// carries the program; the current worker reads it from the pickup.
 			needsProgram := in.JobID != j.ID && command != "cancel"
-			return &pollAssignment{command: command, job: workerJob{Job: j.Job, Lease: j.Lease}, record: j}, needsProgram, true
+			return &pollAssignment{command: command, job: workerJob{Job: j.Job, Lease: j.Lease, ExpectedSettings: expectedSettings(j.Job)}, record: j}, needsProgram, true
 		}
 	}
 	s.drivers[id] = d

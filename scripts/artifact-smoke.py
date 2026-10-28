@@ -79,9 +79,9 @@ class FakeGRBL:
             return list(self.events)
 
     def _serve(self):
-        state = "Idle"
-        resume_queries = 0
-        resume_active = False
+        self.state = "Idle"
+        self.resume_queries = 0
+        self.resume_active = False
         try:
             with socket.socket() as listener:
                 listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -89,54 +89,67 @@ class FakeGRBL:
                 listener.listen(1)
                 listener.settimeout(10)
                 self.ready.set()
-                conn, _ = listener.accept()
-                with conn:
-                    conn.settimeout(0.2)
-                    buf = bytearray()
-                    while not self.closed.is_set():
-                        try:
-                            data = conn.recv(4096)
-                        except socket.timeout:
-                            continue
-                        if not data:
-                            break
-                        for byte in data:
-                            if byte == ord("?"):
-                                if resume_active:
-                                    resume_queries += 1
-                                    state = "Run" if resume_queries == 1 else "Idle"
-                                self.record(f"query:{state}")
-                                conn.sendall(f"<{state}|MPos:0,0,0>\r\n".encode())
-                            elif byte == ord("!"):
-                                state = "Hold:0"
-                                resume_active = False
-                                resume_queries = 0
-                                self.record("hold")
-                            elif byte == ord("~"):
-                                state = "Run"
-                                resume_active = True
-                                resume_queries = 0
-                                self.record("resume")
-                            elif byte == 0x18:
-                                self.record("reset")
-                            elif byte == 10:
-                                line = bytes(buf).decode("ascii", "replace").strip()
-                                buf.clear()
-                                if line:
-                                    self.record(f"gcode:{line}")
-                                    # GRBL's ok is only acceptance. The programmed
-                                    # motion remains in Run until the operator's
-                                    # confirmed pause/resume sequence drains it.
-                                    state = "Run"
-                                    conn.sendall(b"ok\r\n")
-                                    self.record(f"accepted:{line}")
-                            elif byte != 13:
-                                buf.append(byte)
+                # The worker may open short read-only $$ probes before the job
+                # connection; serve connections one at a time like a GRBL port.
+                while not self.closed.is_set():
+                    try:
+                        conn, _ = listener.accept()
+                    except socket.timeout:
+                        continue
+                    self._serve_connection(conn)
         except BaseException as exc:
             if not self.closed.is_set():
                 self.error = exc
         finally:
             self.ready.set()
+
+    def _serve_connection(self, conn):
+        with conn:
+            conn.settimeout(0.2)
+            buf = bytearray()
+            while not self.closed.is_set():
+                try:
+                    data = conn.recv(4096)
+                except socket.timeout:
+                    continue
+                if not data:
+                    break
+                for byte in data:
+                    if byte == ord("?"):
+                        if self.resume_active:
+                            self.resume_queries += 1
+                            self.state = "Run" if self.resume_queries == 1 else "Idle"
+                        self.record(f"query:{self.state}")
+                        conn.sendall(f"<{self.state}|MPos:0,0,0>\r\n".encode())
+                    elif byte == ord("!"):
+                        self.state = "Hold:0"
+                        self.resume_active = False
+                        self.resume_queries = 0
+                        self.record("hold")
+                    elif byte == ord("~"):
+                        self.state = "Run"
+                        self.resume_active = True
+                        self.resume_queries = 0
+                        self.record("resume")
+                    elif byte == 0x18:
+                        self.record("reset")
+                    elif byte == 10:
+                        line = bytes(buf).decode("ascii", "replace").strip()
+                        buf.clear()
+                        if line == "$$":
+                            # Read-only settings dump; it is not motion.
+                            self.record("settings")
+                            conn.sendall(b"$20=0\r\n$30=1000\r\n$31=0\r\n$32=1\r\n$130=300\r\n$131=200\r\nok\r\n")
+                        elif line:
+                            self.record(f"gcode:{line}")
+                            # GRBL's ok is only acceptance. The programmed
+                            # motion remains in Run until the operator's
+                            # confirmed pause/resume sequence drains it.
+                            self.state = "Run"
+                            conn.sendall(b"ok\r\n")
+                            self.record(f"accepted:{line}")
+                    elif byte != 13:
+                        buf.append(byte)
 
     def close(self):
         self.closed.set()
@@ -287,6 +300,9 @@ def run(binary: pathlib.Path, expected_version: str):
             if final_events != source_before:
                 raise SmokeFailure(f"source or cleanup was replayed after control: {final_events!r}")
             events = peer.snapshot()
+            first_source = events.index("gcode:G1 X12 F100")
+            if "settings" not in events[:first_source]:
+                raise SmokeFailure(f"controller settings were not read with $$ before the first program line: {events!r}")
             if events.count("hold") != 1 or events.count("resume") != 1 or "reset" in events:
                 raise SmokeFailure(f"expected exactly one hold/resume and no reset: {events!r}")
             if result.get("acked") != 1 or result.get("total") != 1 or result.get("controller_state") != "Idle":

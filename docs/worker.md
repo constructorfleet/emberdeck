@@ -25,6 +25,25 @@ command, and becomes `running` after a fresh `Run` or `Idle` following resume.
 Cancel stops the same stream and reports a canceled receipt. A worker does not
 reconnect or replay an interrupted lease.
 
+## Controller settings
+
+Every job's readiness phase reads the controller's settings with GRBL's
+read-only `$$` command after the initial `Idle` status and before the first
+program line (see [driver controller settings](driver.md#controller-settings)).
+When the assignment carries `expected_settings` (a designer-generated job's
+profile snapshot), the worker compares `$30`, `$31`, and `$32` and fails the job
+with each differing field before streaming. Uploaded jobs have no expectation;
+their settings are only reported.
+
+When an idle poll response includes `read_settings:true`, the worker opens the
+controller, sends only `$$`, and closes it again within 10 seconds. It never
+writes settings or program bytes during this probe. Every later poll carries the
+last values as `controller_settings` with `settings_read_at`, so the server can
+refuse a mismatched generated job at **Start** with 409. A failed probe clears
+those values and reports `settings_error`. If the probe sees a GRBL startup
+banner, the controller reset and work coordinates may be lost: the worker fails
+its next assigned job without connecting, then reads normally again.
+
 ## Reconnection
 
 An idle worker (one without an active lease) survives server restarts, network

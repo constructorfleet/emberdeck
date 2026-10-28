@@ -156,7 +156,9 @@ unknown states, return 400. List entries never include program bytes (`gcode`)
 or a worker `lease`; `size` is the stored program length in bytes. `GET
 /jobs/{id}` returns the same metadata plus the exact uploaded or generated
 program as `gcode`. Both include optional live `execution` telemetry and, for
-uploaded jobs, an optional `program_review` summary. No operator endpoint
+uploaded jobs, an optional `program_review` summary. The review's
+`constant_power_m3` is true when the program selects GRBL's `M3` constant laser
+power mode, which keeps output on while motion stops. No operator endpoint
 returns a lease. `GET /jobs/{id}/review` returns the selected profile's
 revision, program bounds, profile envelope, bounds status (`in_bounds`,
 `out_of_bounds`, or `unknown`), warnings, and derived path. A partial path can
@@ -204,6 +206,11 @@ separate.
 ## Dispatch and monitoring
 
 `GET /drivers` returns online workers, their last heartbeat time, and busy status.
+When the worker has read them, `controller_settings` holds the controller's
+`$20` (soft limits), `$30`/`$31` (spindle range), `$32` (laser mode), and
+`$130`/`$131` (X/Y max travel) with `settings_read_at`; a failed read is
+reported as `settings_error`. Values come from GRBL's read-only `$$` command.
+EmberDeck never writes `$` settings.
 
 `POST /jobs/{id}/start` takes `{"driver_id":"bench","confirmed":true,"bounds_override":true}`.
 For uploaded jobs, `bounds_override:true` is required when the profile review is
@@ -214,6 +221,18 @@ and confirm physical readiness. A queued job can
 start only on an online, idle worker. The server validates the complete program
 and runs all configured preflight plugins before assignment. A plugin rejection,
 error, or timeout prevents dispatch (422). No automatic queue advancement occurs.
+
+A designer-generated job also requires the selected driver's last reported
+controller settings to match its immutable profile snapshot: `$30` equals
+`max_s`, `$31` equals `min_s` (0), and `$32` is 1 for laser mode. Otherwise
+start returns 409 with each differing field, for example `$30 (maximum
+spindle): controller 255, profile 1000`, and the job stays queued. A driver
+that has not reported settings, or whose last read failed, also returns 409.
+The worker repeats the comparison against the job's snapshot before the first
+program byte and fails the job without streaming if the controller changed. The
+profile does not declare soft limits or travel, so `$20`, `$130`, and `$131` are
+reported but not compared. Uploaded jobs are not blocked by settings; the
+console warns when the driver reports `$32=0` or the program uses `M3`.
 
 `POST /jobs/{id}/pause` takes `{}`. An assigned worker must advertise
 `pause_resume`; older workers return 409 instead of receiving an unsupported
@@ -271,7 +290,15 @@ unique `session` string. Reusing a live ID with another session returns 409.
 
 An idle poll is `{"session":"random-session-id"}`. The response is either
 `{"command":"idle","protocol":"1"}` or an assignment with `command:"run"`,
-`lease`, and `job` (including `id` and `gcode`). Treat a lease as single execution
+`lease`, and `job` (including `id` and `gcode`). An idle response includes
+`read_settings:true` while the server has no settings for the driver (at most
+every 30 seconds); the worker then reads them with `$$` and reports them on the
+next poll. Every poll may carry `controller_settings` (keys `$20`, `$30`, `$31`,
+`$32`, `$130`, `$131`), `settings_read_at`, and `settings_error`. The latest
+poll replaces the server's copy, so omitting settings clears them. Boolean
+settings must be 0 or 1; invalid values return 400. A generated job's
+assignment includes `expected_settings` with its profile's `$30`, `$31`, and
+`$32`; the worker must refuse the job before streaming when they differ. Treat a lease as single execution
 authority. Never execute a completed lease again after lost responses.
 A poll that reports progress for its assigned job receives the same assignment
 shape without `gcode`. The program is sent only when a poll does not already
@@ -305,13 +332,14 @@ executables loaded at startup. See the plugin protocol for installation and limi
 ## Declared machine profiles
 
 Profiles are operator declarations stored separately from `jobs.json` in the
-durable `profiles.json` library. EmberDeck does not measure or configure a
-controller from these values. The initial designer profile supports only
+durable `profiles.json` library. EmberDeck never configures a controller from
+these values; it reads `$30`, `$31`, and `$32` and refuses to start a generated
+job when they differ (see [Dispatch and monitoring](#dispatch-and-monitoring)). The initial designer profile supports only
 `controller:"grbl-1.1"`, `units:"mm"`, `origin:"lower-left"`, and
 `laser_mode_enabled:true`. The declared work origin is the currently prepared
 GRBL work origin; EmberDeck does not home, zero, change coordinate systems, or
-write controller settings. Operators must match `max_s` with GRBL `$30`,
-`min_s:0` with `$31`, and laser mode with `$32=1` themselves. A profile must
+write controller settings. Operators must set GRBL `$30` to `max_s`, `$31` to
+0, and `$32` to 1 themselves. A profile must
 explicitly declare `min_s:0`; other values are unsupported because linear power
 percentage conversion would not match a nonzero GRBL minimum PWM. See GRBL's
 [settings reference](https://github.com/gnea/grbl/blob/master/doc/markdown/settings.md)

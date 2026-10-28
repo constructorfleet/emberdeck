@@ -882,6 +882,7 @@
       driverSelect.disabled = true;
       selectedDriver = "";
       $("#driver-status").textContent = connected ? "Start a driver worker to run programs." : "Drivers are not loaded.";
+      window.EmberDeckControllerSettings?.renderDriver($("#controller-settings"), null); // controller-settings.js
       return;
     }
     for (const driver of drivers) {
@@ -903,6 +904,7 @@
     driverSelect.disabled = !connected;
     const selected = drivers.find((driver) => driver.id === selectedDriver);
     $("#driver-status").textContent = selected ? (selected.busy ? "Driver has an active job." : `Last seen ${new Date(selected.last_seen).toLocaleTimeString()}`) : "Selected driver is disconnected.";
+    window.EmberDeckControllerSettings?.renderDriver($("#controller-settings"), selected); // controller-settings.js
   }
 
   // Row controls carry their job and action so focus can follow a control across list re-renders.
@@ -981,6 +983,7 @@
     const details = [["Job", job.name], ["Driver", driverID]];
     if (job.provenance?.profile?.name) details.push(["Profile", job.provenance.profile.name]);
     details.push(["Bounds review", needsBoundsOverride ? `${review?.bounds_status || "unknown"} · override selected` : (review?.bounds_status || "in_bounds").replace("_", " ")]);
+    details.push(...(window.EmberDeckControllerSettings?.startDetails(job, drivers.find((driver) => driver.id === driverID)) || [])); // controller-settings.js
     openActionDialog({
       eyebrow: "CONFIRM DISPATCH",
       title: `Start ${job.name}?`,
@@ -1108,6 +1111,7 @@
         label.append(checkbox, text);
         info.append(label);
       }
+      window.EmberDeckControllerSettings?.appendJobWarnings(info, job, drivers.find((driver) => driver.id === selectedDriver)); // controller-settings.js
       const active = ["running", "pausing", "paused", "resuming", "canceling"].includes(job.state);
       if (active || job.total > 0) {
         const progress = document.createElement("progress");

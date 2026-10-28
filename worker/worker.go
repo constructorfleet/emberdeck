@@ -92,9 +92,14 @@ type Connector func(context.Context) (io.ReadWriteCloser, error)
 type assignment struct {
 	Command string `json:"command"`
 	Lease   string `json:"lease"`
-	Job     struct {
+	// ReadSettings asks an idle worker to probe the controller with `$$`.
+	ReadSettings bool `json:"read_settings"`
+	Job          struct {
 		ID    string `json:"id"`
 		GCode string `json:"gcode"`
+		// ExpectedSettings is the job's profile snapshot. When present, the
+		// controller's `$$` values must match before any program byte is sent.
+		ExpectedSettings *driver.Settings `json:"expected_settings"`
 	} `json:"job"`
 }
 type progress struct {
@@ -108,8 +113,11 @@ type progress struct {
 	Execution       *toolpath.Execution `json:"execution,omitempty"`
 }
 type pollRequest struct {
-	Session      string   `json:"session"`
-	Capabilities []string `json:"capabilities"`
+	Session            string           `json:"session"`
+	Capabilities       []string         `json:"capabilities"`
+	ControllerSettings *driver.Settings `json:"controller_settings,omitempty"`
+	SettingsReadAt     *time.Time       `json:"settings_read_at,omitempty"`
+	SettingsError      string           `json:"settings_error,omitempty"`
 	*progress
 }
 
@@ -291,12 +299,13 @@ func RunWithOptions(ctx context.Context, serverURL, key, id string, connect Conn
 	completed := make(map[string]progress)
 	retry := backoff{min: options.RetryMin, max: options.RetryMax}
 	failures := 0
+	report := &controllerReport{}
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		var assignment assignment
-		err := post(ctx, client, endpoint, key, pollRequest{Session: session, Capabilities: []string{"pause_resume"}}, &assignment)
+		err := post(ctx, client, endpoint, key, report.poll(session, nil), &assignment)
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -322,6 +331,14 @@ func RunWithOptions(ctx context.Context, serverURL, key, id string, connect Conn
 		}
 		switch assignment.Command {
 		case "idle":
+			if assignment.ReadSettings {
+				report.probe(ctx, connect)
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				// Report the probe result on the next poll without waiting.
+				continue
+			}
 			if err := wait(ctx, pollInterval); err != nil {
 				return err
 			}
@@ -331,7 +348,7 @@ func RunWithOptions(ctx context.Context, serverURL, key, id string, connect Conn
 			}
 			terminal := progress{JobID: assignment.Job.ID, Lease: assignment.Lease, State: "canceled"}
 			completed[assignment.Lease] = terminal
-			if err := postTerminal(ctx, client, endpoint, key, session, terminal); err != nil {
+			if err := postTerminal(ctx, client, endpoint, key, report.poll(session, &terminal)); err != nil {
 				return err
 			}
 		case "run", "pause", "resume":
@@ -339,7 +356,7 @@ func RunWithOptions(ctx context.Context, serverURL, key, id string, connect Conn
 				return errors.New("worker: server returned incomplete assignment")
 			}
 			if terminal, ok := completed[assignment.Lease]; ok {
-				if err := postTerminal(ctx, client, endpoint, key, session, terminal); err != nil {
+				if err := postTerminal(ctx, client, endpoint, key, report.poll(session, &terminal)); err != nil {
 					return err
 				}
 				if err := wait(ctx, pollInterval); err != nil {
@@ -347,12 +364,18 @@ func RunWithOptions(ctx context.Context, serverURL, key, id string, connect Conn
 				}
 				continue
 			}
-			terminal, err := runJob(ctx, client, endpoint, key, session, assignment, connect)
-			if err != nil && terminal.State == "" {
-				return err
+			var terminal progress
+			if reset := report.takeReset(); reset != "" {
+				// A settings probe saw a reset banner; refuse without reopening.
+				terminal = progress{JobID: assignment.Job.ID, Lease: assignment.Lease, State: "failed", Error: reset}
+			} else {
+				terminal, err = runJob(ctx, client, endpoint, key, session, assignment, connect, report)
+				if err != nil && terminal.State == "" {
+					return err
+				}
 			}
 			completed[assignment.Lease] = terminal
-			if postErr := postTerminal(ctx, client, endpoint, key, session, terminal); postErr != nil {
+			if postErr := postTerminal(ctx, client, endpoint, key, report.poll(session, &terminal)); postErr != nil {
 				return postErr
 			}
 			if ctx.Err() != nil {
@@ -399,7 +422,7 @@ func validArguments(ctx context.Context, serverURL, key, id string, connect Conn
 	return nil
 }
 
-func runJob(ctx context.Context, client *http.Client, endpoint, key, session string, a assignment, connect Connector) (progress, error) {
+func runJob(ctx context.Context, client *http.Client, endpoint, key, session string, a assignment, connect Connector, report *controllerReport) (progress, error) {
 	total, validationErr := driver.Validate(a.Job.GCode)
 	if validationErr != nil {
 		return progress{JobID: a.Job.ID, Lease: a.Lease, State: "failed", Error: validationErr.Error()}, nil
@@ -426,7 +449,14 @@ func runJob(ctx context.Context, client *http.Client, endpoint, key, session str
 	totalCount.Store(int64(total))
 	streamDone := make(chan error, 1)
 	go func() {
-		streamDone <- driver.StreamObserved(streamCtx, conn, a.Job.GCode, commands, func(x, n int) { totalCount.Store(int64(n)); acked.Store(int64(x)) }, live.observed, live.observedStatus, live.applied)
+		streamDone <- driver.StreamWithOptions(streamCtx, conn, a.Job.GCode, driver.Options{
+			Commands:   commands,
+			OnProgress: func(x, n int) { totalCount.Store(int64(n)); acked.Store(int64(x)) },
+			OnState:    live.observed,
+			OnStatus:   live.observedStatus,
+			OnApplied:  live.applied,
+			OnSettings: func(settings driver.Settings) error { return report.verify(settings, a.Job.ExpectedSettings) },
+		})
 	}()
 	ticker := time.NewTicker(reportInterval)
 	defer ticker.Stop()
@@ -461,7 +491,7 @@ func runJob(ctx context.Context, client *http.Client, endpoint, key, session str
 			p := live.reported(int(acked.Load()), int(totalCount.Load()))
 			p.JobID, p.Lease = a.Job.ID, a.Lease
 			var response assignment
-			err := post(ctx, client, endpoint, key, pollRequest{Session: session, Capabilities: []string{"pause_resume"}, progress: &p}, &response)
+			err := post(ctx, client, endpoint, key, report.poll(session, &p), &response)
 			if err != nil {
 				cancel()
 				<-streamDone
@@ -517,13 +547,13 @@ func runJob(ctx context.Context, client *http.Client, endpoint, key, session str
 	}
 }
 
-func postTerminal(ctx context.Context, client *http.Client, endpoint, key, session string, p progress) error {
+func postTerminal(ctx context.Context, client *http.Client, endpoint, key string, request pollRequest) error {
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		var response assignment
-		err := post(ctx, client, endpoint, key, pollRequest{Session: session, Capabilities: []string{"pause_resume"}, progress: &p}, &response)
+		err := post(ctx, client, endpoint, key, request, &response)
 		if err == nil {
 			return nil
 		}

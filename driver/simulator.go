@@ -20,6 +20,11 @@ type Simulator struct {
 	once   sync.Once
 }
 
+// SimulatorSettings is the simulator's `$$` reply: laser mode on ($32=1),
+// spindle range 0-1000 ($31/$30), soft limits off ($20=0), and a 300 x 200 mm
+// travel ($130/$131).
+const SimulatorSettings = "$0=10\r\n$1=25\r\n$20=0\r\n$21=0\r\n$22=0\r\n$30=1000\r\n$31=0\r\n$32=1\r\n$100=80.000\r\n$101=80.000\r\n$110=6000.000\r\n$111=6000.000\r\n$130=300.000\r\n$131=200.000\r\nok\r\n"
+
 // NewSimulator creates an in-memory controller connection implementing the
 // exact io.ReadWriteCloser boundary consumed by Stream.
 func NewSimulator() io.ReadWriteCloser {
@@ -97,6 +102,13 @@ func (s *Simulator) serve() {
 			lineBuffer.Reset()
 			if line == "" {
 				if !write("ok\r\n") {
+					return
+				}
+				continue
+			}
+			if line == "$$" {
+				// Read-only settings dump for a laser-mode GRBL 1.1 controller.
+				if !write(SimulatorSettings) {
 					return
 				}
 				continue

@@ -102,17 +102,42 @@ on one page, use **Older →** and **← Newer** below the list; the range betwe
 them shows which programs are on screen. Program text is loaded only when you
 select **View**, so a large library stays quick to refresh.
 
+## Controller settings check
+
+Each driver's worker reads the controller's settings with GRBL's read-only `$$`
+command: once while idle when the server has none, and again before every job,
+after the controller reports `Idle` and before the first program line.
+EmberDeck never writes `$` settings. Below **Connected driver**, the console
+shows the selected driver's last reading: `$30`/`$31` (spindle range), `$32`
+(laser mode), `$20` (soft limits), and `$130`/`$131` (X/Y max travel), or why
+the read failed.
+
+A job generated from a profile can start only when the controller's `$30`,
+`$31`, and `$32` match that job's profile snapshot. Each differing value is
+listed on the job row, and **Start** is refused with the same field-by-field
+message; the job stays queued. Change the controller with your usual GRBL tool,
+or generate the job from a profile that matches. If the controller changes after
+**Start**, the worker fails the job before sending program lines.
+
+Uploaded programs are not blocked. Their row warns when the selected driver
+reports `$32=0` (laser mode off) or the program uses `M3` (constant power). In
+both cases the laser stays at its commanded power while motion stops, including
+during a feed hold, so a pause does not turn it off. Soft limits and travel are
+shown for reference only; profiles do not declare them.
+
+![Driver controller settings read with $$, a generated job refused for a $30 mismatch, and an uploaded M3 program warning](assets/screenshots/operator-console-controller-settings.png)
+
 ## Declare a machine profile and design a rectangle
 
 Connect with the server API key, then create a profile from the machine's
 documented settings and declared work-area dimensions. This profile is an
-operator declaration; EmberDeck does not query, home, zero, or write controller
-settings. Confirm that `$30` matches the declared maximum spindle value, `$31=0`,
-and `$32=1`, and prepare the lower-left origin of the active GRBL work coordinate
-system before using the profile.
-Selecting a profile does not verify the controller or driver assigned to the
-job. Before **Start**, confirm that the selected dispatch driver's controller
-has the matching `$30`, `$31`, and `$32` settings and prepared work coordinates.
+operator declaration; EmberDeck does not home, zero, or write controller
+settings. Set `$30` to the declared maximum spindle value, `$31=0`, and `$32=1`,
+and prepare the lower-left origin of the active GRBL work coordinate system
+before using the profile. **Start** refuses a generated job unless the selected
+driver's controller reports the same `$30`, `$31`, and `$32` (see
+[Controller settings check](#controller-settings-check)). Work coordinates are
+not verified.
 See the official [GRBL settings reference](https://github.com/gnea/grbl/blob/master/doc/markdown/settings.md)
 and [laser mode reference](https://github.com/gnea/grbl/blob/master/doc/markdown/laser_mode.md).
 The commanded S percentage is not a measurement of optical output.

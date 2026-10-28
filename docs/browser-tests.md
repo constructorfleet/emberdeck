@@ -35,6 +35,13 @@ keeps it editable and unassigned, assigns its operation, saves/reopens the
 project, and generates a job without dispatch until explicit confirmation.
 Tests use the rendered UI and real HTTP API rather than mocking storage.
 
+The controller-settings spec checks that the console shows the simulator's
+`$$` settings for the selected driver. It generates a job from a profile whose
+`max_s` differs from the simulator's `$30`, verifies the row lists the
+mismatch, and verifies **Start** is refused with 409 and the field-by-field
+message while the job stays queued. It also checks the `M3` constant-power
+warning on an uploaded program.
+
 ## Run locally
 
 Install the Python documentation dependency, pinned Node dependencies, and

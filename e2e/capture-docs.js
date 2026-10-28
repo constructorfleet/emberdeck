@@ -211,6 +211,28 @@ async function main() {
     await designerRow.getByRole('button', { name: /Delete Panel outline\.gcode/ }).click();
     await expect(designerRow).toHaveCount(0);
 
+    // Controller settings read with $$, a refused profile mismatch, and an M3 warning.
+    const docsApi = (method, path, body) => page.evaluate(async ({ method, path, body }) => {
+      const response = await fetch(path, { method, headers: { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+      if (!response.ok) throw new Error(`${method} ${path}: ${response.status} ${await response.text()}`);
+      return response.status === 204 ? null : response.json();
+    }, { method, path, body });
+    const mismatchProfile = await docsApi('POST', '/api/v1/profiles', { schema_version: 1, name: 'Mismatched 8-bit PWM', controller: 'grbl-1.1', units: 'mm', origin: 'lower-left', width_mm: 300, height_mm: 200, min_s: 0, max_s: 255, min_feed_mm_min: 1, max_feed_mm_min: 6000, max_power_percent: 100, laser_mode_enabled: true });
+    const mismatchProject = await docsApi('POST', '/api/v1/projects', { schema_version: 1, name: 'Settings mismatch', profile_id: mismatchProfile.id, profile_revision: 1, rectangle: { x_mm: 10, y_mm: 10, width_mm: 20, height_mm: 20 }, operation: { type: 'vector-engrave', feed_mm_min: 600, power_percent: 10 } });
+    const mismatchJob = await docsApi('POST', `/api/v1/projects/${mismatchProject.id}/generate`, { revision: 1 });
+    const constantJob = await docsApi('POST', '/api/v1/jobs', { name: 'constant-power-m3.gcode', gcode: 'G21\nG90\nG0 X10 Y10\nM3 S300\nG1 X40 Y10 F600\nM5\n' });
+    await page.locator('#refresh').click();
+    await expect(page.locator('#controller-settings')).toContainText('$32=1 (laser mode)');
+    await expect(page.locator('#job-list li').filter({ hasText: 'Settings mismatch.gcode' })).toContainText('Start will be refused');
+    await expect(page.locator('#job-list li').filter({ hasText: 'constant-power-m3.gcode' })).toContainText('Program uses M3 constant power');
+    await captureElement(page, '.jobs-panel', 'operator-console-controller-settings.png');
+    await docsApi('DELETE', `/api/v1/jobs/${mismatchJob.id}`);
+    await docsApi('DELETE', `/api/v1/jobs/${constantJob.id}`);
+    await docsApi('DELETE', `/api/v1/projects/${mismatchProject.id}`, { revision: 1 });
+    await docsApi('DELETE', `/api/v1/profiles/${mismatchProfile.id}`, { revision: 1 });
+    await page.locator('#refresh').click();
+    await expect(page.locator('#job-list li').filter({ hasText: 'constant-power-m3.gcode' })).toHaveCount(0);
+
     const lines = 1000;
     const name = 'documented-controller-demo.gcode';
     const program = `G21\nG90\nG0 X0 Y0\nM4 S100\n${Array.from({ length: lines }, (_, i) => `G1 X${i + 1} Y${Math.floor(i / 50)} F300`).join('\n')}\nM5\n`;

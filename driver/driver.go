@@ -55,6 +55,12 @@ type Options struct {
 	OnApplied func(Command)
 	// Timeouts overrides the default controller bounds.
 	Timeouts Timeouts
+	// OnSettings, when set, makes the readiness phase read the controller's
+	// settings with the read-only `$$` command after the initial Idle status
+	// and before any program byte. It receives the parsed settings; a non-nil
+	// error refuses the job before streaming. The `$$` reply must complete
+	// within the Response timeout.
+	OnSettings func(Settings) error
 }
 
 // Command controls a stream while it is running.
@@ -174,6 +180,10 @@ func StreamWithOptions(ctx context.Context, conn io.ReadWriteCloser, program str
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	phase := "initial"
+	// preStream covers readiness: the initial status and optional settings read.
+	preStream := func() bool { return phase == "initial" || phase == "settings" }
+	var settings settingsParser
+	settingsDeadline := time.Time{}
 	index, sentIndex := 0, -1
 	pending, cleanupPending := false, false
 	gate, pauseSent, pauseConfirmed, resumeRequested, resuming := false, false, false, false, false
@@ -244,6 +254,23 @@ func StreamWithOptions(ctx context.Context, conn io.ReadWriteCloser, program str
 		}
 		return nil
 	}
+	enterStream := func() error {
+		phase = "stream"
+		select {
+		case cmd, ok := <-commands:
+			if ok && cmd == Pause {
+				gate = true
+			}
+			if !ok {
+				commands = nil
+			}
+		default:
+		}
+		if gate {
+			return applyPause()
+		}
+		return nil
+	}
 	if err := sendQuery("initial"); err != nil {
 		return fmt.Errorf("driver: query initial status: %w", err)
 	}
@@ -262,7 +289,7 @@ func StreamWithOptions(ctx context.Context, conn io.ReadWriteCloser, program str
 				}
 				switch cmd {
 				case Pause:
-					if phase == "initial" {
+					if preStream() {
 						gate, pauseSent, pauseConfirmed, resumeRequested, resuming = true, false, false, false, false
 						controlDeadline = time.Now().Add(timeouts.Response)
 					} else {
@@ -283,7 +310,7 @@ func StreamWithOptions(ctx context.Context, conn io.ReadWriteCloser, program str
 			}
 		}
 	controlsDrained:
-		if gate && phase != "initial" && !pauseSent {
+		if gate && !preStream() && !pauseSent {
 			if err := applyPause(); err != nil {
 				return err
 			}
@@ -309,8 +336,11 @@ func StreamWithOptions(ctx context.Context, conn io.ReadWriteCloser, program str
 		if pending && !gate && time.Now().After(ackDeadline) {
 			return fmt.Errorf("driver: response timeout")
 		}
-		if (gate || phase == "initial" || phase == "final") && time.Since(lastStatus) > timeouts.Response {
+		if (gate || preStream() || phase == "final") && time.Since(lastStatus) > timeouts.Response {
 			return fmt.Errorf("driver: status timeout")
+		}
+		if phase == "settings" && time.Now().After(settingsDeadline) {
+			return fmt.Errorf("driver: controller settings ($$) response timeout")
 		}
 		if !controlDeadline.IsZero() && time.Now().After(controlDeadline) {
 			return fmt.Errorf("driver: controller did not reach requested hold/resume state in time")
@@ -325,7 +355,7 @@ func StreamWithOptions(ctx context.Context, conn io.ReadWriteCloser, program str
 			}
 			switch cmd {
 			case Pause:
-				if phase == "initial" {
+				if preStream() {
 					gate, pauseSent, pauseConfirmed = true, false, false
 					controlDeadline = time.Now().Add(timeouts.Response)
 					continue
@@ -359,6 +389,27 @@ func StreamWithOptions(ctx context.Context, conn io.ReadWriteCloser, program str
 			}
 		case event := <-readLines:
 			line := event.text
+			if phase == "settings" {
+				if err := settingsReplyError(line); err != nil {
+					return err
+				}
+				if line == "ok" {
+					if err := opts.OnSettings(settings.settings); err != nil {
+						return fmt.Errorf("driver: controller settings refused before streaming: %w", err)
+					}
+					if err := enterStream(); err != nil {
+						return err
+					}
+					continue
+				}
+				isSetting, err := settings.line(line)
+				if err != nil {
+					return err
+				}
+				if isSetting {
+					continue
+				}
+			}
 			if strings.HasPrefix(line, "ALARM:") {
 				return fmt.Errorf("driver: controller alarm: %s", line)
 			}
@@ -474,21 +525,17 @@ func StreamWithOptions(ctx context.Context, conn io.ReadWriteCloser, program str
 					if state != "Idle" {
 						return fmt.Errorf("driver: controller is %s before job; operator readiness required", state)
 					}
-					phase = "stream"
-					select {
-					case cmd, ok := <-commands:
-						if ok && cmd == Pause {
-							gate = true
+					if opts.OnSettings != nil {
+						// Read-only settings query; program bytes wait for its ok.
+						if err := write("$$\n"); err != nil {
+							return fmt.Errorf("driver: request controller settings: %w", err)
 						}
-						if !ok {
-							commands = nil
-						}
-					default:
+						phase = "settings"
+						settingsDeadline = time.Now().Add(timeouts.Response)
+						continue
 					}
-					if gate {
-						if err := applyPause(); err != nil {
-							return err
-						}
+					if err := enterStream(); err != nil {
+						return err
 					}
 					continue
 				}
