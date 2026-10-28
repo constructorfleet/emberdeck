@@ -51,6 +51,59 @@ func TestSVGImportReturnsEditableGeometryWithoutMachineSettings(t *testing.T) {
 	}
 }
 
+func TestSVGImportAPIComposesNestedGroupsAndReturnsUnassignedGeometry(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	source := `<svg width="100mm" height="100mm" viewBox="0 0 100 100"><g transform="translate(10 20)"><g transform="scale(2)"><line x1="1" y1="2" x2="3" y2="4"/></g></g></svg>`
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/svg-import", strings.NewReader(source))
+	request.Header.Set("Authorization", "Bearer test-key")
+	request.Header.Set("Content-Type", "image/svg+xml")
+	response := httptest.NewRecorder()
+	s.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("nested SVG import = %d %s", response.Code, response.Body.String())
+	}
+	var imported struct {
+		Objects []struct {
+			Subpaths []struct {
+				Points []struct {
+					X float64 `json:"x_mm"`
+					Y float64 `json:"y_mm"`
+				} `json:"points"`
+			} `json:"subpaths"`
+			OperationID string `json:"operation_id"`
+		} `json:"objects"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &imported); err != nil {
+		t.Fatal(err)
+	}
+	if len(imported.Objects) != 1 || imported.Objects[0].OperationID != "" {
+		t.Fatalf("nested SVG objects should remain unassigned: %+v", imported.Objects)
+	}
+	points := imported.Objects[0].Subpaths[0].Points
+	want := []struct{ X, Y float64 }{{12, 76}, {16, 72}}
+	if len(points) != len(want) {
+		t.Fatalf("nested API points = %+v, want %+v", points, want)
+	}
+	for i := range want {
+		if points[i].X != want[i].X || points[i].Y != want[i].Y {
+			t.Fatalf("point %d = %+v, want %+v", i, points[i], want[i])
+		}
+	}
+
+	unsupported := httptest.NewRequest(http.MethodPost, "/api/v1/svg-import", strings.NewReader(`<svg width="40mm" height="20mm" viewBox="0 0 40 20"><g style="fill:red"><line x1="0" y1="0" x2="1" y2="1"/></g></svg>`))
+	unsupported.Header.Set("Authorization", "Bearer test-key")
+	unsupported.Header.Set("Content-Type", "image/svg+xml")
+	unsupportedResponse := httptest.NewRecorder()
+	s.ServeHTTP(unsupportedResponse, unsupported)
+	if unsupportedResponse.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("SVG import with unsupported group styling = %d %s", unsupportedResponse.Code, unsupportedResponse.Body.String())
+	}
+}
+
 func TestSVGImportRequiresImageContentTypeAndRejectsActiveContent(t *testing.T) {
 	s, err := server.Open(t.TempDir(), "test-key")
 	if err != nil {

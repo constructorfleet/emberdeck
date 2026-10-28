@@ -32,7 +32,7 @@ qualification. Generated jobs carry immutable schema-v2 source/profile snapshots
 and use the existing explicit operator confirmation and dispatch path. The
 static SVG importer stores accepted geometry in this same editable path model;
 imported paths remain unassigned until an operator chooses an operation layer.
-No SVG style or machine setting is inferred.
+No SVG style, operation assignment, or machine setting is imported.
 
 Native text objects preserve editable source content, font ID, height, and
 origin alongside server-generated open stroke paths. The hand-authored
@@ -48,9 +48,13 @@ SVG `C/c` and `S/s` cubic curves and `Q/q` and `T/t` quadratic curves are flatte
 to editable millimetre polylines with a 0.05 mm chord tolerance after element
 transforms and viewport scaling, capped at 4,000 points and 16 subdivision
 levels. Smooth commands reflect the previous compatible control point, or use
-the current point when a different command intervenes. The importer
-rejects nested groups, `A/a` arcs, styles, text,
-and active or external content. V2 stores per-object translation, nonuniform
+the current point when a different command intervenes. Nested SVG `<g>` groups
+compose their `transform` with descendant group and element transforms. Groups
+accept only `id` and `transform` attributes, with a maximum nesting depth of 16;
+unsupported group attributes (including styling) are rejected. The importer
+rejects `A/a` arcs, styles, text, and active or external content. Accepted paths
+remain editable and unassigned; no SVG operation or machine settings are
+imported. V2 stores per-object translation, nonuniform
 scale, and rotation around the source bounds center; profile validation,
 preview, and generation apply the same rounded transform. Group alignment uses
 the transformed point bounds of selected objects, adding only the necessary

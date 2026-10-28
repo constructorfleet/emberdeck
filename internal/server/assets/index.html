@@ -100,7 +100,7 @@
                 <button class="button button-small" type="button" data-add-shape="text">Add text</button>
                 <label class="button button-small svg-import-button" for="vector-svg-file">Import SVG<input id="vector-svg-file" type="file" accept=".svg,image/svg+xml" disabled></label>
               </div>
-              <p class="hint">Imports static paths and basic shapes. SVG C/c/S/s and Q/q/T/t curves become lines within 0.05 mm chord deviation; circles and ellipses become 32-point paths. M/L/H/V/Z and cubic/quadratic path commands and element transforms are supported. Curves exceeding the 4,000-point or subdivision limits, nested groups, styling, text, and machine settings are not imported.</p>
+              <p class="hint">Imports static paths and basic shapes. Nested SVG groups and their transforms compose with child transforms up to 16 levels. SVG C/c/S/s and Q/q/T/t curves become lines within 0.05 mm chord deviation; circles and ellipses become 32-point paths. M/L/H/V/Z and cubic/quadratic path commands and element transforms are supported. Curves exceeding the 4,000-point or subdivision limits, styling, text, and machine settings are not imported.</p>
               <h4 class="vector-subhead">Shapes</h4><p class="hint">Click a path to select it, drag it to move it, or drag its corner handle to scale it. Use the shape checkboxes for alignment or select a shape name to edit exact geometry and transforms.</p><ul id="vector-object-list" class="vector-list" aria-label="Project shapes"></ul>
               <div id="vector-align-controls" class="vector-align-controls" role="group" aria-label="Align selected shapes">
                 <span class="vector-subhead">Align selected shapes</span>

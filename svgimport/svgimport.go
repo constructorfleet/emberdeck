@@ -13,12 +13,14 @@ import (
 )
 
 const MaxBytes = 1 << 20
+const svgNamespace = "http://www.w3.org/2000/svg"
 
 // CurveToleranceMM is the maximum supported deviation between an imported
 // Bezier curve and its editable polyline approximation.
 const CurveToleranceMM = 0.05
 
 const maxFlattenDepth = 16
+const maxGroupDepth = 16
 const maxPathPoints = 4000
 const roundingAllowanceMM = 0.001
 
@@ -46,9 +48,10 @@ type Document struct {
 	Objects  []Object `json:"objects"`
 }
 
-// Parse accepts an SVG with a physical viewport and supported direct-child shapes.
-// It maps SVG coordinates to lower-left-origin millimetres. Styling and machine
-// operation settings are never imported, and external or active content is rejected.
+// Parse accepts an SVG with a physical viewport, bounded nested groups, and
+// supported static shapes. It maps SVG coordinates to lower-left-origin
+// millimetres. Styling and machine operation settings are never imported, and
+// external or active content is rejected.
 func Parse(source []byte) (Document, error) {
 	if len(source) == 0 || len(source) > MaxBytes {
 		return Document{}, errors.New("SVG must contain 1 byte to 1 MiB")
@@ -69,7 +72,7 @@ func Parse(source []byte) (Document, error) {
 			return Document{}, fmt.Errorf("SVG directives are not supported: %s", directive)
 		}
 	}
-	if root.Name.Local != "svg" {
+	if root.Name.Local != "svg" || root.Name.Space != "" && root.Name.Space != svgNamespace {
 		return Document{}, errors.New("root element must be svg")
 	}
 	attrs, err := attributes(root, map[string]bool{"xmlns": true, "id": true, "version": true, "width": true, "height": true, "viewBox": true, "preserveAspectRatio": true})
@@ -97,6 +100,8 @@ func Parse(source []byte) (Document, error) {
 	}
 	doc := Document{WidthMM: width, HeightMM: height, Objects: []Object{}}
 	depth, totalPoints := 1, 0
+	groupTransforms := []affine{}
+	groupDepths := []int{}
 	for {
 		token, err := decoder.Token()
 		if err == io.EOF {
@@ -107,8 +112,38 @@ func Parse(source []byte) (Document, error) {
 		}
 		switch item := token.(type) {
 		case xml.StartElement:
-			if depth != 1 {
+			if item.Name.Space != "" && item.Name.Space != svgNamespace {
+				return Document{}, fmt.Errorf("SVG element {%s}%s is not supported", item.Name.Space, item.Name.Local)
+			}
+			if item.Name.Local == "g" {
+				if depth != 1+len(groupTransforms) {
+					return Document{}, errors.New("nested SVG elements are not supported inside shapes")
+				}
+				if len(groupTransforms) >= maxGroupDepth {
+					return Document{}, fmt.Errorf("SVG group nesting exceeds %d levels", maxGroupDepth)
+				}
+				values, err := attributes(item, map[string]bool{"id": true, "transform": true})
+				if err != nil {
+					return Document{}, err
+				}
+				groupTransform, err := parseTransform(values["transform"])
+				if err != nil {
+					return Document{}, err
+				}
+				if len(groupTransforms) > 0 {
+					groupTransform = groupTransforms[len(groupTransforms)-1].multiply(groupTransform)
+				}
+				depth++
+				groupDepths = append(groupDepths, depth)
+				groupTransforms = append(groupTransforms, groupTransform)
+				continue
+			}
+			if depth != 1+len(groupTransforms) {
 				return Document{}, errors.New("nested SVG elements are not supported")
+			}
+			parentTransform := identityAffine()
+			if len(groupTransforms) > 0 {
+				parentTransform = groupTransforms[len(groupTransforms)-1]
 			}
 			var coords []float64
 			var transformSpec string
@@ -125,6 +160,7 @@ func Parse(source []byte) (Document, error) {
 				if err != nil {
 					return Document{}, err
 				}
+				curveTransform = parentTransform.multiply(curveTransform)
 				toMM := func(point Point) Point {
 					return importPoint(point, curveTransform, viewBox, sx, sy, height)
 				}
@@ -247,6 +283,7 @@ func Parse(source []byte) (Document, error) {
 			if err != nil {
 				return Document{}, err
 			}
+			affine = parentTransform.multiply(affine)
 			if len(subpaths) > 500 {
 				return Document{}, errors.New("SVG path exceeds 500 subpaths")
 			}
@@ -283,6 +320,13 @@ func Parse(source []byte) (Document, error) {
 			doc.Objects = append(doc.Objects, Object{Subpaths: subpaths})
 			depth++
 		case xml.EndElement:
+			if item.Name.Local == "g" {
+				if len(groupDepths) == 0 || groupDepths[len(groupDepths)-1] != depth {
+					return Document{}, errors.New("unexpected SVG group closing tag")
+				}
+				groupDepths = groupDepths[:len(groupDepths)-1]
+				groupTransforms = groupTransforms[:len(groupTransforms)-1]
+			}
 			depth--
 			if depth < 0 {
 				return Document{}, errors.New("unexpected SVG closing tag")
@@ -311,6 +355,9 @@ func attributes(element xml.StartElement, allowed map[string]bool) (map[string]s
 	for _, attr := range element.Attr {
 		if attr.Name.Space == "xmlns" || attr.Name.Space == "" && attr.Name.Local == "xmlns" {
 			continue
+		}
+		if attr.Name.Space != "" {
+			return nil, fmt.Errorf("SVG attribute %q is not supported", attr.Name.Local)
 		}
 		name := attr.Name.Local
 		if strings.HasPrefix(strings.ToLower(name), "on") || !allowed[name] {

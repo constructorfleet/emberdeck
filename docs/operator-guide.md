@@ -276,17 +276,20 @@ importer supports straight path commands (M/L/H/V/Z), cubic Bezier commands
 rectangles, circles, and ellipses. Smooth commands reflect the prior compatible
 curve control point; otherwise they start from the current point. Curves become
 line segments with at most 0.05 mm chord deviation after SVG and element
-transforms; imports that exceed the 16-level subdivision or 4,000-point import
-limits are rejected. Circle and ellipse outlines become
-editable 32-point paths. Nested groups, arc commands, styles, text,
-external resources, and active content are rejected with an error. Imported
-shapes appear unassigned: inspect the preview and workspace bounds, select each
-shape, and assign its engraving or cutting layer before generating. Save and reopen the
-project through the same project controls.
+transforms. Nested `<g>` transforms compose with their parent and child element
+transforms. Groups may contain only `id` and `transform` attributes and are
+limited to 16 nested levels. Imports that exceed the 16-level curve-subdivision
+or 4,000-point import limits are also rejected. Circle and ellipse outlines
+become editable 32-point paths. Arc commands, group styling or other group
+attributes, text, external resources, and active content are rejected with an
+error. Imported geometry appears as editable, unassigned objects: no operation
+or machine settings are imported. Inspect the preview and workspace bounds,
+select each shape, and assign its engraving or cutting layer before generating.
+Save and reopen the project through the same project controls.
 
-![Imported static SVG paths as editable, unassigned vector geometry](assets/screenshots/designer-svg-import.png)
+![Nested SVG group geometry imported as editable, unassigned vector objects](assets/screenshots/designer-svg-import.png)
 
-![Imported SVG geometry in the mobile vector editor](assets/screenshots/designer-svg-import-mobile.png)
+![Nested SVG group geometry imported in the mobile vector editor](assets/screenshots/designer-svg-import-mobile.png)
 
 Generation creates an immutable queued G-code program with the project, profile,
 and operation layer values in its provenance. Both cutting and engraving use
