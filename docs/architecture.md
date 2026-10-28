@@ -170,9 +170,10 @@ XY G-code. It shows laser-off travel and available work position; unsupported
 motion is surfaced as warnings. Position matching assumes `$13=0` and is not
 machine-bound or safety-qualified. The bounded SVG importer supports static line
 geometry, cubic/quadratic Bezier curves flattened at a 0.05 mm chord tolerance,
-and element-level affine transforms. It rejects styles, text, nested groups,
-arc commands, and active or external content. Arbitrary path editing, undo/redo,
-nested SVG groups, and raster engraving remain future work; see the [designer
+element-level affine transforms, and nested SVG groups with composed transforms.
+Group nesting is limited to 32 levels. It rejects styles, text, arc commands,
+and active or external content. Arbitrary path editing, undo/redo, and raster
+engraving remain future work; see the [designer
 plan](research/designer-architecture.md) and
 [operator guide](operator-guide.md).
 

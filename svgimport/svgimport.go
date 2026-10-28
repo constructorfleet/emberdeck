@@ -20,6 +20,7 @@ const CurveToleranceMM = 0.05
 
 const maxFlattenDepth = 16
 const maxPathPoints = 4000
+const maxGroupDepth = 32
 const roundingAllowanceMM = 0.001
 
 var transformToken = regexp.MustCompile(`([A-Za-z]+)\s*\(([^)]*)\)`)
@@ -97,6 +98,7 @@ func Parse(source []byte) (Document, error) {
 	}
 	doc := Document{WidthMM: width, HeightMM: height, Objects: []Object{}}
 	depth, totalPoints := 1, 0
+	groupTransforms := []affine{}
 	for {
 		token, err := decoder.Token()
 		if err == io.EOF {
@@ -107,8 +109,34 @@ func Parse(source []byte) (Document, error) {
 		}
 		switch item := token.(type) {
 		case xml.StartElement:
-			if depth != 1 {
+			if item.Name.Local == "g" {
+				if depth != 1+len(groupTransforms) {
+					return Document{}, errors.New("SVG groups may contain only groups and supported shapes")
+				}
+				if len(groupTransforms) >= maxGroupDepth {
+					return Document{}, errors.New("SVG group nesting exceeds 32 levels")
+				}
+				values, err := attributes(item, map[string]bool{"id": true, "transform": true})
+				if err != nil {
+					return Document{}, err
+				}
+				groupTransform, err := parseTransform(values["transform"])
+				if err != nil {
+					return Document{}, err
+				}
+				if len(groupTransforms) > 0 {
+					groupTransform = groupTransforms[len(groupTransforms)-1].multiply(groupTransform)
+				}
+				groupTransforms = append(groupTransforms, groupTransform)
+				depth++
+				continue
+			}
+			if depth != 1+len(groupTransforms) {
 				return Document{}, errors.New("nested SVG elements are not supported")
+			}
+			groupTransform := identityAffine()
+			if len(groupTransforms) > 0 {
+				groupTransform = groupTransforms[len(groupTransforms)-1]
 			}
 			var coords []float64
 			var transformSpec string
@@ -125,6 +153,7 @@ func Parse(source []byte) (Document, error) {
 				if err != nil {
 					return Document{}, err
 				}
+				curveTransform = groupTransform.multiply(curveTransform)
 				toMM := func(point Point) Point {
 					return importPoint(point, curveTransform, viewBox, sx, sy, height)
 				}
@@ -247,6 +276,7 @@ func Parse(source []byte) (Document, error) {
 			if err != nil {
 				return Document{}, err
 			}
+			affine = groupTransform.multiply(affine)
 			if len(subpaths) > 500 {
 				return Document{}, errors.New("SVG path exceeds 500 subpaths")
 			}
@@ -286,6 +316,12 @@ func Parse(source []byte) (Document, error) {
 			depth--
 			if depth < 0 {
 				return Document{}, errors.New("unexpected SVG closing tag")
+			}
+			if item.Name.Local == "g" {
+				if len(groupTransforms) == 0 || depth != len(groupTransforms) {
+					return Document{}, errors.New("unexpected SVG group closing tag")
+				}
+				groupTransforms = groupTransforms[:len(groupTransforms)-1]
 			}
 		case xml.Directive:
 			return Document{}, errors.New("SVG directives and entities are not supported")

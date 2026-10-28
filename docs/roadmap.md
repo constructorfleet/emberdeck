@@ -90,10 +90,11 @@ designer's remaining capabilities are delivered.
   toolpaths. Keyboard-accessible multi-selection aligns left/center/right and
   top/middle/bottom using transformed bounds, saves the resulting translations,
   and preserves profile warnings. [Source review and remaining architecture](research/designer-architecture.md)
-  track nested SVG groups, arc commands, SVG text import, arbitrary path
+  track arc commands, SVG text import, arbitrary path
   editing, and raster evaluation. A bounded
   static SVG importer now converts basic shapes and
-  line/Bezier paths into editable, unassigned geometry. Native text objects also
+  line/Bezier paths, including nested groups with composed transforms, into
+  editable, unassigned geometry. Native text objects also
   preserve editable content/font/size/origin and use deterministic generated
   stroke geometry for preview and G-code. The fixed hand-authored
   `emberdeck-stick-v1` font supports ASCII A–Z/a–z, digits, space, and
