@@ -102,7 +102,7 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
   await projectRow.getByRole('button', { name: `Delete project ${projectName}` }).click();
   await expect(projectRow).toHaveCount(0);
   await expect(row).toBeVisible();
-  await row.getByRole('button', { name: 'View' }).click();
+  await row.getByRole('button', { name: 'View', exact: true }).click();
   await expect(page.locator('#program-code')).toHaveText(generatedCode);
   await expect(page.locator('#program-provenance')).toContainText(projectName);
 

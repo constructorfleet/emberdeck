@@ -57,7 +57,7 @@ test('operator uploads, confirms, monitors, views, completes, and deletes a job'
 
   const selectedDriver = await page.locator('#driver-select').inputValue();
   const pollCountBeforeView = driverPolls;
-  await row.getByRole('button', { name: 'View' }).click();
+  await row.getByRole('button', { name: 'View', exact: true }).click();
   await expect(page.locator('#program-panel')).toBeVisible();
   await expect(page.locator('#program-code')).toContainText('G1 X1 F100');
   await expect.poll(() => driverPolls, { timeout: 5000 }).toBeGreaterThan(pollCountBeforeView);
@@ -84,6 +84,40 @@ test('operator can cancel a running job', async ({ page }) => {
   await expect(row.getByRole('button', { name: /Delete/ })).toBeVisible();
 });
 
+test('running uploaded G-code shows a fitted camera-free toolpath with estimated controller position', async ({ page }) => {
+  await connect(page);
+  const name = `operator-toolpath-${test.info().retry}.gcode`;
+  const moves = 1000;
+  const program = [
+    'G21 G90',
+    'G0 X0 Y0',
+    'M4 S100',
+    ...Array.from({ length: moves }, (_, index) => `G1 X${index + 1} Y0 F300`),
+    'M5',
+  ].join('\n');
+  await page.locator('#job-file').setInputFiles({
+    name,
+    mimeType: 'text/plain',
+    buffer: Buffer.from(program),
+  });
+  await page.locator('#job-name').fill(name);
+  await page.getByRole('button', { name: /Add to library/ }).click();
+  const row = page.locator('#job-list li').filter({ hasText: name });
+  await expect(row).toContainText(/queued/i);
+  const progress = await startJob(page, row);
+  await expect(row.locator('.toolpath-live')).toBeVisible({ timeout: 10000 });
+  await expect(row.locator('.toolpath-summary')).toContainText(/estimated/i, { timeout: 10000 });
+  await expect(row.locator('.toolpath-svg .path-active')).toHaveCount(1, { timeout: 10000 });
+  await expect(row.getByText(/Position match assumes GRBL \$13=0/)).toBeVisible();
+  await expect(row.locator('.toolpath-legend')).toContainText('laser-off travel dashed');
+  await expect(row.getByRole('button', { name: 'Zoom in toolpath' })).toBeVisible();
+  await expect(row.getByRole('button', { name: 'Fit toolpath to view' })).toBeVisible();
+  await progress.evaluate((node) => node.value);
+  await expect(row).toContainText(/completed/i, { timeout: 30000 });
+  await expect(row.locator('.toolpath-summary')).toContainText('controller_idle', { timeout: 10000 });
+  await expect(row.locator('.toolpath-svg .path-completed')).toHaveCount(moves, { timeout: 10000 });
+});
+
 test('operator pauses on controller acknowledgement, confirms resume, and completes', async ({ page }) => {
   const controllerStates = [];
   const name = `operator-pause-resume-${test.info().repeatEachIndex}-${test.info().retry}.gcode`;
@@ -99,7 +133,7 @@ test('operator pauses on controller acknowledgement, confirms resume, and comple
   const row = await uploadJob(page, name, lines);
   const progress = await startJob(page, row);
   await waitForProgress(progress, lines);
-  await row.getByRole('button', { name: 'View' }).click();
+  await row.getByRole('button', { name: 'View', exact: true }).click();
 
   await row.getByRole('button', { name: 'Pause' }).click();
   await expect(row).toContainText(/pausing/i);
