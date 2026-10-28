@@ -494,9 +494,30 @@
       units: "mm",
       profile_id: profile.id,
       profile_revision: profile.revision,
-      objects: vectorObjects.map(({ id, kind, operation_id, subpaths }) => ({ id, kind: kind || "path", ...(operation_id ? { operation_id } : {}), subpaths })),
+      objects: vectorObjects.map(vectorObjectPayload),
       operations: vectorOperations.map(({ id, type, feed_mm_min, power_percent }) => ({ id, type, feed_mm_min, power_percent })),
     };
+  }
+
+  function vectorObjectPayload(object) {
+    const payload = { id: object.id, kind: objectKind(object), ...(object.operation_id ? { operation_id: object.operation_id } : {}), subpaths: object.subpaths };
+    if (object.transform && !isIdentityTransform(object.transform)) payload.transform = normalizedTransform(object.transform);
+    return payload;
+  }
+
+  function normalizedTransform(transform = {}) {
+    return {
+      translate_x_mm: transform.translate_x_mm ?? 0,
+      translate_y_mm: transform.translate_y_mm ?? 0,
+      scale_x: transform.scale_x ?? 1,
+      scale_y: transform.scale_y ?? 1,
+      rotation_deg: transform.rotation_deg ?? 0,
+    };
+  }
+
+  function isIdentityTransform(transform) {
+    const value = normalizedTransform(transform);
+    return value.translate_x_mm === 0 && value.translate_y_mm === 0 && value.scale_x === 1 && value.scale_y === 1 && value.rotation_deg === 0;
   }
 
   function objectKind(object) { return object.kind || "path"; }
@@ -509,6 +530,38 @@
       width: Math.max(...points.map((point) => point.x_mm)) - Math.min(...points.map((point) => point.x_mm)),
       height: Math.max(...points.map((point) => point.y_mm)) - Math.min(...points.map((point) => point.y_mm)),
     };
+  }
+
+  function transformedSubpaths(object) {
+    const transform = normalizedTransform(object.transform);
+    const points = object.subpaths.flatMap((path) => path.points);
+    const centerX = (Math.min(...points.map((point) => point.x_mm)) + Math.max(...points.map((point) => point.x_mm))) / 2;
+    const centerY = (Math.min(...points.map((point) => point.y_mm)) + Math.max(...points.map((point) => point.y_mm))) / 2;
+    const angle = transform.rotation_deg * Math.PI / 180;
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    const round = (value) => Math.round(value * 1000) / 1000;
+    return object.subpaths.map((path) => ({
+      ...path,
+      points: path.points.map((point) => {
+        const x = (point.x_mm - centerX) * transform.scale_x;
+        const y = (point.y_mm - centerY) * transform.scale_y;
+        return {
+          x_mm: round(centerX + x * cos - y * sin + transform.translate_x_mm),
+          y_mm: round(centerY + x * sin + y * cos + transform.translate_y_mm),
+        };
+      }),
+    }));
+  }
+
+  function updateSelectedTransform() {
+    const object = vectorObjects.find((candidate) => candidate.id === selectedVectorObject);
+    if (!object) return;
+    const values = ["#vector-translate-x", "#vector-translate-y", "#vector-scale-x", "#vector-scale-y", "#vector-rotation"].map(finiteField);
+    if (values.some((value) => value === null)) return updateVectorValidation();
+    const [translate_x_mm, translate_y_mm, scale_x, scale_y, rotation_deg] = values;
+    object.transform = { translate_x_mm, translate_y_mm, scale_x, scale_y, rotation_deg };
+    if (isIdentityTransform(object.transform)) delete object.transform;
+    updateVectorValidation();
   }
 
   function shapePoints(type, x, y, width, height) {
@@ -555,12 +608,19 @@
     });
     const object = vectorObjects.find((candidate) => candidate.id === selectedVectorObject);
     $("#vector-geometry").hidden = !object;
+    $("#vector-transform").hidden = !object;
     if (!object) return;
     const bounds = boundsFor(object);
     $("#vector-x").value = bounds.x.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
     $("#vector-y").value = bounds.y.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
     $("#vector-width").value = Math.max(0.001, bounds.width).toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
     $("#vector-height").value = Math.max(0.001, bounds.height).toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+    const transform = normalizedTransform(object.transform);
+    $("#vector-translate-x").value = String(transform.translate_x_mm);
+    $("#vector-translate-y").value = String(transform.translate_y_mm);
+    $("#vector-scale-x").value = String(transform.scale_x);
+    $("#vector-scale-y").value = String(transform.scale_y);
+    $("#vector-rotation").value = String(transform.rotation_deg);
     const assignment = $("#vector-object-operation");
     assignment.replaceChildren(new Option("Unassigned", ""));
     vectorOperations.forEach((operation, index) => assignment.append(new Option(`${index + 1}. ${operation.type.replace("vector-", "")}`, operation.id)));
@@ -621,7 +681,7 @@
     vectorObjects.forEach((object) => {
       const operation = vectorOperations.find((candidate) => candidate.id === object.operation_id);
       const commands = [];
-      object.subpaths.forEach((path) => {
+      transformedSubpaths(object).forEach((path) => {
         path.points.forEach((point, index) => commands.push(`${index ? "L" : "M"} ${left + point.x_mm * scale} ${bottom - point.y_mm * scale}`));
         if (path.closed) commands.push("Z");
       });
@@ -645,6 +705,9 @@
       const geometry = ["#vector-x", "#vector-y", "#vector-width", "#vector-height"].map(finiteField);
       if (geometry.some((value) => value === null)) return "Enter finite position and size values with at most three decimal places.";
       if (geometry[0] < 0 || geometry[1] < 0 || geometry[2] <= 0 || geometry[3] <= 0) return "Position must be nonnegative and shape width and height must be positive.";
+      const transform = ["#vector-translate-x", "#vector-translate-y", "#vector-scale-x", "#vector-scale-y", "#vector-rotation"].map(finiteField);
+      if (transform.some((value) => value === null)) return "Enter finite transform values with at most three decimal places.";
+      if (transform[2] < 0.01 || transform[2] > 100 || transform[3] < 0.01 || transform[3] > 100 || transform[4] < -360 || transform[4] > 360) return "Scale must be from 0.01 to 100 and rotation from −360 to 360 degrees.";
     }
     for (const operation of vectorOperations) {
       if (!Number.isFinite(operation.feed_mm_min) || operation.feed_mm_min < profile.min_feed_mm_min || operation.feed_mm_min > profile.max_feed_mm_min) return "Operation feed is outside the selected profile range.";
@@ -655,12 +718,16 @@
     for (const object of vectorObjects) {
       if (!object.subpaths.length || object.subpaths.some((path) => path.points.length < (path.closed ? 3 : 2))) return "Each shape needs a valid path.";
       for (const point of object.subpaths.flatMap((path) => path.points)) {
-        if (![point.x_mm, point.y_mm].every(Number.isFinite) || !decimalPlacesAtMostThree(String(point.x_mm)) || !decimalPlacesAtMostThree(String(point.y_mm)) || point.x_mm < 0 || point.y_mm < 0 || milli(point.x_mm) > milli(profile.width_mm) || milli(point.y_mm) > milli(profile.height_mm)) return "A shape is outside the declared workspace or uses unsupported coordinate precision.";
+        if (![point.x_mm, point.y_mm].every(Number.isFinite) || !decimalPlacesAtMostThree(String(point.x_mm)) || !decimalPlacesAtMostThree(String(point.y_mm)) || point.x_mm < 0 || point.y_mm < 0 || point.x_mm > 10000 || point.y_mm > 10000) return "A shape has invalid source coordinates or unsupported coordinate precision.";
+      }
+      const transformed = transformedSubpaths(object);
+      for (const point of transformed.flatMap((path) => path.points)) {
+        if (![point.x_mm, point.y_mm].every(Number.isFinite) || point.x_mm < 0 || point.y_mm < 0 || milli(point.x_mm) > milli(profile.width_mm) || milli(point.y_mm) > milli(profile.height_mm)) return "A transformed shape is outside the declared workspace.";
       }
       if (object.operation_id) {
         const operation = vectorOperations.find((candidate) => candidate.id === object.operation_id);
         if (!operation) return "A shape refers to a missing operation layer.";
-        if (operation.type === "vector-cut" && object.subpaths.some((path) => !path.closed || !pathHasArea(path.points))) return "Cut operations require closed shapes with nonzero area. Assign this path to an engraving layer or change its geometry.";
+        if (operation.type === "vector-cut" && transformed.some((path) => !path.closed || !pathHasArea(path.points))) return "Cut operations require closed shapes with nonzero area. Assign this path to an engraving layer or change its geometry.";
       }
     }
     return "";
@@ -671,7 +738,7 @@
     return JSON.stringify(currentVectorPayload(profile)) === JSON.stringify({
       schema_version: 2, name: openVectorProject.name, units: openVectorProject.units, profile_id: openVectorProject.profile_id,
       profile_revision: openVectorProject.profile_revision,
-      objects: openVectorProject.objects.map(({ id, kind, operation_id, subpaths }) => ({ id, kind: kind || "path", ...(operation_id ? { operation_id } : {}), subpaths })),
+      objects: openVectorProject.objects.map(vectorObjectPayload),
       operations: openVectorProject.operations,
     });
   }
@@ -701,7 +768,7 @@
 
   function fillVectorProject(project = null) {
     openVectorProject = project;
-    vectorObjects = project ? project.objects.map((object) => ({ ...object, kind: objectKind(object), subpaths: object.subpaths.map((path) => ({ ...path, points: path.points.map((point) => ({ ...point })) })) })) : [];
+    vectorObjects = project ? project.objects.map((object) => ({ ...object, kind: objectKind(object), transform: object.transform ? { ...object.transform } : undefined, subpaths: object.subpaths.map((path) => ({ ...path, points: path.points.map((point) => ({ ...point })) })) })) : [];
     vectorOperations = project ? project.operations.map((operation) => ({ ...operation })) : [{ id: vectorID("operation"), type: "vector-engrave", feed_mm_min: 600, power_percent: 25 }];
     selectedVectorObject = vectorObjects[0]?.id || "";
     $("#vector-form").hidden = false;
@@ -779,7 +846,7 @@
       });
       await refreshDesigner();
       openVectorProject = projects.find((project) => project.id === saved.id) || saved;
-      vectorObjects = openVectorProject.objects.map((object) => ({ ...object, kind: objectKind(object) }));
+      vectorObjects = openVectorProject.objects.map((object) => ({ ...object, kind: objectKind(object), transform: object.transform ? { ...object.transform } : undefined }));
       vectorOperations = openVectorProject.operations.map((operation) => ({ ...operation }));
       $("#vector-form-title").textContent = `Edit ${saved.name}`;
       $("#delete-vector-project").hidden = false;
@@ -882,6 +949,7 @@
   $("#vector-form").addEventListener("submit", saveVectorProject);
   $("#vector-form").addEventListener("input", (event) => {
     if (event.target.matches("#vector-x, #vector-y, #vector-width, #vector-height")) updateSelectedGeometry();
+    else if (event.target.matches("#vector-translate-x, #vector-translate-y, #vector-scale-x, #vector-scale-y, #vector-rotation")) updateSelectedTransform();
     else updateVectorValidation();
   });
   $("#vector-form").addEventListener("change", (event) => {

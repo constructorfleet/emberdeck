@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"math"
@@ -82,12 +83,57 @@ type VectorSubpath struct {
 	Closed bool          `json:"closed"`
 }
 
+// VectorTransform is saved in the editable project and applies scale and
+// rotation about the source geometry's center, followed by a millimetre move.
+// Omitted fields use identity values so clients can send only fields they need.
+type VectorTransform struct {
+	TranslateXMM float64 `json:"translate_x_mm"`
+	TranslateYMM float64 `json:"translate_y_mm"`
+	ScaleX       float64 `json:"scale_x"`
+	ScaleY       float64 `json:"scale_y"`
+	RotationDeg  float64 `json:"rotation_deg"`
+}
+
+func (transform *VectorTransform) UnmarshalJSON(data []byte) error {
+	type transformInput struct {
+		TranslateXMM *float64 `json:"translate_x_mm"`
+		TranslateYMM *float64 `json:"translate_y_mm"`
+		ScaleX       *float64 `json:"scale_x"`
+		ScaleY       *float64 `json:"scale_y"`
+		RotationDeg  *float64 `json:"rotation_deg"`
+	}
+	var input transformInput
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		return err
+	}
+	*transform = VectorTransform{ScaleX: 1, ScaleY: 1}
+	if input.TranslateXMM != nil {
+		transform.TranslateXMM = *input.TranslateXMM
+	}
+	if input.TranslateYMM != nil {
+		transform.TranslateYMM = *input.TranslateYMM
+	}
+	if input.ScaleX != nil {
+		transform.ScaleX = *input.ScaleX
+	}
+	if input.ScaleY != nil {
+		transform.ScaleY = *input.ScaleY
+	}
+	if input.RotationDeg != nil {
+		transform.RotationDeg = *input.RotationDeg
+	}
+	return nil
+}
+
 // VectorObject keeps editable geometry independent from machine operation settings.
 type VectorObject struct {
-	Kind        string          `json:"kind"`
-	ID          string          `json:"id"`
-	OperationID string          `json:"operation_id,omitempty"`
-	Subpaths    []VectorSubpath `json:"subpaths"`
+	Kind        string           `json:"kind"`
+	ID          string           `json:"id"`
+	OperationID string           `json:"operation_id,omitempty"`
+	Transform   *VectorTransform `json:"transform,omitempty"`
+	Subpaths    []VectorSubpath  `json:"subpaths"`
 }
 
 // VectorOperation is an explicitly ordered vector cutting or engraving layer.
@@ -292,7 +338,7 @@ func validVectorProjectIntrinsic(project DesignerProject) bool {
 	for _, object := range project.Objects {
 		if !validObjectID(object.ID) || objectIDs[object.ID] ||
 			(object.Kind != "rectangle" && object.Kind != "ellipse" && object.Kind != "line" && object.Kind != "path") ||
-			len(object.Subpaths) == 0 || len(object.Subpaths) > 500 {
+			len(object.Subpaths) == 0 || len(object.Subpaths) > 500 || !validVectorTransform(object.Transform) {
 			return false
 		}
 		if object.Kind == "rectangle" && (len(object.Subpaths) != 1 || !object.Subpaths[0].Closed || len(object.Subpaths[0].Points) != 4) ||
@@ -302,16 +348,8 @@ func validVectorProjectIntrinsic(project DesignerProject) bool {
 		}
 		objectIDs[object.ID] = true
 		if object.OperationID != "" {
-			typ, exists := operationIDs[object.OperationID]
-			if !exists {
+			if _, exists := operationIDs[object.OperationID]; !exists {
 				return false
-			}
-			if typ == "vector-cut" {
-				for _, path := range object.Subpaths {
-					if !path.Closed || !nonzeroPathArea(path.Points) {
-						return false
-					}
-				}
 			}
 		}
 		for _, path := range object.Subpaths {
@@ -341,8 +379,91 @@ func validVectorProjectIntrinsic(project DesignerProject) bool {
 				}
 			}
 		}
+		transformed := transformedVectorSubpaths(object)
+		for _, path := range transformed {
+			for i, point := range path.Points {
+				if !finite(point.XMM) || !finite(point.YMM) || !validPrecision(point.XMM) || !validPrecision(point.YMM) || point.XMM < 0 || point.YMM < 0 || point.XMM > 10000 || point.YMM > 10000 {
+					return false
+				}
+				if i > 0 && milli(point.XMM) == milli(path.Points[i-1].XMM) && milli(point.YMM) == milli(path.Points[i-1].YMM) {
+					return false
+				}
+			}
+			if path.Closed {
+				first, last := path.Points[0], path.Points[len(path.Points)-1]
+				if milli(first.XMM) == milli(last.XMM) && milli(first.YMM) == milli(last.YMM) {
+					return false
+				}
+			}
+			if object.OperationID != "" && operationIDs[object.OperationID] == "vector-cut" && (!path.Closed || !nonzeroPathArea(path.Points)) {
+				return false
+			}
+		}
 	}
 	return true
+}
+
+func validVectorTransform(transform *VectorTransform) bool {
+	if transform == nil {
+		return true
+	}
+	return finite(transform.TranslateXMM) && finite(transform.TranslateYMM) &&
+		finite(transform.ScaleX) && finite(transform.ScaleY) && finite(transform.RotationDeg) &&
+		validPrecision(transform.TranslateXMM) && validPrecision(transform.TranslateYMM) &&
+		validPrecision(transform.ScaleX) && validPrecision(transform.ScaleY) && validPrecision(transform.RotationDeg) &&
+		transform.TranslateXMM >= -10000 && transform.TranslateXMM <= 10000 &&
+		transform.TranslateYMM >= -10000 && transform.TranslateYMM <= 10000 &&
+		transform.ScaleX >= 0.01 && transform.ScaleX <= 100 &&
+		transform.ScaleY >= 0.01 && transform.ScaleY <= 100 &&
+		transform.RotationDeg >= -360 && transform.RotationDeg <= 360
+}
+
+func transformedVectorSubpaths(object VectorObject) []VectorSubpath {
+	if object.Transform == nil {
+		return object.Subpaths
+	}
+	var minX, maxX, minY, maxY float64
+	firstPoint := true
+	for _, path := range object.Subpaths {
+		for _, point := range path.Points {
+			if firstPoint {
+				minX, maxX, minY, maxY = point.XMM, point.XMM, point.YMM, point.YMM
+				firstPoint = false
+				continue
+			}
+			minX = math.Min(minX, point.XMM)
+			maxX = math.Max(maxX, point.XMM)
+			minY = math.Min(minY, point.YMM)
+			maxY = math.Max(maxY, point.YMM)
+		}
+	}
+	if firstPoint {
+		return object.Subpaths
+	}
+	centerX, centerY := (minX+maxX)/2, (minY+maxY)/2
+	transform := *object.Transform
+	if transform.ScaleX == 0 {
+		transform.ScaleX = 1
+	}
+	if transform.ScaleY == 0 {
+		transform.ScaleY = 1
+	}
+	angle := transform.RotationDeg * math.Pi / 180
+	cosine, sine := math.Cos(angle), math.Sin(angle)
+	round := func(value float64) float64 { return math.Round(value*1000) / 1000 }
+	transformed := make([]VectorSubpath, len(object.Subpaths))
+	for pathIndex, path := range object.Subpaths {
+		transformed[pathIndex] = VectorSubpath{Closed: path.Closed, Points: make([]VectorPoint, len(path.Points))}
+		for pointIndex, point := range path.Points {
+			x := (point.XMM - centerX) * transform.ScaleX
+			y := (point.YMM - centerY) * transform.ScaleY
+			transformed[pathIndex].Points[pointIndex] = VectorPoint{
+				XMM: round(centerX + cosine*x - sine*y + transform.TranslateXMM),
+				YMM: round(centerY + sine*x + cosine*y + transform.TranslateYMM),
+			}
+		}
+	}
+	return transformed
 }
 
 func validObjectID(id string) bool {
@@ -378,7 +499,7 @@ func validateVectorProjectValues(project DesignerProject, profile MachineProfile
 		operations[operation.ID] = operation
 	}
 	for _, object := range project.Objects {
-		for _, path := range object.Subpaths {
+		for _, path := range transformedVectorSubpaths(object) {
 			for _, point := range path.Points {
 				if milli(point.XMM) > milli(profile.WidthMM) || milli(point.YMM) > milli(profile.HeightMM) {
 					return errors.New("vector geometry is outside the declared workspace")

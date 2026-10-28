@@ -102,6 +102,13 @@
                 <label>Height (mm)<input id="vector-height" type="number" min="0.001" step="0.001"></label>
                 <label>Operation layer<select id="vector-object-operation"></select></label>
               </div>
+              <div id="vector-transform" class="numeric-grid vector-fields" hidden>
+                <label>Translate X (mm)<input id="vector-translate-x" type="number" step="0.001" value="0"></label>
+                <label>Translate Y (mm)<input id="vector-translate-y" type="number" step="0.001" value="0"></label>
+                <label>Scale X<input id="vector-scale-x" type="number" min="0.01" max="100" step="0.001" value="1"></label>
+                <label>Scale Y<input id="vector-scale-y" type="number" min="0.01" max="100" step="0.001" value="1"></label>
+                <label>Rotation (degrees)<input id="vector-rotation" type="number" min="-360" max="360" step="0.001" value="0"></label>
+              </div>
               <div class="layer-heading"><h4 class="vector-subhead">Ordered operation layers</h4><button id="add-operation" class="button button-small" type="button">Add layer</button></div>
               <ol id="vector-operation-list" class="vector-list vector-layers" aria-label="Ordered operation layers"></ol>
             </div>

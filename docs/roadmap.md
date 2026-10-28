@@ -76,10 +76,12 @@ designer's remaining capabilities are delivered.
   Implemented end-to-end milestones support the original saved rectangle and a
   schema-v2 multi-path editor with rectangle/ellipse/line primitives, ordered
   vector engrave/cut layers, profile preview, immutable generated jobs, and
-  explicit dispatch. [Source review and remaining architecture](research/designer-architecture.md)
-  track the remaining rotation/alignment, multi-selection/transforms, nested
-  SVG groups, smooth/arc commands, text import, arbitrary path editing, and raster
-  evaluation. A bounded static SVG importer now converts basic shapes and
+  explicit dispatch. Single-object translation, X/Y scaling, and rotation are
+  saved, previewed, checked against the work area, and applied to generated
+  toolpaths. [Source review and remaining architecture](research/designer-architecture.md)
+  track the remaining alignment, multi-selection, nested SVG groups, smooth/arc
+  commands, text import, arbitrary path editing, and raster evaluation. A bounded
+  static SVG importer now converts basic shapes and
   line/Bezier paths into editable, unassigned geometry. The full issue stays open.
 - [ ] [#7: Live completed/remaining toolpath progress](https://github.com/constructorfleet/emberdeck/issues/7).
   Implement camera-independent execution monitoring for supported uploaded G-code

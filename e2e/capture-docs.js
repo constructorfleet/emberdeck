@@ -170,7 +170,13 @@ async function main() {
     await page.locator('#vector-object-operation').selectOption({ label: '2. cut' });
     await page.getByRole('button', { name: '3. line' }).click();
     await page.locator('#vector-object-operation').selectOption({ label: '1. engrave' });
+    await page.getByRole('button', { name: '1. rectangle' }).click();
+    await page.getByLabel('Translate X (mm)').fill('3');
+    await page.getByLabel('Translate Y (mm)').fill('2');
+    await page.getByLabel('Scale X').fill('1.2');
+    await page.getByLabel('Rotation (degrees)').fill('15');
     await expect(page.locator('#vector-validation')).toBeHidden();
+    await captureElement(page, '#vector-form', 'designer-vector-transform.png');
     await page.getByRole('button', { name: 'Save vector project' }).click();
     await expect(page.locator('#designer-status')).toContainText('Vector project saved');
     await captureElement(page, '#vector-form', 'designer-vector-project.png');

@@ -201,14 +201,18 @@ confirmation and **Start** control when ready.
 ## Create a multi-path vector project
 
 Select **New vector project** to add multiple rectangle, ellipse, and line
-shapes. Select a shape to edit its X/Y position and width/height, assign it to
-an operation layer, or remove it. Add engraving or cutting layers, set each
+shapes. Select a shape to edit its source X/Y position and width/height, then
+translate, scale, or rotate it around its source bounding-box center. The preview
+and profile bounds check use the transformed geometry. Assign the shape to an
+operation layer or remove it. Add engraving or cutting layers, set each
 layer's feed and commanded power, and move layers to change execution order.
 Every path must be assigned before generation. Lines can be engraved; cutting
 requires closed shapes with nonzero area. The preview uses green for engraving,
 red dashed outlines for cutting, and gray dotted paths for unassigned geometry.
 
 ![Multi-path designer with editable shapes, ordered engraving and cutting layers, and profile-aware preview](assets/screenshots/designer-vector-project.png)
+
+![Selected vector shape with saved translation, X/Y scale, and rotation controls](assets/screenshots/designer-vector-transform.png)
 
 Choose **Import SVG** inside an open vector project to add static geometry. The
 importer supports straight path commands (M/L/H/V/Z), cubic and quadratic
