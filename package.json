@@ -1,5 +1,5 @@
 {
-  "name": "emberdeck-browser-e2e",
+  "name": "emberdeck-development",
   "private": true,
   "scripts": {
     "test": "node e2e/run.js",

@@ -59,7 +59,7 @@ async function stopServer(child) {
 
 async function main() {
   const binary = path.resolve(process.env.EMBERDECK_BINARY || path.join(root, 'bin', 'emberdeck'));
-  if (!fs.existsSync(binary)) {
+  if (!process.env.EMBERDECK_BINARY) {
     fs.mkdirSync(path.dirname(binary), { recursive: true });
     const result = spawnSync('go', ['build', '-o', binary, './cmd/emberdeck'], { cwd: root, stdio: 'inherit' });
     if (result.status !== 0) throw new Error('Could not build EmberDeck for browser tests');
