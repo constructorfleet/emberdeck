@@ -4,7 +4,9 @@ This directory contains a portable C host prototype for the device-side job
 staging gate described in the ESP32 feasibility report and issue #57. It stages
 bounded content through an injected storage interface, verifies exact size and
 SHA-256, checks the full G-code framing contract, and then returns an opaque
-handle that can stream the original bytes to an injected UART sink.
+handle that can stream the original bytes to an injected UART sink. The device
+contract caps a program at 4 MiB; an over-cap manifest is rejected without a
+fetch and clears any previously staged bytes when storage reset succeeds.
 
 **Host prototype only.** It does not implement EmberDeck network sessions,
 worker credentials, leases, polling, heartbeats, progress, or receipts. It does
@@ -42,6 +44,10 @@ ctest --test-dir build --output-on-failure
 ```
 
 `component/CMakeLists.txt` also provides the conventional ESP-IDF component
-registration layout. The native contract tests do not require `idf.py` or an
-ESP-IDF toolchain. No ESP-IDF target build or physical hardware test is claimed
-by this prototype.
+registration layout. The native tests cover ordered bounded fetches,
+short/truncated data, digest mismatch, malformed G-code, over-cap manifests,
+cleanup after partial staging, storage immutability, and the no-output-before-
+verification/single-use gate. They do not cover HTTP sessions, lease renewal,
+receipts, or lost network responses, and do not require `idf.py` or an ESP-IDF
+toolchain. No ESP-IDF target build or physical hardware test is claimed by this
+prototype.

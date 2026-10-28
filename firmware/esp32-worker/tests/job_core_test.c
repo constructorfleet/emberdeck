@@ -207,10 +207,17 @@ static int test_malformed_gcode(void) {
 
 static int test_oversized_manifest(void) {
     static const unsigned char program[] = "G1 X1\n";
+    static const unsigned char stale[] = "G1 X9\n";
     fixture f; ed_manifest manifest; ed_storage storage;
     prepare(&f, program, sizeof(program)-1, &manifest, &storage);
+    if (storage_write(&f, 0, stale, sizeof(stale)-1) != 0) return 0;
     manifest.size = ED_MAX_PROGRAM_BYTES + 1u;
-    return expect_preverification_failure("oversized manifest rejected", &f, &manifest, &storage);
+    ed_verified_job *verified = NULL;
+    ed_result result = ed_stage_verify(&manifest, fetch_range, &f, &storage, &verified);
+    if (!check(result == ED_ERR_TOO_LARGE, "oversized manifest rejected")) return 0;
+    if (!check(verified == NULL, "oversized manifest yields no verified handle")) return 0;
+    if (!check(f.fetch_calls == 0, "oversized manifest is rejected before fetching")) return 0;
+    return check(f.staged_size == 0, "oversized manifest discards previous staged bytes");
 }
 
 static int test_out_of_order_fetch(void) {
