@@ -264,6 +264,23 @@ separate.
 ## Dispatch and monitoring
 
 `GET /drivers` returns online workers, their last heartbeat time, and busy status.
+It also returns `camera_available`, a boolean that does not reveal the source
+URL or credentials. An administrator can configure a driver's optional HTTP
+camera source with `PUT /drivers/{id}/camera` and
+`{"url":"http://camera.local/mjpeg","username":"viewer","password":"secret"}`.
+Use `{}` to remove the source. The URL must not contain embedded user-info;
+optional Basic Auth credentials are stored server-side and never returned by
+the API. EmberDeck accepts an MJPEG multipart stream or a single JPEG response,
+refuses redirects, and reads at most one 2 MiB frame within three seconds.
+
+`GET /drivers/{id}/camera` returns the first JPEG frame from the configured
+source. The endpoint requires an authenticated viewer, operator, or admin
+credential, disables caching, and limits requests to one frame per second per
+driver. A missing, slow, or invalid source returns `502 camera offline or
+stale`. Camera delivery is independent of job execution; a camera failure does
+not change job state. Cameras are for observation only and do not replace
+supervision, enclosures, interlocks, or emergency stops.
+
 When the worker has read them, `controller_settings` holds the controller's
 `$20` (soft limits), `$30`/`$31` (spindle range), `$32` (laser mode), and
 `$130`/`$131` (X/Y max travel) with `settings_read_at`; a failed read is

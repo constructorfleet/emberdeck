@@ -338,6 +338,15 @@ assumption. A repeated or overlapping path can make correlation ambiguous;
 missing coordinates, disconnects, pauses, and restarts can leave progress
 unknown. Acknowledged lines are never treated as proof of completed motion.
 
+If an administrator configured a camera for the assigned driver, the job row
+also shows a refreshed camera frame beside its progress and controls. A failed
+or delayed source is labeled **Camera offline or stale**; an older frame stays
+visible with its age. Camera frames are limited to one per second. A camera is
+only an observation aid: it does not detect every hazard or replace continuous
+operator supervision, an enclosure interlock, or an emergency stop.
+
+![Running job with its authenticated camera feed beside progress and controls](assets/screenshots/operator-camera-monitor.png)
+
 ![Running program with estimated live toolpath, head marker, legend, and G-code source open](assets/screenshots/operator-console-running-view.png)
 
 ## Pause and resume

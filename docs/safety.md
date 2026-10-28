@@ -14,6 +14,11 @@ feed-hold, or reset requests are not emergency stops and cannot guarantee that
 motion or laser output has stopped. A controller status is a report from the
 controller, not a physical sensor.
 
+A camera feed is only an observation aid. It can be delayed, stale, obstructed,
+or unavailable, and it does not detect every hazardous condition. It is not a
+safety device and does not replace direct supervision, enclosure interlocks, or
+an emergency stop.
+
 ## Laser output, motion, and travel
 
 Review the G-code and machine setup before dispatch. A toolpath display may label
