@@ -52,3 +52,12 @@ tab session. Keep the bootstrap admin key on the server side and give each
 remote worker its own credential. See the
 [credential contract](api.md#credential-roles-and-lifecycle) and the
 [Operator Guide](operator-guide.md#connect-and-choose-a-driver).
+
+## Server or worker shows no useful logs
+
+Logs go to standard error. Read them with `docker compose logs -f emberdeck`,
+`docker logs` with the container name, or `journalctl -u emberdeck -f`. The default `info`
+level omits successful reads and worker polls; set `EMBERDECK_LOG_LEVEL=debug`
+(or `-log-level debug`) to see every request, and `EMBERDECK_LOG_FORMAT=json`
+for a log collector. See [Deployment](deployment.md#logs) for what each level
+records.

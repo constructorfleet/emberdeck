@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     environment:
       EMBERDECK_API_KEY: ${EMBERDECK_API_KEY:?Set EMBERDECK_API_KEY in the environment}
+      EMBERDECK_LOG_LEVEL: ${EMBERDECK_LOG_LEVEL:-info}
+      EMBERDECK_LOG_FORMAT: ${EMBERDECK_LOG_FORMAT:-text}
     ports:
       - "8080:8080"
     volumes:
@@ -25,6 +27,8 @@ services:
     restart: unless-stopped
     environment:
       EMBERDECK_API_KEY: ${EMBERDECK_API_KEY:?Set EMBERDECK_API_KEY in the environment}
+      EMBERDECK_LOG_LEVEL: ${EMBERDECK_LOG_LEVEL:-info}
+      EMBERDECK_LOG_FORMAT: ${EMBERDECK_LOG_FORMAT:-text}
     ports:
       - "8080:8080"
     volumes:
@@ -41,6 +45,8 @@ services:
     restart: always
     environment:
       EMBERDECK_API_KEY: ${EMBERDECK_API_KEY:?Set EMBERDECK_API_KEY in the environment}
+      EMBERDECK_LOG_LEVEL: ${EMBERDECK_LOG_LEVEL:-info}
+      EMBERDECK_LOG_FORMAT: ${EMBERDECK_LOG_FORMAT:-text}
     command:
       - driver
       - -server

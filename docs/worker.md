@@ -69,8 +69,11 @@ drops, reverse-proxy errors, and session conflicts. When an idle poll fails, it
 logs the attempt number, the error, and the next delay, then retries with a new
 session. Delays start at 1 second, double after each failure up to 30 seconds,
 and are jittered between half and all of that value. A successful poll logs the
-reconnection and resets the delay. `worker.RunWithOptions` accepts
-`worker.Options` to change the delays and the log destination.
+reconnection and resets the delay. The worker also logs its first successful
+connection, each job it starts, and each job's terminal state and error.
+`worker.RunWithOptions` accepts `worker.Options` to change the delays and the log
+destination; the `emberdeck driver` command sends these lines through its
+structured logger (see [Deployment](deployment.md#logs)).
 
 A new session can receive HTTP 409 `driver ID already owned by another
 session` while the server still holds the previous process's session. That

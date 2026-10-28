@@ -43,7 +43,8 @@ type Options struct {
 	RetryMin time.Duration
 	// RetryMax caps the retry base delay. Default 30s.
 	RetryMax time.Duration
-	// Logf receives one line per retry, reconnection, and supervised restart.
+	// Logf receives one line per connection, job start and outcome, retry,
+	// reconnection, and supervised restart.
 	// Default log.Printf.
 	Logf func(format string, args ...any)
 }
@@ -304,6 +305,7 @@ func RunWithOptions(ctx context.Context, serverURL, key, id string, connect Conn
 	completed := make(map[string]progress)
 	retry := backoff{min: options.RetryMin, max: options.RetryMax}
 	failures := 0
+	connected := false
 	report := &controllerReport{}
 	for {
 		if err := ctx.Err(); err != nil {
@@ -329,6 +331,10 @@ func RunWithOptions(ctx context.Context, serverURL, key, id string, connect Conn
 			}
 			continue
 		}
+		if !connected {
+			options.Logf("worker %s: connected to %s", id, serverURL)
+			connected = true
+		}
 		if failures > 0 {
 			options.Logf("worker %s: reconnected after %d failed polls", id, failures)
 			failures = 0
@@ -353,6 +359,7 @@ func RunWithOptions(ctx context.Context, serverURL, key, id string, connect Conn
 			}
 			terminal := progress{JobID: assignment.Job.ID, Lease: assignment.Lease, State: "canceled"}
 			completed[assignment.Lease] = terminal
+			options.Logf("worker %s: job %s canceled before streaming", id, assignment.Job.ID)
 			if err := postTerminal(ctx, client, endpoint, key, report.poll(session, &terminal)); err != nil {
 				return err
 			}
@@ -374,6 +381,7 @@ func RunWithOptions(ctx context.Context, serverURL, key, id string, connect Conn
 				// A settings probe saw a reset banner; refuse without reopening.
 				terminal = progress{JobID: assignment.Job.ID, Lease: assignment.Lease, State: "failed", Error: reset}
 			} else {
+				options.Logf("worker %s: running job %s", id, assignment.Job.ID)
 				if assignment.Job.Content != nil {
 					gcode, fetchErr := fetchContent(ctx, client, endpoint, key, session, assignment)
 					if fetchErr != nil {
@@ -393,6 +401,11 @@ func RunWithOptions(ctx context.Context, serverURL, key, id string, connect Conn
 				}
 			}
 			completed[assignment.Lease] = terminal
+			if terminal.Error != "" {
+				options.Logf("worker %s: job %s %s: %s", id, assignment.Job.ID, terminal.State, terminal.Error)
+			} else {
+				options.Logf("worker %s: job %s %s", id, assignment.Job.ID, terminal.State)
+			}
 			if postErr := postTerminal(ctx, client, endpoint, key, report.poll(session, &terminal)); postErr != nil {
 				return postErr
 			}

@@ -7,7 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -26,7 +26,7 @@ var version = "dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		log.Print(err)
+		slog.Error(err.Error())
 		os.Exit(1)
 	}
 }
@@ -60,6 +60,7 @@ func runServe(args []string) error {
 	serialPort := flags.String("serial", "", "run a driver connected to a serial controller")
 	baud := flags.Int("baud", 115200, "serial connection baud rate")
 	serialDTR, serialRTS := addSerialModemFlags(flags)
+	logLevel, logFormat := addLogFlags(flags)
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -69,6 +70,11 @@ func runServe(args []string) error {
 	if flags.NArg() != 0 {
 		return errors.New("serve does not accept positional arguments")
 	}
+	logger, err := newLogger(os.Stderr, *logLevel, *logFormat)
+	if err != nil {
+		return err
+	}
+	slog.SetDefault(logger)
 	if connectionCount(*simulate, *tcpAddress, *serialPort) > 1 {
 		return errors.New("choose at most one local driver connection: -simulate, -tcp address, or -serial port")
 	}
@@ -83,15 +89,17 @@ func runServe(args []string) error {
 	if key == "" {
 		return errors.New("EMBERDECK_API_KEY is required")
 	}
+	logger.Info("starting EmberDeck server", "version", version, "data", *data, "plugins", *plugins)
 	handler, err := server.OpenWithPlugins(*data, key, *plugins)
 	if err != nil {
 		return fmt.Errorf("open job library: %w", err)
 	}
 	defer func() {
 		if err := handler.Close(); err != nil {
-			log.Printf("close job library: %v", err)
+			logger.Error("close job library", "error", err)
 		}
 	}()
+	handler.SetLogger(logger)
 	handler.SetBuildVersion(version)
 	listener, err := net.Listen("tcp", *listenAddress)
 	if err != nil {
@@ -112,6 +120,7 @@ func runServe(args []string) error {
 			WriteTimeout:      30 * time.Second,
 			IdleTimeout:       60 * time.Second,
 		}
+		logger.Info("serving metrics", "address", metricsListener.Addr().String(), "authenticated", os.Getenv("EMBERDECK_METRICS_KEY") != "")
 		metricsServeErr = make(chan error, 1)
 		go func() { metricsServeErr <- metricsServer.Serve(metricsListener) }()
 		defer func() { _ = metricsServer.Close() }()
@@ -129,6 +138,7 @@ func runServe(args []string) error {
 	defer cancelWorker()
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- httpServer.Serve(listener) }()
+	logger.Info("serving HTTP", "address", listener.Addr().String())
 	mode := connectionMode(*simulate, *tcpAddress, *serialPort)
 	var workerErr chan error
 	if mode != "" {
@@ -140,7 +150,8 @@ func runServe(args []string) error {
 		}
 		label := localDriverLabel(mode, *tcpAddress, *serialPort)
 		connect := connectionConnectorWithModemBits(mode, *tcpAddress, *serialPort, *baud, modemBits)
-		logf := func(format string, args ...any) { log.Printf(label+": "+format, args...) }
+		logf := func(format string, args ...any) { logger.Info(fmt.Sprintf(format, args...), "driver", label) }
+		logger.Info("starting local driver", "driver", label, "id", id)
 		go func() {
 			// A local worker failure marks the driver offline (its heartbeat
 			// expires) and restarts it; it never stops the HTTP server.
@@ -175,10 +186,11 @@ func runServe(args []string) error {
 		case err := <-workerErr:
 			workerErr = nil
 			if err != nil && !errors.Is(err, context.Canceled) {
-				log.Printf("%s stopped: %v; driver offline, HTTP server still running", localDriverLabel(mode, *tcpAddress, *serialPort), err)
+				logger.Error("local driver stopped; driver offline, HTTP server still running", "driver", localDriverLabel(mode, *tcpAddress, *serialPort), "error", err)
 			}
 		}
 	}
+	logger.Info("shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
@@ -210,6 +222,7 @@ func runDriver(args []string) error {
 	baud := flags.Int("baud", 115200, "serial connection baud rate")
 	serialDTR, serialRTS := addSerialModemFlags(flags)
 	listPorts := flags.Bool("list-ports", false, "list available serial ports and exit")
+	logLevel, logFormat := addLogFlags(flags)
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -249,17 +262,64 @@ func runDriver(args []string) error {
 	if err := validateServerURL(*serverURLFlag); err != nil {
 		return err
 	}
+	logger, err := newLogger(os.Stderr, *logLevel, *logFormat)
+	if err != nil {
+		return err
+	}
+	slog.SetDefault(logger)
 	key := os.Getenv("EMBERDECK_API_KEY")
 	if key == "" {
 		return errors.New("EMBERDECK_API_KEY is required")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	logger.Info("starting EmberDeck driver", "version", version, "server", *serverURLFlag, "id", *id, "connection", localDriverLabel(connectionMode(*simulate, *tcpAddress, *serialPort), *tcpAddress, *serialPort))
 	err = worker.Run(ctx, *serverURLFlag, key, *id, connectionConnectorWithModemBits(connectionMode(*simulate, *tcpAddress, *serialPort), *tcpAddress, *serialPort, *baud, modemBits))
 	if errors.Is(err, context.Canceled) && ctx.Err() != nil {
 		return nil
 	}
 	return err
+}
+
+// addLogFlags registers -log-level and -log-format, defaulting to
+// EMBERDECK_LOG_LEVEL and EMBERDECK_LOG_FORMAT so containers can set them.
+func addLogFlags(flags *flag.FlagSet) (*string, *string) {
+	level := flags.String("log-level", envOr("EMBERDECK_LOG_LEVEL", "info"), "log level: debug, info, warn, or error (env EMBERDECK_LOG_LEVEL)")
+	format := flags.String("log-format", envOr("EMBERDECK_LOG_FORMAT", "text"), "log format: text or json (env EMBERDECK_LOG_FORMAT)")
+	return level, format
+}
+
+func envOr(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
+}
+
+// newLogger builds a structured logger; empty settings mean info and text.
+func newLogger(w io.Writer, level, format string) (*slog.Logger, error) {
+	var minimum slog.Level
+	switch level {
+	case "debug":
+		minimum = slog.LevelDebug
+	case "", "info":
+		minimum = slog.LevelInfo
+	case "warn":
+		minimum = slog.LevelWarn
+	case "error":
+		minimum = slog.LevelError
+	default:
+		return nil, fmt.Errorf("-log-level must be debug, info, warn, or error, not %q", level)
+	}
+	options := &slog.HandlerOptions{Level: minimum}
+	switch format {
+	case "", "text":
+		return slog.New(slog.NewTextHandler(w, options)), nil
+	case "json":
+		return slog.New(slog.NewJSONHandler(w, options)), nil
+	default:
+		return nil, fmt.Errorf("-log-format must be text or json, not %q", format)
+	}
 }
 
 func connectionCount(simulate bool, tcpAddress, serialPort string) int {

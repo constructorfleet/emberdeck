@@ -182,7 +182,7 @@ func (s *Server) persistCredentials(credentials map[string]credentialRecord) err
 	library := credentialLibrary{Version: credentialStoreVersion, Credentials: credentials}
 	published, err := durableJSON(filepath.Join(s.dir, "credentials.json"), library)
 	if published && err != nil {
-		s.storageErr = err
+		s.failStorage(err)
 	}
 	if err != nil {
 		return err
@@ -420,7 +420,7 @@ func (s *Server) revokeCredential(w http.ResponseWriter, r *http.Request) {
 		if err := s.save(jobs); err != nil {
 			// The credential revocation is already durable. Until the active job
 			// transition is certain, disable all APIs; restart recovery interrupts it.
-			s.storageErr = err
+			s.failStorage(err)
 			fail(w, http.StatusInternalServerError, "could not persist interrupted job after credential revocation")
 			return
 		}

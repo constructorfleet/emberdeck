@@ -144,7 +144,7 @@ func (s *Server) saveProfiles(profiles map[string]MachineProfile) error {
 	}
 	published, err := durableJSON(filepath.Join(s.dir, "profiles.json"), profiles)
 	if published && err != nil {
-		s.storageErr = err
+		s.failStorage(err)
 	}
 	if err != nil {
 		return err
