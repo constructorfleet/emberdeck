@@ -10,6 +10,7 @@ import (
 )
 
 const rectangleGeneratorVersion = "rectangle-v1"
+const vectorGeneratorVersion = "vector-v1"
 
 // JobProvenance is an immutable value snapshot of designer inputs at generation.
 type JobProvenance struct {
@@ -45,12 +46,20 @@ func (s *Server) generateProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "profile is missing or its revision changed; review and save the project before generation")
 		return
 	}
-	values := projectRequest{SchemaVersion: project.SchemaVersion, Name: project.Name, ProfileID: project.ProfileID, ProfileRevision: project.ProfileRevision, Rectangle: project.Rectangle, Operation: project.Operation}
-	if err := validateProjectValues(values, profile); err != nil {
+	if err := validateProjectValues(projectRequestFromProject(project), profile); err != nil {
 		fail(w, 409, "saved project no longer validates against its profile")
 		return
 	}
 	program := generateRectangleProgram(project, profile)
+	generatorVersion := rectangleGeneratorVersion
+	if project.SchemaVersion == 2 {
+		if err := validateVectorProjectValues(project, profile, true); err != nil {
+			fail(w, 409, "saved vector project cannot be generated: "+err.Error())
+			return
+		}
+		program = generateVectorProgram(project, profile)
+		generatorVersion = vectorGeneratorVersion
+	}
 	count, err := driver.Validate(program)
 	if err != nil {
 		fail(w, http.StatusUnprocessableEntity, "generated program failed GRBL validation: "+err.Error())
@@ -62,7 +71,7 @@ func (s *Server) generateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	job := Job{ID: id, Name: project.Name + ".gcode", Gcode: program, State: "queued", Created: time.Now().UTC(), Total: count,
-		Provenance: &JobProvenance{GeneratorVersion: rectangleGeneratorVersion, Project: project, Profile: profile}}
+		Provenance: &JobProvenance{GeneratorVersion: generatorVersion, Project: project, Profile: profile}}
 	jobs := s.copyJobs()
 	jobs[id] = job
 	if err := s.save(jobs); err != nil {
@@ -71,6 +80,40 @@ func (s *Server) generateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Location", "/api/v1/jobs/"+id)
 	respond(w, http.StatusCreated, job)
+}
+
+func generateVectorProgram(project DesignerProject, profile MachineProfile) string {
+	lines := []string{"M5", "G21", "G90", "G94"}
+	for _, operation := range project.Operations {
+		for _, object := range project.Objects {
+			if object.OperationID != operation.ID {
+				continue
+			}
+			for _, path := range object.Subpaths {
+				points := path.Points
+				first := points[0]
+				lines = append(lines, "G0 X"+formatMilli(milli(first.XMM))+" Y"+formatMilli(milli(first.YMM)))
+				// Dynamic laser mode keeps output disabled when motion is stopped,
+				// including feed holds; cutting uses the same fail-dark mode.
+				lines = append(lines, "M4 S0")
+				power := powerS(profile.MaxS, operation.PowerPercent)
+				feed := formatMilli(milli(operation.FeedMMMin))
+				for i := 1; i < len(points); i++ {
+					point := points[i]
+					move := "G1 X" + formatMilli(milli(point.XMM)) + " Y" + formatMilli(milli(point.YMM))
+					if i == 1 {
+						move += " F" + feed + " S" + strconv.FormatInt(power, 10)
+					}
+					lines = append(lines, move)
+				}
+				if path.Closed {
+					lines = append(lines, "G1 X"+formatMilli(milli(first.XMM))+" Y"+formatMilli(milli(first.YMM)))
+				}
+				lines = append(lines, "M5")
+			}
+		}
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 func generateRectangleProgram(project DesignerProject, profile MachineProfile) string {

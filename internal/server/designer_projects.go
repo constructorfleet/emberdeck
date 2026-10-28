@@ -33,9 +33,69 @@ type DesignerProject struct {
 	Name            string            `json:"name"`
 	ProfileID       string            `json:"profile_id"`
 	ProfileRevision int               `json:"profile_revision"`
-	Rectangle       Rectangle         `json:"rectangle"`
-	Operation       DesignerOperation `json:"operation"`
+	Rectangle       Rectangle         `json:"rectangle,omitempty"`
+	Operation       DesignerOperation `json:"operation,omitempty"`
+	Units           string            `json:"units,omitempty"`
+	Objects         []VectorObject    `json:"objects,omitempty"`
+	Operations      []VectorOperation `json:"operations,omitempty"`
 	ProfileStale    bool              `json:"profile_stale"`
+}
+
+func (project DesignerProject) MarshalJSON() ([]byte, error) {
+	type projectJSON struct {
+		SchemaVersion   int                `json:"schema_version"`
+		ID              string             `json:"id"`
+		Revision        int                `json:"revision"`
+		Name            string             `json:"name"`
+		ProfileID       string             `json:"profile_id"`
+		ProfileRevision int                `json:"profile_revision"`
+		Rectangle       *Rectangle         `json:"rectangle,omitempty"`
+		Operation       *DesignerOperation `json:"operation,omitempty"`
+		Units           string             `json:"units,omitempty"`
+		Objects         []VectorObject     `json:"objects,omitempty"`
+		Operations      *[]VectorOperation `json:"operations,omitempty"`
+		ProfileStale    bool               `json:"profile_stale"`
+	}
+	encoded := projectJSON{SchemaVersion: project.SchemaVersion, ID: project.ID, Revision: project.Revision, Name: project.Name,
+		ProfileID: project.ProfileID, ProfileRevision: project.ProfileRevision, ProfileStale: project.ProfileStale}
+	if project.SchemaVersion == 1 {
+		encoded.Rectangle, encoded.Operation = &project.Rectangle, &project.Operation
+	} else {
+		encoded.Units, encoded.Objects, encoded.Operations = project.Units, project.Objects, &project.Operations
+		if *encoded.Operations == nil {
+			empty := []VectorOperation{}
+			encoded.Operations = &empty
+		}
+	}
+	return json.Marshal(encoded)
+}
+
+// VectorPoint is a lower-left-origin work coordinate in millimetres.
+type VectorPoint struct {
+	XMM float64 `json:"x_mm"`
+	YMM float64 `json:"y_mm"`
+}
+
+// VectorSubpath is a line path; closed paths return to their first point.
+type VectorSubpath struct {
+	Points []VectorPoint `json:"points"`
+	Closed bool          `json:"closed"`
+}
+
+// VectorObject keeps editable geometry independent from machine operation settings.
+type VectorObject struct {
+	Kind        string          `json:"kind"`
+	ID          string          `json:"id"`
+	OperationID string          `json:"operation_id,omitempty"`
+	Subpaths    []VectorSubpath `json:"subpaths"`
+}
+
+// VectorOperation is an explicitly ordered vector cutting or engraving layer.
+type VectorOperation struct {
+	ID           string  `json:"id"`
+	Type         string  `json:"type"`
+	FeedMMMin    float64 `json:"feed_mm_min"`
+	PowerPercent float64 `json:"power_percent"`
 }
 
 type projectRequest struct {
@@ -45,6 +105,9 @@ type projectRequest struct {
 	ProfileRevision  int               `json:"profile_revision"`
 	Rectangle        Rectangle         `json:"rectangle"`
 	Operation        DesignerOperation `json:"operation"`
+	Units            string            `json:"units,omitempty"`
+	Objects          []VectorObject    `json:"objects,omitempty"`
+	Operations       []VectorOperation `json:"operations,omitempty"`
 	Revision         json.RawMessage   `json:"revision"`
 	ExpectedRevision int               `json:"-"`
 }
@@ -68,7 +131,7 @@ func (s *Server) saveProjects(projects map[string]DesignerProject) error {
 }
 
 func validStoredProject(project DesignerProject, profiles map[string]MachineProfile) bool {
-	if project.SchemaVersion != 1 || project.Name == "" || project.Name != strings.TrimSpace(project.Name) || len(project.Name) > 120 ||
+	if (project.SchemaVersion != 1 && project.SchemaVersion != 2) || project.Name == "" || project.Name != strings.TrimSpace(project.Name) || len(project.Name) > 120 ||
 		!validHexID(project.ProfileID) || project.ProfileRevision < 1 || !validProjectIntrinsic(project) {
 		return false
 	}
@@ -79,11 +142,13 @@ func validStoredProject(project DesignerProject, profiles map[string]MachineProf
 	if project.ProfileRevision < profile.Revision {
 		return true
 	}
-	input := projectRequest{SchemaVersion: project.SchemaVersion, Name: project.Name, ProfileID: project.ProfileID, ProfileRevision: project.ProfileRevision, Rectangle: project.Rectangle, Operation: project.Operation}
-	return validateProjectValues(input, profile) == nil
+	return validateProjectValues(projectRequestFromProject(project), profile) == nil
 }
 
 func validProjectIntrinsic(project DesignerProject) bool {
+	if project.SchemaVersion == 2 {
+		return validVectorProjectIntrinsic(project)
+	}
 	g, op := project.Rectangle, project.Operation
 	return finite(g.XMM) && finite(g.YMM) && finite(g.WidthMM) && finite(g.HeightMM) && finite(op.FeedMMMin) && finite(op.PowerPercent) &&
 		validPrecision(g.XMM) && validPrecision(g.YMM) && validPrecision(g.WidthMM) && validPrecision(g.HeightMM) && validPrecision(op.FeedMMMin) && validPrecision(op.PowerPercent) &&
@@ -98,7 +163,7 @@ func validateProjectInput(w http.ResponseWriter, r *http.Request, updating bool)
 		return input, false
 	}
 	input.Name = strings.TrimSpace(input.Name)
-	if input.SchemaVersion != 1 || input.Name == "" || len(input.Name) > 120 {
+	if (input.SchemaVersion != 1 && input.SchemaVersion != 2) || input.Name == "" || len(input.Name) > 120 {
 		fail(w, 400, "invalid designer project")
 		return input, false
 	}
@@ -106,11 +171,8 @@ func validateProjectInput(w http.ResponseWriter, r *http.Request, updating bool)
 		fail(w, 400, "invalid project revision")
 		return input, false
 	}
-	g := input.Rectangle
-	op := input.Operation
-	if op.Type != "vector-engrave" || !finite(g.XMM) || !finite(g.YMM) || !finite(g.WidthMM) || !finite(g.HeightMM) || !finite(op.FeedMMMin) || !finite(op.PowerPercent) ||
-		!validPrecision(g.XMM) || !validPrecision(g.YMM) || !validPrecision(g.WidthMM) || !validPrecision(g.HeightMM) || !validPrecision(op.FeedMMMin) || !validPrecision(op.PowerPercent) ||
-		g.XMM < 0 || g.YMM < 0 || g.WidthMM <= 0 || g.HeightMM <= 0 || g.XMM > 10000 || g.YMM > 10000 || g.WidthMM > 10000 || g.HeightMM > 10000 || op.FeedMMMin <= 0 || op.FeedMMMin > 100000 || op.PowerPercent <= 0 || op.PowerPercent > 100 {
+	project := DesignerProject{SchemaVersion: input.SchemaVersion, Name: input.Name, ProfileID: input.ProfileID, ProfileRevision: input.ProfileRevision, Rectangle: input.Rectangle, Operation: input.Operation, Units: input.Units, Objects: input.Objects, Operations: input.Operations}
+	if !validProjectIntrinsic(project) {
 		fail(w, 400, "rectangle or vector engraving settings are outside the declared profile limits")
 		return input, false
 	}
@@ -167,7 +229,7 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "could not allocate project ID")
 		return
 	}
-	project := DesignerProject{SchemaVersion: input.SchemaVersion, ID: id, Revision: 1, Name: input.Name, ProfileID: input.ProfileID, ProfileRevision: input.ProfileRevision, Rectangle: input.Rectangle, Operation: input.Operation}
+	project := DesignerProject{SchemaVersion: input.SchemaVersion, ID: id, Revision: 1, Name: input.Name, ProfileID: input.ProfileID, ProfileRevision: input.ProfileRevision, Rectangle: input.Rectangle, Operation: input.Operation, Units: input.Units, Objects: input.Objects, Operations: input.Operations}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Profile validation is repeated under the mutation lock to prevent a concurrent update.
@@ -191,12 +253,149 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func validateProjectValues(input projectRequest, profile MachineProfile) error {
+	if input.SchemaVersion == 2 {
+		project := DesignerProject{SchemaVersion: 2, Name: input.Name, ProfileID: input.ProfileID, ProfileRevision: input.ProfileRevision, Units: input.Units, Objects: input.Objects, Operations: input.Operations}
+		return validateVectorProjectValues(project, profile, false)
+	}
 	g, op := input.Rectangle, input.Operation
 	if op.Type != "vector-engrave" || !finite(g.XMM) || !finite(g.YMM) || !finite(g.WidthMM) || !finite(g.HeightMM) || !finite(op.FeedMMMin) || !finite(op.PowerPercent) ||
 		!validPrecision(g.XMM) || !validPrecision(g.YMM) || !validPrecision(g.WidthMM) || !validPrecision(g.HeightMM) || !validPrecision(op.FeedMMMin) || !validPrecision(op.PowerPercent) ||
 		g.XMM < 0 || g.YMM < 0 || g.WidthMM <= 0 || g.HeightMM <= 0 || g.XMM > 10000 || g.YMM > 10000 || g.WidthMM > 10000 || g.HeightMM > 10000 || milli(g.XMM)+milli(g.WidthMM) > milli(profile.WidthMM) || milli(g.YMM)+milli(g.HeightMM) > milli(profile.HeightMM) ||
 		op.FeedMMMin < profile.MinFeed || op.FeedMMMin > profile.MaxFeed || op.PowerPercent <= 0 || op.PowerPercent > profile.MaxPowerPct || powerS(profile.MaxS, op.PowerPercent) < 1 {
 		return errors.New("rectangle or vector engraving settings are outside the declared profile limits")
+	}
+	return nil
+}
+
+func projectRequestFromProject(project DesignerProject) projectRequest {
+	return projectRequest{SchemaVersion: project.SchemaVersion, Name: project.Name, ProfileID: project.ProfileID, ProfileRevision: project.ProfileRevision, Rectangle: project.Rectangle, Operation: project.Operation, Units: project.Units, Objects: project.Objects, Operations: project.Operations}
+}
+
+func validVectorProjectIntrinsic(project DesignerProject) bool {
+	if project.Units != "mm" || len(project.Objects) == 0 || len(project.Objects) > 500 || len(project.Operations) > 100 {
+		return false
+	}
+	operationIDs := make(map[string]string, len(project.Operations))
+	for _, operation := range project.Operations {
+		_, duplicate := operationIDs[operation.ID]
+		if !validObjectID(operation.ID) || duplicate ||
+			(operation.Type != "vector-engrave" && operation.Type != "vector-cut") ||
+			!finite(operation.FeedMMMin) || !finite(operation.PowerPercent) ||
+			!validPrecision(operation.FeedMMMin) || !validPrecision(operation.PowerPercent) ||
+			operation.FeedMMMin <= 0 || operation.FeedMMMin > 100000 || operation.PowerPercent <= 0 || operation.PowerPercent > 100 {
+			return false
+		}
+		operationIDs[operation.ID] = operation.Type
+	}
+	objectIDs := make(map[string]bool, len(project.Objects))
+	totalPoints := 0
+	for _, object := range project.Objects {
+		if !validObjectID(object.ID) || objectIDs[object.ID] ||
+			(object.Kind != "rectangle" && object.Kind != "ellipse" && object.Kind != "line" && object.Kind != "path") ||
+			len(object.Subpaths) == 0 || len(object.Subpaths) > 500 {
+			return false
+		}
+		if object.Kind == "rectangle" && (len(object.Subpaths) != 1 || !object.Subpaths[0].Closed || len(object.Subpaths[0].Points) != 4) ||
+			object.Kind == "ellipse" && (len(object.Subpaths) != 1 || !object.Subpaths[0].Closed || len(object.Subpaths[0].Points) < 8) ||
+			object.Kind == "line" && (len(object.Subpaths) != 1 || object.Subpaths[0].Closed || len(object.Subpaths[0].Points) != 2) {
+			return false
+		}
+		objectIDs[object.ID] = true
+		if object.OperationID != "" {
+			typ, exists := operationIDs[object.OperationID]
+			if !exists {
+				return false
+			}
+			if typ == "vector-cut" {
+				for _, path := range object.Subpaths {
+					if !path.Closed || !nonzeroPathArea(path.Points) {
+						return false
+					}
+				}
+			}
+		}
+		for _, path := range object.Subpaths {
+			minimum := 2
+			if path.Closed {
+				minimum = 3
+			}
+			if len(path.Points) < minimum {
+				return false
+			}
+			totalPoints += len(path.Points)
+			if totalPoints > 4000 {
+				return false
+			}
+			for i, point := range path.Points {
+				if !finite(point.XMM) || !finite(point.YMM) || !validPrecision(point.XMM) || !validPrecision(point.YMM) || point.XMM < 0 || point.YMM < 0 || point.XMM > 10000 || point.YMM > 10000 {
+					return false
+				}
+				if i > 0 && milli(point.XMM) == milli(path.Points[i-1].XMM) && milli(point.YMM) == milli(path.Points[i-1].YMM) {
+					return false
+				}
+			}
+			if path.Closed {
+				first, last := path.Points[0], path.Points[len(path.Points)-1]
+				if milli(first.XMM) == milli(last.XMM) && milli(first.YMM) == milli(last.YMM) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+func validObjectID(id string) bool {
+	if len(id) == 0 || len(id) > 64 {
+		return false
+	}
+	for _, r := range id {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func nonzeroPathArea(points []VectorPoint) bool {
+	var twiceArea int64
+	for i, point := range points {
+		next := points[(i+1)%len(points)]
+		twiceArea += milli(point.XMM)*milli(next.YMM) - milli(next.XMM)*milli(point.YMM)
+	}
+	return twiceArea != 0
+}
+
+func validateVectorProjectValues(project DesignerProject, profile MachineProfile, requireAssigned bool) error {
+	if !validVectorProjectIntrinsic(project) {
+		return errors.New("invalid vector project geometry or operations")
+	}
+	operations := make(map[string]VectorOperation, len(project.Operations))
+	for _, operation := range project.Operations {
+		if operation.FeedMMMin < profile.MinFeed || operation.FeedMMMin > profile.MaxFeed || operation.PowerPercent > profile.MaxPowerPct || powerS(profile.MaxS, operation.PowerPercent) < 1 {
+			return errors.New("vector operation feed or power is outside the declared profile limits")
+		}
+		operations[operation.ID] = operation
+	}
+	for _, object := range project.Objects {
+		for _, path := range object.Subpaths {
+			for _, point := range path.Points {
+				if milli(point.XMM) > milli(profile.WidthMM) || milli(point.YMM) > milli(profile.HeightMM) {
+					return errors.New("vector geometry is outside the declared workspace")
+				}
+			}
+		}
+		if object.OperationID == "" {
+			if requireAssigned {
+				return errors.New("assign every vector object to an operation before generation")
+			}
+			continue
+		}
+		for _, path := range object.Subpaths {
+			if operations[object.OperationID].Type == "vector-cut" && !path.Closed {
+				return errors.New("vector cutting requires closed paths")
+			}
+		}
 	}
 	return nil
 }
@@ -238,7 +437,7 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	updated := DesignerProject{SchemaVersion: input.SchemaVersion, ID: id, Revision: current.Revision + 1, Name: input.Name, ProfileID: input.ProfileID, ProfileRevision: input.ProfileRevision, Rectangle: input.Rectangle, Operation: input.Operation}
+	updated := DesignerProject{SchemaVersion: input.SchemaVersion, ID: id, Revision: current.Revision + 1, Name: input.Name, ProfileID: input.ProfileID, ProfileRevision: input.ProfileRevision, Rectangle: input.Rectangle, Operation: input.Operation, Units: input.Units, Objects: input.Objects, Operations: input.Operations}
 	projects := copyProjects(s.projects)
 	projects[id] = updated
 	if err := s.saveProjects(projects); err != nil {
