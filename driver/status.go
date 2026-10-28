@@ -95,3 +95,57 @@ func parseVector(raw string) (Vector, error) {
 	}
 	return vector, nil
 }
+
+// plannerBlocksAvailable returns the Bf planner block count from a GRBL status
+// line, or -1 when it is absent or malformed. Bf is diagnostic, so a malformed
+// value is ignored rather than treated as a controller fault.
+func plannerBlocksAvailable(line string) int {
+	line = strings.TrimSpace(line)
+	if len(line) < 3 || line[0] != '<' || line[len(line)-1] != '>' {
+		return -1
+	}
+	for _, field := range strings.Split(line[1:len(line)-1], "|") {
+		value, found := strings.CutPrefix(field, "Bf:")
+		if !found {
+			continue
+		}
+		blocks, _, _ := strings.Cut(value, ",")
+		if n, err := strconv.Atoi(blocks); err == nil && n >= 0 {
+			return n
+		}
+		return -1
+	}
+	return -1
+}
+
+// motionProgress remembers the previous fresh status report so a stream can
+// tell a moving controller from one that repeats an unchanged report.
+type motionProgress struct {
+	known         bool
+	position      Vector
+	work          bool
+	hasPosition   bool
+	plannerBlocks int
+}
+
+// observe records a fresh status report and its Bf planner block count (-1 when
+// absent). It reports whether the position or planner block count changed since
+// the previous fresh report. Unparseable reports reset the comparison and never
+// count as progress.
+func (p *motionProgress) observe(report StatusReport, parsed bool, plannerBlocks int) bool {
+	if !parsed {
+		*p = motionProgress{}
+		return false
+	}
+	next := motionProgress{known: true, plannerBlocks: plannerBlocks}
+	switch {
+	case report.MachinePosition != nil:
+		next.position, next.hasPosition = *report.MachinePosition, true
+	case report.WorkPosition != nil:
+		next.position, next.hasPosition, next.work = *report.WorkPosition, true, true
+	}
+	moved := p.known && p.hasPosition && next.hasPosition && p.work == next.work && p.position != next.position
+	planned := p.known && p.plannerBlocks >= 0 && next.plannerBlocks >= 0 && p.plannerBlocks != next.plannerBlocks
+	*p = next
+	return moved || planned
+}
