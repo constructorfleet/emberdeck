@@ -5,8 +5,10 @@ server with its GRBL simulator. It covers API key connection, G-code upload,
 the safety confirmation gate, live progress, program viewing, completion,
 controller acknowledged pause and resume, cancellation while paused, and deletion.
 The pause test observes the simulator's `Hold:0` acknowledgement across repeated
-job polls, confirms progress stays fixed while held, and observes `Run` after
-resume before checking completion. It does not connect to or qualify physical
+job polls and confirms progress stays fixed while held. After the explicit
+Resume, it verifies acknowledged progress advances and accepts either a sampled
+`Run` report or a completed job with the final `Idle` report; a short simulator
+job can finish between UI polls. It does not connect to or qualify physical
 hardware.
 
 ## Run locally

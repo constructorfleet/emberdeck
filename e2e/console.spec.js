@@ -86,16 +86,17 @@ test('operator can cancel a running job', async ({ page }) => {
 
 test('operator pauses on controller acknowledgement, confirms resume, and completes', async ({ page }) => {
   const controllerStates = [];
+  const name = `operator-pause-resume-${test.info().repeatEachIndex}-${test.info().retry}.gcode`;
   page.on('response', async (response) => {
     if (response.request().method() !== 'GET' || new URL(response.url()).pathname !== '/api/v1/jobs') return;
     try {
       const jobs = await response.json();
-      for (const job of jobs) if (job.controller_state) controllerStates.push(job.controller_state);
+      for (const job of jobs) if (job.name === name && job.controller_state) controllerStates.push(job.controller_state);
     } catch (_) { /* Non-JSON responses are reported by the page assertions. */ }
   });
   await connect(page);
   const lines = 1200;
-  const row = await uploadJob(page, `operator-pause-resume-${test.info().retry}.gcode`, lines);
+  const row = await uploadJob(page, name, lines);
   const progress = await startJob(page, row);
   await waitForProgress(progress, lines);
   await row.getByRole('button', { name: 'View' }).click();
@@ -117,11 +118,15 @@ test('operator pauses on controller acknowledgement, confirms resume, and comple
   await expect(resume).toBeDisabled();
   await page.locator('#operator-confirmation').check();
   await expect(resume).toBeEnabled();
+  const resumeStateIndex = controllerStates.length;
   await resume.click();
   await expect(page.locator('#operator-confirmation')).not.toBeChecked();
-  await expect(row).toContainText(/resuming/i);
-  await expect(row).toContainText(/running/i, { timeout: 15000 });
-  await expect(row).toContainText(/Run/);
+  await expect.poll(async () => progress.evaluate((node) => node.value), { timeout: 15000 }).toBeGreaterThan(pausedAt);
+  await expect.poll(async () => {
+    const postResumeStates = controllerStates.slice(resumeStateIndex);
+    const text = await row.innerText();
+    return postResumeStates.includes('Run') || (postResumeStates.includes('Idle') && /completed/i.test(text));
+  }, { timeout: 15000 }).toBe(true);
   await expect(row).toContainText(/completed/i, { timeout: 30000 });
   await expect(progress).toHaveJSProperty('value', lines);
 });
