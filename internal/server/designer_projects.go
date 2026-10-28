@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Rectangle is editable lower-left-origin geometry in millimetres.
@@ -31,6 +32,8 @@ type DesignerProject struct {
 	SchemaVersion   int               `json:"schema_version"`
 	ID              string            `json:"id"`
 	Revision        int               `json:"revision"`
+	UpdatedAt       *time.Time        `json:"updated_at,omitempty"`
+	UpdatedBy       string            `json:"updated_by,omitempty"`
 	Name            string            `json:"name"`
 	ProfileID       string            `json:"profile_id"`
 	ProfileRevision int               `json:"profile_revision"`
@@ -47,6 +50,8 @@ func (project DesignerProject) MarshalJSON() ([]byte, error) {
 		SchemaVersion   int                `json:"schema_version"`
 		ID              string             `json:"id"`
 		Revision        int                `json:"revision"`
+		UpdatedAt       *time.Time         `json:"updated_at,omitempty"`
+		UpdatedBy       string             `json:"updated_by,omitempty"`
 		Name            string             `json:"name"`
 		ProfileID       string             `json:"profile_id"`
 		ProfileRevision int                `json:"profile_revision"`
@@ -57,7 +62,7 @@ func (project DesignerProject) MarshalJSON() ([]byte, error) {
 		Operations      *[]VectorOperation `json:"operations,omitempty"`
 		ProfileStale    bool               `json:"profile_stale"`
 	}
-	encoded := projectJSON{SchemaVersion: project.SchemaVersion, ID: project.ID, Revision: project.Revision, Name: project.Name,
+	encoded := projectJSON{SchemaVersion: project.SchemaVersion, ID: project.ID, Revision: project.Revision, UpdatedAt: project.UpdatedAt, UpdatedBy: project.UpdatedBy, Name: project.Name,
 		ProfileID: project.ProfileID, ProfileRevision: project.ProfileRevision, ProfileStale: project.ProfileStale}
 	if project.SchemaVersion == 1 {
 		encoded.Rectangle, encoded.Operation = &project.Rectangle, &project.Operation
@@ -295,7 +300,8 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "could not allocate project ID")
 		return
 	}
-	project := DesignerProject{SchemaVersion: input.SchemaVersion, ID: id, Revision: 1, Name: input.Name, ProfileID: input.ProfileID, ProfileRevision: input.ProfileRevision, Rectangle: input.Rectangle, Operation: input.Operation, Units: input.Units, Objects: input.Objects, Operations: input.Operations}
+	now := time.Now().UTC()
+	project := DesignerProject{SchemaVersion: input.SchemaVersion, ID: id, Revision: 1, UpdatedAt: &now, UpdatedBy: requestPrincipal(r).Name, Name: input.Name, ProfileID: input.ProfileID, ProfileRevision: input.ProfileRevision, Rectangle: input.Rectangle, Operation: input.Operation, Units: input.Units, Objects: input.Objects, Operations: input.Operations}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Profile validation is repeated under the mutation lock to prevent a concurrent update.
@@ -597,7 +603,7 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if input.ExpectedRevision != current.Revision {
-		fail(w, 409, "project revision conflict")
+		respond(w, http.StatusConflict, map[string]any{"error": "project revision conflict", "current": s.projectView(current)})
 		return
 	}
 	latest, exists := s.profiles[input.ProfileID]
@@ -609,7 +615,8 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	updated := DesignerProject{SchemaVersion: input.SchemaVersion, ID: id, Revision: current.Revision + 1, Name: input.Name, ProfileID: input.ProfileID, ProfileRevision: input.ProfileRevision, Rectangle: input.Rectangle, Operation: input.Operation, Units: input.Units, Objects: input.Objects, Operations: input.Operations}
+	now := time.Now().UTC()
+	updated := DesignerProject{SchemaVersion: input.SchemaVersion, ID: id, Revision: current.Revision + 1, UpdatedAt: &now, UpdatedBy: requestPrincipal(r).Name, Name: input.Name, ProfileID: input.ProfileID, ProfileRevision: input.ProfileRevision, Rectangle: input.Rectangle, Operation: input.Operation, Units: input.Units, Objects: input.Objects, Operations: input.Operations}
 	projects := copyProjects(s.projects)
 	projects[id] = updated
 	if err := s.saveProjects(projects); err != nil {

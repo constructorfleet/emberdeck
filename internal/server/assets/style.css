@@ -1042,6 +1042,22 @@ footer {
   color: var(--warning);
 }
 
+.remote-project-change {
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border: 1px solid var(--warning);
+  background: var(--surface-inset);
+  color: var(--warning);
+}
+
+.remote-project-change p {
+  margin: 0 0 var(--space-2);
+}
+
+.remote-project-change[hidden] {
+  display: none;
+}
+
 .form-validation[hidden] {
   display: none;
 }

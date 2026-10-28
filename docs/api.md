@@ -759,9 +759,20 @@ project references it.
 
 `GET /projects` returns projects in ID order. `POST /projects` creates an
 editable project and returns 201 with a Location header. `GET /projects/{id}`
-reads one project. `PUT /projects/{id}` requires its current positive `revision`
-and increments it on success; stale writes return 409. `DELETE /projects/{id}`
-requires `{"revision":N}` and returns 204. Missing projects return 404.
+reads one project. Each save advances the positive integer `revision` and
+returns `updated_at` (RFC 3339 UTC) and `updated_by` (the authenticated
+credential name, when present). `PUT /projects/{id}` requires the revision the
+editor read; stale writes return 409 with both `error` and the current saved
+project, including its revision and save metadata. Clients must keep local edits
+when this happens and offer reload or save-as-copy recovery. This revision check
+also protects the race where another save lands after a client's last refresh.
+`DELETE /projects/{id}` requires `{"revision":N}` and returns 204. Missing
+projects return 404. Projects written before save metadata was introduced may
+omit `updated_at` and `updated_by` until the next save.
+
+```json
+{"error":"project revision conflict","current":{"schema_version":1,"id":"PROJECT_ID","revision":3,"updated_at":"2026-10-28T18:42:00Z","updated_by":"shop operator","name":"Panel outline","profile_id":"PROFILE_ID","profile_revision":1,"rectangle":{"x_mm":10,"y_mm":20,"width_mm":30,"height_mm":20},"operation":{"type":"vector-engrave","feed_mm_min":600,"power_percent":25},"profile_stale":false}}
+```
 
 Version 1 request shape is `{"schema_version":1,"name":"Panel outline",
 "profile_id":"PROFILE_ID","profile_revision":1,"rectangle":{"x_mm":10,

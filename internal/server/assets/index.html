@@ -66,6 +66,7 @@
             <h4 id="project-form-title">New rectangle project</h4>
             <label for="project-name">Project name</label><input id="project-name" maxlength="120" required>
             <p id="stale-profile-warning" class="form-validation warning" role="status" hidden>Profile revision changed. Review this project against the current declared envelope and save it before generating.</p>
+            <section id="project-remote-change" class="remote-project-change" role="status" aria-live="polite" hidden><p id="project-remote-message"></p><div class="designer-actions"><button id="project-reload-latest" class="button button-small" type="button">Reload latest</button><button id="project-copy-local" class="button button-small" type="button">Continue as separate project</button></div></section>
             <p id="profile-save-hint" class="hint" hidden>Save or cancel profile edits before generating this project.</p>
             <div class="project-editor-grid">
               <div class="numeric-grid">
@@ -93,6 +94,7 @@
           <h4 id="vector-form-title">New vector project</h4>
           <label for="vector-name">Project name</label><input id="vector-name" maxlength="120" required>
           <p id="vector-validation" class="form-validation" role="alert" hidden></p>
+          <section id="vector-remote-change" class="remote-project-change" role="status" aria-live="polite" hidden><p id="vector-remote-message"></p><div class="designer-actions"><button id="vector-reload-latest" class="button button-small" type="button">Reload latest</button><button id="vector-copy-local" class="button button-small" type="button">Continue as separate project</button></div></section>
           <div class="vector-editor-grid">
             <div>
               <div class="vector-toolbar" aria-label="Add or import vector geometry">
