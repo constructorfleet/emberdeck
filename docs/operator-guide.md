@@ -11,8 +11,19 @@ authentication error.
 ## Connect and choose a driver
 
 Open the EmberDeck console and enter the API key supplied by the server
-operator. The key field is masked, and the key stays in this browser session.
-After connecting, choose the driver assigned to the machine you prepared.
+operator; the key field is masked. Surrounding whitespace is removed before the
+key is checked. **Connect**
+validates the key with the server before saving it in this browser session or
+starting library refreshes. While that check is in progress, the button reads
+**Connecting…** and is disabled. A rejected key is not saved or retried; the
+console stops polling, focuses the key field, and lets you correct it and try
+again. API-dependent controls remain disabled until the key is accepted.
+
+After connecting, the access panel collapses to **Connected · Change key ·
+Disconnect**. Choose **Change key** to return to the key field and validate a
+different key, or **Disconnect** to forget the session key and stop polling. In
+either case the library controls are disabled until you connect again. Once
+connected, choose the driver assigned to the machine you prepared.
 
 ![Connected operator console with a queued program, driver selector, and safety check](assets/screenshots/operator-console-library.png)
 
