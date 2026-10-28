@@ -15,9 +15,9 @@ Simulator and software checks do not qualify a physical machine. See
   and separate queued G-code generation for review and explicit dispatch. The
   editor supports vector cutting and engraving and a bounded static SVG importer
   for line/Bezier paths, basic shapes, element transforms, multi-shape
-  alignment, editable monoline text engraving, and bounded nested SVG groups.
-  SVG text import, arc commands, undo/redo, and raster engraving remain future
-  work.
+  alignment, editable monoline text engraving, bounded nested SVG groups, and
+  bounded SVG `<text>` import. Arc commands, undo/redo, and raster engraving
+  remain future work.
 - Uploaded-job review against a selected machine profile, including upload-time
   line validation, known or unknown path bounds, unsupported/incomplete-motion
   warnings, a static envelope preview, and an explicit override before dispatch
@@ -46,7 +46,7 @@ Simulator and software checks do not qualify a physical machine. See
   incremental or machine-coordinate moves, offset writes, and programs without a
   known initial head position are reported as unknown rather than guessed, so a
   review may still require an explicit bounds override.
-- SVG text import, arbitrary path editing, raster engraving,
+- Arbitrary path editing, raster engraving,
   and automatic design-to-machine configuration.
 - Universal Wi-Fi, proprietary DSP/Ruida controllers, or OctoPrint plugin
   compatibility.
@@ -90,18 +90,21 @@ designer's remaining capabilities are delivered.
   toolpaths. Keyboard-accessible multi-selection aligns left/center/right and
   top/middle/bottom using transformed bounds, saves the resulting translations,
   and preserves profile warnings. [Source review and remaining architecture](research/designer-architecture.md)
-  track arc commands, SVG text import, arbitrary path editing, and raster
-  evaluation. A bounded
+  track arc commands, arbitrary path editing, and raster evaluation. A bounded
   static SVG importer converts basic shapes and line/Bezier paths into editable,
   unassigned geometry. Nested `<g>` transforms compose with child transforms;
-  groups allow only `id` and `transform` and can nest up to 16 levels. Imported
-  geometry carries no operation or machine settings. Native text objects also
+  groups allow only `id` and `transform` and can nest up to 16 levels. Static
+  `<text>` imports use `emberdeck-stick-v1`, a unitless font size of 1–100, and
+  at most 32 ASCII characters from A–Z, a–z, digits, space, and
+  `. , : ; ! ? + - / _ ( )`; output is open unassigned strokes. Unsupported
+  attributes, styles, other fonts, and nested text content such as `<tspan>` are
+  rejected. Imported geometry carries no operation or machine settings. Native text objects also
   preserve editable content/font/size/origin and use deterministic generated
   stroke geometry for preview and G-code. The fixed hand-authored
   `emberdeck-stick-v1` font supports ASCII A–Z/a–z, digits, space, and
   `. , : ; ! ? + - / _ ( )`; text is limited to 1–32 characters and 1–100 mm
-  high and can only be engraved. Raster engraving and SVG text import remain
-  unsupported. The full issue stays open.
+  high and can only be engraved. Raster engraving remains unsupported. The full
+  issue stays open.
 - [ ] [#7: Live completed/remaining toolpath progress](https://github.com/constructorfleet/emberdeck/issues/7).
   Implement camera-independent execution monitoring for supported uploaded G-code
   as well as designer-generated jobs. Share the coordinate/toolpath renderer

@@ -193,9 +193,16 @@ The version 1 rectangle editor supports one rectangle and vector engraving.
 Version 2 supports multiple rectangle, ellipse, line, and monoline text objects,
 described below.
 The multi-path editor can import a bounded static SVG subset. It converts
-physical dimensions and the viewBox to editable millimetre paths. It rejects
-color, style, and other unsupported SVG attributes rather than silently
-dropping them. SVG text, raster images, and machine settings are not imported.
+physical dimensions and the viewBox to editable millimetre paths. Supported
+`<text>` elements become open monoline strokes using the fixed
+`emberdeck-stick-v1` font. SVG text needs a unitless `font-size` from 1 to 100
+SVG user units and supports at most 32 ASCII characters: A–Z, a–z, digits,
+space, and `. , : ; ! ? + - / _ ( )`. Lowercase letters use uppercase strokes.
+Text may set unitless `x` and `y` and a transform. Only `x`, `y`, `font-family`,
+`font-size`, `id`, and `transform` attributes are accepted on `<text>`. Other
+fonts, `style` or other unsupported attributes, nested text elements such as
+`<tspan>`, and raster images are rejected. Imported geometry remains
+unassigned; no operation or machine settings are inferred.
 
 ![Editable rectangle project with declared workspace and laser-off approach endpoint](assets/screenshots/designer-project.png)
 
@@ -251,7 +258,8 @@ characters and be 1–100 mm high. Unsupported characters, empty/space-only text
 invalid size, and out-of-range coordinates show field errors and block save and
 generation. The font is a small hand-authored stroke table with no external
 runtime font dependency. This is vector engraving; raster engraving remains
-unsupported. SVG `<text>` import also remains unsupported.
+unsupported. Static SVG `<text>` import supports only the fixed monoline font
+and bounded character set described in the SVG importer section.
 
 ![Editable monoline text source, size, and generated stroke preview](assets/screenshots/designer-monoline-text.png)
 
@@ -282,16 +290,18 @@ transforms. Groups may contain only `id` and `transform` attributes and are
 limited to 16 nested levels. Imports that exceed the 16-level curve-subdivision
 or 4,000-point import limits are also rejected. Circle and ellipse outlines
 become editable 32-point paths. Arc commands, group styling or other group
-attributes, shape-level styling or other unsupported shape attributes, text,
-external resources, and active content are rejected with an error. Imported
+attributes, shape-level styling or other unsupported shape attributes,
+external resources, and active content are rejected with an error. Only an
+unqualified SVG or the official SVG namespace is accepted; foreign element
+namespaces and namespaced attributes are rejected. Imported
 geometry appears as editable, unassigned objects: no operation or machine
 settings are imported. Inspect the preview and workspace bounds,
 select each shape, and assign its engraving or cutting layer before generating.
 Save and reopen the project through the same project controls.
 
-![Nested SVG group geometry imported as editable, unassigned vector objects](assets/screenshots/designer-svg-import.png)
+![Nested SVG group geometry and monoline SVG text imported as editable, unassigned vector objects](assets/screenshots/designer-svg-import.png)
 
-![Nested SVG group geometry imported in the mobile vector editor](assets/screenshots/designer-svg-import-mobile.png)
+![Nested SVG group geometry and monoline SVG text imported in the mobile vector editor](assets/screenshots/designer-svg-import-mobile.png)
 
 Generation creates an immutable queued G-code program with the project, profile,
 and operation layer values in its provenance. Both cutting and engraving use
@@ -404,8 +414,9 @@ Regenerate the screenshots from the current console and simulator with
 
 ## Requested UI that is not available yet
 
-The current designer does not have SVG text import, undo/redo, or raster
-engraving. Native editable monoline text is supported as described above.
+The current designer does not have undo/redo or raster engraving. Native
+editable monoline text and bounded static SVG `<text>` import are supported as
+described above.
 SVG import supports straight paths, C/c/S/s cubic and Q/q/T/t quadratic Bezier
 curves, and nested `<g>` groups up to 16 levels deep. Group transforms compose
 with descendant group and element transforms. A/a arcs are not available. Live

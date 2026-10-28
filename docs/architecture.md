@@ -170,10 +170,15 @@ XY G-code. It shows laser-off travel and available work position; unsupported
 motion is surfaced as warnings. Position matching assumes `$13=0` and is not
 machine-bound or safety-qualified. The bounded SVG importer supports static line
 geometry, cubic/quadratic Bezier curves flattened at a 0.05 mm chord tolerance,
-and element-level affine transforms. It rejects styles, text, nested groups,
-arc commands, and active or external content. Arbitrary path editing, undo/redo,
-nested SVG groups, and raster engraving remain future work; see the [designer
-plan](research/designer-architecture.md) and
+element-level affine transforms, and nested `<g>` transforms composed with
+descendant transforms. Groups accept only `id` and `transform` and may nest up
+to 16 levels. Static `<text>` uses `emberdeck-stick-v1`, a unitless font size
+from 1 to 100, and up to 32 ASCII characters (A–Z, a–z, digits, space, and
+`. , : ; ! ? + - / _ ( )`); it becomes open, unassigned stroke geometry.
+Unsupported attributes and styles, other fonts, nested text such as `<tspan>`,
+foreign namespaces, and active or external content are rejected. Arc commands,
+arbitrary path editing, undo/redo, and raster engraving remain future work; see
+the [designer plan](research/designer-architecture.md) and
 [operator guide](operator-guide.md).
 
 ## Confirmed controller control

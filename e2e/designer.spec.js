@@ -303,7 +303,7 @@ test('open profile and rectangle editors fit tablet and phone viewports', async 
   }
 });
 
-test('operator imports static SVG paths into an editable project and assigns their operation layer', async ({ page }) => {
+test('operator imports SVG paths and bounded text into an editable project and dispatches only after confirmation', async ({ page }) => {
   test.setTimeout(90000);
   const startRequests = [];
   page.on('request', (request) => {
@@ -328,12 +328,12 @@ test('operator imports static SVG paths into an editable project and assigns the
 
   await page.getByRole('button', { name: 'New vector project' }).click();
   await page.locator('#vector-name').fill(projectName);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300mm" height="200mm" viewBox="0 0 300 200"><g transform="translate(5 0)"><g transform="scale(1.2)"><path transform="translate(2 0)" d="M10 150 L40 150 L40 120 L10 120 Z"/></g></g><g transform="translate(0 5)"><path d="M60 190 C70 180 80 180 90 190 S110 180 120 190 Q130 180 140 190 T160 190"/></g></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300mm" height="200mm" viewBox="0 0 300 200"><g transform="translate(5 0)"><g transform="scale(1.2)"><path transform="translate(2 0)" d="M10 150 L40 150 L40 120 L10 120 Z"/></g></g><g transform="translate(0 5)"><path d="M60 190 C70 180 80 180 90 190 S110 180 120 190 Q130 180 140 190 T160 190"/></g><text x="180" y="50" font-family="emberdeck-stick-v1" font-size="7">A</text></svg>`;
   await page.locator('#vector-svg-file').setInputFiles({ name: 'panel.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(svg) });
-  await expect(page.locator('#notice .notice-message')).toContainText('Imported 2 editable SVG paths');
-  await expect(page.locator('#vector-object-list li')).toHaveCount(2);
+  await expect(page.locator('#notice .notice-message')).toContainText('Imported 3 editable SVG paths');
+  await expect(page.locator('#vector-object-list li')).toHaveCount(3);
   await expect(page.locator('#vector-object-list')).toContainText('Unassigned');
-  await expect(page.locator('#vector-preview-content .vector-path')).toHaveCount(2);
+  await expect(page.locator('#vector-preview-content .vector-path')).toHaveCount(3);
   const previewStart = await page.locator('#vector-preview-content .vector-path').first().evaluate((path) => {
     const [, x, y] = path.getAttribute('d').match(/^M ([0-9.]+) ([0-9.]+)/);
     return { x: Number(x), y: Number(y) };
@@ -344,9 +344,9 @@ test('operator imports static SVG paths into an editable project and assigns the
   const outsideSVG = `<svg width="350mm" height="200mm" viewBox="0 0 350 200"><polyline points="330,190 350,190"/></svg>`;
   await page.locator('#vector-svg-file').setInputFiles({ name: 'outside.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(outsideSVG) });
   await expect(page.locator('#vector-validation')).toContainText(/outside the declared workspace/i);
-  await expect(page.locator('#vector-object-list li')).toHaveCount(3);
-  await page.getByRole('button', { name: '3. path' }).click();
-  await page.getByRole('button', { name: 'Remove shape 3' }).click();
+  await expect(page.locator('#vector-object-list li')).toHaveCount(4);
+  await page.getByRole('button', { name: '4. path' }).click();
+  await page.getByRole('button', { name: 'Remove shape 4' }).click();
   await expect(page.locator('#vector-validation')).toBeHidden();
   for (const width of [1024, 760, 390]) {
     await page.setViewportSize({ width, height: 900 });
@@ -358,13 +358,15 @@ test('operator imports static SVG paths into an editable project and assigns the
   await page.locator('#vector-object-operation').selectOption({ label: '1. engrave' });
   await page.getByRole('button', { name: '2. path' }).click();
   await page.locator('#vector-object-operation').selectOption({ label: '1. engrave' });
+  await page.getByRole('button', { name: '3. path' }).click();
+  await page.locator('#vector-object-operation').selectOption({ label: '1. engrave' });
   await expect(page.locator('#vector-validation')).toBeHidden();
   await page.getByRole('button', { name: 'Save vector project' }).click();
   await expect(page.locator('#notice .notice-message')).toContainText('Vector project saved');
   await page.reload();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
   await page.getByRole('button', { name: `Reopen vector ${projectName}` }).click();
-  await expect(page.locator('#vector-object-list li')).toHaveCount(2);
+  await expect(page.locator('#vector-object-list li')).toHaveCount(3);
   await expect(page.locator('#generate-vector-project')).toBeEnabled();
   await page.locator('#generate-vector-project').click();
   await page.getByRole('link', { name: 'Job library' }).click();
@@ -372,6 +374,7 @@ test('operator imports static SVG paths into an editable project and assigns the
   await expect(row).toContainText(/queued/i);
   await row.getByRole('button', { name: /^View / }).click();
   await expect(page.locator('#program-code')).toContainText('G1 X55.4 Y56');
+  await expect(page.locator('#program-code')).toContainText('G1 X182.5 Y157');
   expect(startRequests).toHaveLength(0);
   await expect(page.locator('#operator-confirmation')).not.toBeChecked();
   await expect(page.locator('#driver-select')).toHaveValue('simulator');
