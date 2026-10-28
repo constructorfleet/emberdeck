@@ -52,12 +52,12 @@ async function captureElement(page, selector, name, maxHeight = null) {
   let bounds;
   let captured = false;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const element = page.locator(selector);
-    await element.waitFor({ state: 'visible' });
-    await element.scrollIntoViewIfNeeded();
-    bounds = await element.boundingBox();
-    if (!bounds) throw new Error(`Cannot capture hidden or empty documentation panel: ${selector}`);
     try {
+      const element = page.locator(selector);
+      await element.waitFor({ state: 'visible' });
+      await element.scrollIntoViewIfNeeded();
+      bounds = await element.boundingBox();
+      if (!bounds) throw new Error(`Cannot capture hidden or empty documentation panel: ${selector}`);
       if (maxHeight && bounds.height > maxHeight) {
         await element.evaluate((node) => window.scrollTo(0, Math.max(0, node.getBoundingClientRect().top)));
         const viewportWidth = await page.evaluate(() => document.documentElement.clientWidth);
@@ -68,7 +68,8 @@ async function captureElement(page, selector, name, maxHeight = null) {
       captured = true;
       break;
     } catch (error) {
-      if (attempt === 2 || !String(error).includes('not attached to the DOM')) throw error;
+      const transient = String(error).includes('not attached to the DOM') || String(error).includes('not stable');
+      if (attempt === 2 || !transient) throw error;
       await page.waitForTimeout(50);
     }
   }

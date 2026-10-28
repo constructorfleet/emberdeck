@@ -18,7 +18,7 @@ the same independent settings as `-serial-dtr on|off` and `-serial-rts on|off`.
 The one-connection-per-job lifecycle remains in place; each stream owns and
 closes its connection, and persistent connection reuse has not been validated.
 
-The implementation uses [`go.bug.st/serial`](https://pkg.go.dev/go.bug.st/serial),
+The implementation uses [`go.bug.st/serial` v1.8.0](https://pkg.go.dev/go.bug.st/serial/v1.8.0),
 whose API exposes cross-platform serial open, read/write/close, read timeouts,
 and port enumeration. Operator port selection and device permissions are covered
 in [Deployment](deployment.md#serial-workers-and-all-in-one-hardware-mode).

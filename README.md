@@ -132,7 +132,7 @@ for the supported GRBL settings and coordinate assumptions.
 ## What EmberDeck does
 
 EmberDeck stores G-code jobs, dispatches them to a connected GRBL driver after
-operator confirmation, and reports controller acknowledgements and available
+operator confirmation, and reports controller acknowledgments and available
 execution telemetry. It can also save declared machine profiles and vector
 design projects and generate separate queued jobs for review. It does not start
 generated jobs automatically. See the [operator guide](docs/operator-guide.md)
