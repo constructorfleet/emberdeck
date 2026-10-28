@@ -43,3 +43,15 @@ jobs:
         run: |
           python3 scripts/check-commits.py
           python3 scripts/check-docs.py
+  esp-idf-smoke:
+    name: ESP-IDF compile smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.3.2
+          target: esp32
+          path: firmware/esp32-worker/idf-smoke

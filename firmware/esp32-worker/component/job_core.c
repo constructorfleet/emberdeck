@@ -101,10 +101,16 @@ static ed_result discard_and_return(const ed_storage *storage, ed_result error) 
     return error;
 }
 
+static ed_result discard_and_free(const ed_storage *storage, unsigned char *io,
+                                  ed_result error) {
+    free(io);
+    return discard_and_return(storage, error);
+}
+
 ed_result ed_stage_verify(const ed_manifest *manifest, ed_range_fetch fetch,
                           void *fetch_context, const ed_storage *storage,
                           ed_verified_job **verified_out) {
-    unsigned char io[IO_BUFFER_BYTES], digest[32];
+    unsigned char *io, digest[32];
     size_t offset = 0, amount, received;
     ed_sha256_context hash;
     gcode_validator validator;
@@ -119,18 +125,25 @@ ed_result ed_stage_verify(const ed_manifest *manifest, ed_range_fetch fetch,
         if (storage->reset(storage->context, 0) != 0) return ED_ERR_STORAGE;
         return ED_ERR_TOO_LARGE;
     }
-    if (storage->reset(storage->context, manifest->size) != 0) return ED_ERR_STORAGE;
+    io = (unsigned char *)malloc(IO_BUFFER_BYTES);
+    if (io == NULL) {
+        return storage->reset(storage->context, 0) == 0 ? ED_ERR_MEMORY : ED_ERR_STORAGE;
+    }
+    if (storage->reset(storage->context, manifest->size) != 0) {
+        free(io);
+        return ED_ERR_STORAGE;
+    }
 
     while (offset < manifest->size) {
         amount = manifest->size - offset;
         if (amount > ED_MAX_RANGE_BYTES) amount = ED_MAX_RANGE_BYTES;
-        if (amount > sizeof(io)) amount = sizeof(io);
+        if (amount > IO_BUFFER_BYTES) amount = IO_BUFFER_BYTES;
         received = 0;
-        if (fetch(fetch_context, offset, amount, io, sizeof(io), &received) != 0)
-            return discard_and_return(storage, ED_ERR_FETCH);
-        if (received != amount) return discard_and_return(storage, ED_ERR_SIZE);
+        if (fetch(fetch_context, offset, amount, io, IO_BUFFER_BYTES, &received) != 0)
+            return discard_and_free(storage, io, ED_ERR_FETCH);
+        if (received != amount) return discard_and_free(storage, io, ED_ERR_SIZE);
         if (storage->write(storage->context, offset, io, received) != 0)
-            return discard_and_return(storage, ED_ERR_STORAGE);
+            return discard_and_free(storage, io, ED_ERR_STORAGE);
         offset += received;
     }
 
@@ -140,27 +153,28 @@ ed_result ed_stage_verify(const ed_manifest *manifest, ed_range_fetch fetch,
     offset = 0;
     while (offset < manifest->size) {
         amount = manifest->size - offset;
-        if (amount > sizeof(io)) amount = sizeof(io);
+        if (amount > IO_BUFFER_BYTES) amount = IO_BUFFER_BYTES;
         if (storage->read(storage->context, offset, io, amount) != 0)
-            return discard_and_return(storage, ED_ERR_STORAGE);
+            return discard_and_free(storage, io, ED_ERR_STORAGE);
         ed_sha256_update_internal(&hash, io, amount);
         validate_bytes(&validator, io, amount);
-        if (validator.invalid) return discard_and_return(storage, ED_ERR_GCODE);
+        if (validator.invalid) return discard_and_free(storage, io, ED_ERR_GCODE);
         offset += amount;
     }
     ed_sha256_finish_internal(&hash, digest);
-    if (!digest_equal(digest, manifest->sha256)) return discard_and_return(storage, ED_ERR_DIGEST);
-    if (validator.mode == PARSE_PAREN) return discard_and_return(storage, ED_ERR_GCODE);
+    if (!digest_equal(digest, manifest->sha256)) return discard_and_free(storage, io, ED_ERR_DIGEST);
+    if (validator.mode == PARSE_PAREN) return discard_and_free(storage, io, ED_ERR_GCODE);
     finish_line(&validator);
-    if (validator.executable_lines == 0) return discard_and_return(storage, ED_ERR_GCODE);
+    if (validator.executable_lines == 0) return discard_and_free(storage, io, ED_ERR_GCODE);
 
     job = (ed_verified_job *)malloc(sizeof(*job));
-    if (job == NULL) return discard_and_return(storage, ED_ERR_MEMORY);
+    if (job == NULL) return discard_and_free(storage, io, ED_ERR_MEMORY);
     if (storage->seal(storage->context, manifest->size) != 0) {
         free(job);
         storage->unseal(storage->context);
-        return discard_and_return(storage, ED_ERR_STORAGE);
+        return discard_and_free(storage, io, ED_ERR_STORAGE);
     }
+    free(io);
     job->storage = *storage;
     job->size = manifest->size;
     memcpy(job->sha256, digest, sizeof(job->sha256));
@@ -171,34 +185,37 @@ ed_result ed_stage_verify(const ed_manifest *manifest, ed_range_fetch fetch,
 
 ed_result ed_verified_send_uart(ed_verified_job *verified,
                                 ed_uart_sink sink, void *sink_context) {
-    unsigned char io[IO_BUFFER_BYTES];
+    unsigned char *io;
     size_t offset = 0, amount;
     unsigned char digest[32];
     ed_sha256_context hash;
     if (verified == NULL || sink == NULL || verified->used) return ED_ERR_ARGUMENT;
     verified->used = 1;
+    io = (unsigned char *)malloc(IO_BUFFER_BYTES);
+    if (io == NULL) return ED_ERR_MEMORY;
     /* Storage is an injected backend and may be mutable. Verify the complete
      * staged image before the first UART callback to preserve the gate. */
     ed_sha256_init_internal(&hash);
     while (offset < verified->size) {
         amount = verified->size - offset;
-        if (amount > sizeof(io)) amount = sizeof(io);
+        if (amount > IO_BUFFER_BYTES) amount = IO_BUFFER_BYTES;
         if (verified->storage.read(verified->storage.context, offset, io, amount) != 0)
-            return ED_ERR_STORAGE;
+            { free(io); return ED_ERR_STORAGE; }
         ed_sha256_update_internal(&hash, io, amount);
         offset += amount;
     }
     ed_sha256_finish_internal(&hash, digest);
-    if (!digest_equal(digest, verified->sha256)) return ED_ERR_DIGEST;
+    if (!digest_equal(digest, verified->sha256)) { free(io); return ED_ERR_DIGEST; }
     offset = 0;
     while (offset < verified->size) {
         amount = verified->size - offset;
-        if (amount > sizeof(io)) amount = sizeof(io);
+        if (amount > IO_BUFFER_BYTES) amount = IO_BUFFER_BYTES;
         if (verified->storage.read(verified->storage.context, offset, io, amount) != 0)
-            return ED_ERR_STORAGE;
-        if (sink(sink_context, io, amount) != 0) return ED_ERR_UART;
+            { free(io); return ED_ERR_STORAGE; }
+        if (sink(sink_context, io, amount) != 0) { free(io); return ED_ERR_UART; }
         offset += amount;
     }
+    free(io);
     return ED_OK;
 }
 

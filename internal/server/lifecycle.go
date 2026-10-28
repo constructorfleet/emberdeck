@@ -337,24 +337,29 @@ func (s *Server) pollDriver(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if needsProgram {
-		if assignment.chunked {
-			assignment.job.Content = &jobtransfer.Manifest{Size: assignment.record.Size, SHA256: assignment.record.SHA256}
-		} else {
-			// Legacy workers receive the complete program in the assignment.
-			// Capability-negotiated workers fetch it in bounded authenticated chunks.
-			gcode, ok := s.program(w, assignment.record)
-			if !ok {
-				return
-			}
-			assignment.job.Gcode = gcode
-		}
-	}
-	protocol := 1
 	if assignment.chunked {
-		protocol = 2
+		if needsProgram {
+			assignment.job.Content = &jobtransfer.Manifest{Size: assignment.record.Size, SHA256: assignment.record.SHA256}
+		}
+		respond(w, http.StatusOK, chunkedWorkerAssignment{
+			Command: assignment.command,
+			Job: chunkedWorkerJob{
+				ID: assignment.job.ID, Total: assignment.job.Total, Size: assignment.job.Size,
+				ExpectedSettings: assignment.job.ExpectedSettings, Content: assignment.job.Content,
+			},
+			Lease: assignment.job.Lease, Protocol: 2,
+		})
+		return
 	}
-	response := map[string]any{"command": assignment.command, "job": assignment.job, "lease": assignment.job.Lease, "protocol": protocol}
+	if needsProgram {
+		// Legacy workers receive the complete program in the assignment.
+		gcode, ok := s.program(w, assignment.record)
+		if !ok {
+			return
+		}
+		assignment.job.Gcode = gcode
+	}
+	response := map[string]any{"command": assignment.command, "job": assignment.job, "lease": assignment.job.Lease, "protocol": 1}
 	if needsProgram && !assignment.chunked {
 		encoded, err := json.Marshal(response)
 		if err != nil {
@@ -595,18 +600,23 @@ func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCa
 	}
 	if in.JobID != "" {
 		j, exists := s.jobs[in.JobID]
-		if !exists || j.DriverID != id || j.Lease == "" || j.Lease != in.Lease {
+		if !exists {
+			tombstone, retained := s.terminalReceipts[in.JobID]
+			if !retained || tombstone.DriverID != id || tombstone.Lease != in.Lease || tombstone.Digest != terminalReceiptDigest(in) {
+				fail(w, 409, "stale or invalid job lease")
+				return nil, false, false
+			}
+		} else if j.DriverID != id || j.Lease == "" || j.Lease != in.Lease {
 			fail(w, 409, "stale or invalid job lease")
 			return nil, false, false
-		}
-		previousState := j.State
-		if !activeJob(j.State) {
+		} else if !activeJob(j.State) {
 			// Repeated terminal receipts are idempotent after response loss.
 			if j.State != in.State || !matchesTerminalReceipt(j, in) {
 				fail(w, 409, "job is already terminal")
 				return nil, false, false
 			}
 		} else {
+			previousState := j.State
 			if in.Acked < j.Acked || in.Total < 0 || in.Acked > in.Total || in.Acked < 0 || (j.Total != 0 && j.Total != in.Total) {
 				fail(w, 400, "invalid progress")
 				return nil, false, false

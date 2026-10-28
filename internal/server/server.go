@@ -25,16 +25,17 @@ import (
 
 // Server serializes durable mutations before acknowledging API requests.
 type Server struct {
-	storageErr  error
-	lock        *flock.Flock
-	closed      bool
-	plugins     []plugin.Plugin
-	drivers     map[string]Driver
-	credentials map[string]credentialRecord
-	mu          sync.Mutex
-	dir         string
-	key         string
-	jobs        map[string]jobRecord
+	storageErr       error
+	lock             *flock.Flock
+	closed           bool
+	plugins          []plugin.Plugin
+	drivers          map[string]Driver
+	credentials      map[string]credentialRecord
+	mu               sync.Mutex
+	dir              string
+	key              string
+	jobs             map[string]jobRecord
+	terminalReceipts map[string]terminalReceiptTombstone
 	// progressDirty marks in-memory progress newer than jobs.json. Progress-only
 	// reports are not written; the next durable write or Close persists them.
 	progressDirty    bool
@@ -281,6 +282,14 @@ func validHexID(id string) bool {
 		return false
 	}
 	_, err := hex.DecodeString(id)
+	return err == nil
+}
+
+func validLease(lease string) bool {
+	if len(lease) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(lease)
 	return err == nil
 }
 
@@ -561,8 +570,24 @@ func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jobs := s.copyJobs()
+	receipts := make(map[string]terminalReceiptTombstone, len(s.terminalReceipts)+1)
+	for receiptJobID, receipt := range s.terminalReceipts {
+		receipts[receiptJobID] = receipt
+	}
+	deleted := jobs[id]
+	if deleted.TerminalReceiptDigest != "" && deleted.Lease != "" {
+		// A later terminal receipt from this driver proves that its earlier
+		// terminal receipt was observed and execution moved on. Keep only the
+		// newest deleted-job retry key for each driver.
+		for receiptJobID, receipt := range receipts {
+			if receipt.DriverID == deleted.DriverID {
+				delete(receipts, receiptJobID)
+			}
+		}
+		receipts[id] = terminalReceiptTombstone{DriverID: deleted.DriverID, Lease: deleted.Lease, Digest: deleted.TerminalReceiptDigest}
+	}
 	delete(jobs, id)
-	if err := s.save(jobs, operatorCause(r, "delete")); err != nil {
+	if err := s.saveWithReceipts(jobs, receipts, operatorCause(r, "delete")); err != nil {
 		fail(w, 500, "could not persist deletion")
 		return
 	}

@@ -24,6 +24,8 @@ typedef struct {
     int close_calls;
     int callback_error;
     ed_terminal_state reported_state;
+    size_t reported_acked;
+    size_t reported_total;
     char reported_error[ED_WORKER_ERROR_BYTES];
     char reported_controller_state[ED_WORKER_CONTROLLER_STATE_BYTES];
     char active_controller_state[ED_WORKER_CONTROLLER_STATE_BYTES];
@@ -34,6 +36,8 @@ typedef struct {
     int wrong_response_at;
     int cancel_at;
     size_t last_acked;
+    int saved_present;
+    ed_worker_saved_receipt saved_receipt;
 } fixture;
 
 static int uart_sink(void *context, const unsigned char *bytes, size_t length);
@@ -127,6 +131,7 @@ static int poll_assignment(void *context, const char *session,
     if (strcmp(session, f->session) != 0) return -1;
     strcpy(assignment->job_id, "job-7");
     strcpy(assignment->lease, "lease-one");
+    assignment->total = 2;
     assignment->content.size = f->source_size;
     ed_sha256(f->source, f->source_size, assignment->content.sha256);
     *has_assignment = f->no_assignment ? 0 : 1;
@@ -206,6 +211,8 @@ static int report_terminal(void *context, const char *session,
     fixture *f = (fixture *)context;
     f->report_calls++;
     f->reported_state = receipt->state;
+    f->reported_acked = receipt->acked;
+    f->reported_total = receipt->total;
     strcpy(f->reported_controller_state, receipt->controller_state);
     if (strcmp(session, f->session) != 0 || strcmp(job_id, "job-7") != 0 ||
         strcmp(lease, f->expected_lease) != 0) {
@@ -245,6 +252,26 @@ static int check(int condition, const char *message) {
     return condition;
 }
 
+static int receipt_load(void *context, ed_worker_saved_receipt *receipt,
+                        int *present) {
+    fixture *f = (fixture *)context;
+    *present = f->saved_present;
+    if (f->saved_present) *receipt = f->saved_receipt;
+    return 0;
+}
+
+static int receipt_save(void *context, const ed_worker_saved_receipt *receipt) {
+    fixture *f = (fixture *)context;
+    f->saved_receipt = *receipt;
+    f->saved_present = 1;
+    return 0;
+}
+
+static int receipt_clear(void *context) {
+    ((fixture *)context)->saved_present = 0;
+    return 0;
+}
+
 static void prepare(fixture *f, ed_worker_adapters *adapters,
                     const unsigned char *program, size_t length) {
     memset(f, 0, sizeof(*f));
@@ -268,6 +295,10 @@ static void prepare(fixture *f, ed_worker_adapters *adapters,
     adapters->storage.read = storage_read;
     adapters->storage.seal = storage_seal;
     adapters->storage.unseal = storage_unseal;
+    adapters->receipt_store.context = f;
+    adapters->receipt_store.load = receipt_load;
+    adapters->receipt_store.save = receipt_save;
+    adapters->receipt_store.clear = receipt_clear;
 }
 
 static int test_successful_assignment(void) {
@@ -360,6 +391,8 @@ static int test_incomplete_controller_result_is_not_reported_completed(void) {
                "completed requires all acknowledgments and controller Idle")) return 0;
     return check(f.uart_size == f.source_size &&
                  f.report_calls == 1 && f.reported_state == ED_TERMINAL_FAILED &&
+                 f.reported_acked == 2 && f.reported_total == 2 &&
+                 strcmp(f.reported_controller_state, "Run") == 0 &&
                  f.close_calls == 1 &&
                  result.outcome == ED_WORKER_ERROR,
                  "incomplete controller result is not reported as terminal");

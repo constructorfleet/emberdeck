@@ -112,6 +112,102 @@ func TestChunkedWorkerFetchesImmutableProgramUnderItsLease(t *testing.T) {
 	}
 }
 
+func TestProtocolTwoAssignmentOmitsLargeDesignerProvenanceButLegacyAssignmentKeepsFullJob(t *testing.T) {
+	s := openServer(t)
+	profileID := createTestProfile(t, s)
+	objects := make([]server.VectorObject, 40)
+	for i := range objects {
+		x := float64(i + 10)
+		objects[i] = server.VectorObject{
+			Kind: "path", ID: fmt.Sprintf("path-%d", i), OperationID: "engrave",
+			Subpaths: []server.VectorSubpath{{Points: []server.VectorPoint{
+				{XMM: x, YMM: 10}, {XMM: x + 1, YMM: 11},
+			}}},
+		}
+	}
+	projectBody, err := json.Marshal(struct {
+		SchemaVersion   int                      `json:"schema_version"`
+		Name            string                   `json:"name"`
+		Units           string                   `json:"units"`
+		ProfileID       string                   `json:"profile_id"`
+		ProfileRevision int                      `json:"profile_revision"`
+		Objects         []server.VectorObject    `json:"objects"`
+		Operations      []server.VectorOperation `json:"operations"`
+	}{2, "many paths", "mm", profileID, 1, objects,
+		[]server.VectorOperation{{ID: "engrave", Type: "vector-engrave", FeedMMMin: 600, PowerPercent: 25}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := request(t, s, http.MethodPost, "/api/v1/projects", string(projectBody), "test-key")
+	var saved struct {
+		ID string `json:"id"`
+	}
+	if project.Code != http.StatusCreated || json.Unmarshal(project.Body.Bytes(), &saved) != nil {
+		t.Fatalf("create large designer project: %d %s", project.Code, project.Body.String())
+	}
+	generated := request(t, s, http.MethodPost, "/api/v1/projects/"+saved.ID+"/generate", `{"revision":1}`, "test-key")
+	var job struct {
+		ID string `json:"id"`
+	}
+	if generated.Code != http.StatusCreated || json.Unmarshal(generated.Body.Bytes(), &job) != nil {
+		t.Fatalf("generate large-provenance job: %d %s", generated.Code, generated.Body.String())
+	}
+	request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll",
+		`{"session":"device-session","capabilities":["`+jobtransfer.Capability+`"],"controller_settings":{"$20":0,"$30":1000,"$31":0,"$32":1,"$130":300,"$131":200}}`, "test-key")
+	started := request(t, s, http.MethodPost, "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true}`, "test-key")
+	if started.Code != http.StatusOK {
+		t.Fatalf("start designer job: %d %s", started.Code, started.Body.String())
+	}
+	chunked := request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll",
+		`{"session":"device-session","capabilities":["`+jobtransfer.Capability+`"],"controller_settings":{"$20":0,"$30":1000,"$31":0,"$32":1,"$130":300,"$131":200}}`, "test-key")
+	var chunkedBody map[string]json.RawMessage
+	if err := json.Unmarshal(chunked.Body.Bytes(), &chunkedBody); err != nil {
+		t.Fatal(err)
+	}
+	var chunkedJob map[string]json.RawMessage
+	if err := json.Unmarshal(chunkedBody["job"], &chunkedJob); err != nil {
+		t.Fatal(err)
+	}
+	if chunked.Code != http.StatusOK || len(chunked.Body.Bytes()) > 4096 {
+		t.Fatalf("protocol-2 assignment size = %d, status=%d; device limit is 4096: %s", len(chunked.Body.Bytes()), chunked.Code, chunked.Body.String())
+	}
+	for _, field := range []string{"id", "total", "size", "content", "expected_settings"} {
+		if len(chunkedJob[field]) == 0 {
+			t.Errorf("protocol-2 assignment omitted Go worker field %q: %s", field, chunked.Body.String())
+		}
+	}
+	for _, field := range []string{"provenance", "name", "created", "execution", "review", "gcode"} {
+		if len(chunkedJob[field]) != 0 {
+			t.Errorf("protocol-2 assignment included non-worker field %q", field)
+		}
+	}
+
+	legacyUpload := request(t, s, http.MethodPost, "/api/v1/jobs", `{"name":"legacy.gcode","gcode":"G21\nG90\nM5\n"}`, "test-key")
+	var legacyCreated struct {
+		ID string `json:"id"`
+	}
+	if legacyUpload.Code != http.StatusCreated || json.Unmarshal(legacyUpload.Body.Bytes(), &legacyCreated) != nil {
+		t.Fatalf("create legacy job: %d %s", legacyUpload.Code, legacyUpload.Body.String())
+	}
+	request(t, s, http.MethodPost, "/api/v1/drivers/legacy/poll", `{"session":"legacy-session"}`, "test-key")
+	legacyStart := request(t, s, http.MethodPost, "/api/v1/jobs/"+legacyCreated.ID+"/start", `{"driver_id":"legacy","confirmed":true,"bounds_override":true}`, "test-key")
+	if legacyStart.Code != http.StatusOK {
+		t.Fatalf("start legacy job: %d %s", legacyStart.Code, legacyStart.Body.String())
+	}
+	legacyPickup := request(t, s, http.MethodPost, "/api/v1/drivers/legacy/poll", `{"session":"legacy-session"}`, "test-key")
+	var legacyBody map[string]json.RawMessage
+	if err := json.Unmarshal(legacyPickup.Body.Bytes(), &legacyBody); err != nil {
+		t.Fatal(err)
+	}
+	var legacyJob map[string]json.RawMessage
+	if err := json.Unmarshal(legacyBody["job"], &legacyJob); err != nil {
+		t.Fatal(err)
+	}
+	if string(legacyBody["protocol"]) != "1" || len(legacyJob["name"]) == 0 || len(legacyJob["created"]) == 0 || len(legacyJob["gcode"]) == 0 {
+		t.Fatalf("legacy protocol-1 assignment changed: %s", legacyPickup.Body.String())
+	}
+}
+
 func TestServerRejectsProgramsAboveTheWorkerTransferLimit(t *testing.T) {
 	s := openServer(t)
 	program := "M5" + strings.Repeat(" ", jobtransfer.MaxProgramBytes)
@@ -241,6 +337,95 @@ func TestChunkedWorkerTerminalReceiptRetryIsIdempotentAndConflictsWhenChanged(t 
 	page := listChunkedJobs(t, s, "?state=failed")
 	if page.Total != 1 || page.Jobs[0]["acked"] != float64(acked) || page.Jobs[0]["total"] != float64(total) || page.Jobs[0]["error"] != errorText || page.Jobs[0]["controller_state"] != controllerState {
 		t.Fatalf("terminal receipt retry changed the committed result: %+v", page.Jobs)
+	}
+}
+
+func TestChunkedWorkerTerminalReceiptRetrySurvivesJobDeletionAndRestart(t *testing.T) {
+	dir := t.TempDir()
+	s := openChunkedWorkerServerAt(t, dir)
+	jobID, lease, workerKey := startChunkedWorkerJob(t, s, "G21\nG90\nM5\n")
+	receipt := fmt.Sprintf(`{"session":"device-session","job_id":%q,"lease":%q,"state":"failed","acked":1,"total":3,"controller_state":"Alarm:1","error":"controller alarm","execution":{"path_progress":{"completed":0,"total":0,"confidence":"unknown"}}}`, jobID, lease)
+	if got := request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll", receipt, workerKey); got.Code != http.StatusOK {
+		t.Fatalf("first terminal receipt: %d %s", got.Code, got.Body.String())
+	}
+	if got := request(t, s, http.MethodDelete, "/api/v1/jobs/"+jobID, "", bootstrapKey); got.Code != http.StatusNoContent {
+		t.Fatalf("delete terminal job: %d %s", got.Code, got.Body.String())
+	}
+	secondUpload := request(t, s, http.MethodPost, "/api/v1/jobs", `{"name":"newer-receipt.gcode","gcode":"G21\nG90\nM5\n"}`, bootstrapKey)
+	if secondUpload.Code != http.StatusCreated {
+		t.Fatalf("upload newer job: %d %s", secondUpload.Code, secondUpload.Body.String())
+	}
+	var secondCreated struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(secondUpload.Body.Bytes(), &secondCreated); err != nil || secondCreated.ID == "" {
+		t.Fatalf("newer job response: %s (%v)", secondUpload.Body.String(), err)
+	}
+	secondJobID := secondCreated.ID
+	startSecond := request(t, s, http.MethodPost, "/api/v1/jobs/"+secondJobID+"/start", `{"driver_id":"bench","confirmed":true,"bounds_override":true}`, bootstrapKey)
+	if startSecond.Code != http.StatusOK {
+		t.Fatalf("start newer job: %d %s", startSecond.Code, startSecond.Body.String())
+	}
+	workerPoll := `{"session":"device-session","capabilities":["` + jobtransfer.Capability + `"]}`
+	secondPickup := request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll", workerPoll, workerKey)
+	if secondPickup.Code != http.StatusOK {
+		t.Fatalf("pick up newer job: %d %s", secondPickup.Code, secondPickup.Body.String())
+	}
+	var secondAssignment struct {
+		Lease string `json:"lease"`
+	}
+	if err := json.Unmarshal(secondPickup.Body.Bytes(), &secondAssignment); err != nil || secondAssignment.Lease == "" {
+		t.Fatalf("newer assignment: %s (%v)", secondPickup.Body.String(), err)
+	}
+	secondLease := secondAssignment.Lease
+	secondReceipt := fmt.Sprintf(`{"session":"device-session","job_id":%q,"lease":%q,"state":"failed","acked":1,"total":3,"controller_state":"Alarm:1","error":"newer controller alarm","execution":{"path_progress":{"completed":0,"total":0,"confidence":"unknown"}}}`, secondJobID, secondLease)
+	if got := request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll", secondReceipt, workerKey); got.Code != http.StatusOK {
+		t.Fatalf("newer terminal receipt: %d %s", got.Code, got.Body.String())
+	}
+	if got := request(t, s, http.MethodDelete, "/api/v1/jobs/"+secondJobID, "", bootstrapKey); got.Code != http.StatusNoContent {
+		t.Fatalf("delete newer terminal job: %d %s", got.Code, got.Body.String())
+	}
+	indexData, err := os.ReadFile(filepath.Join(dir, "jobs.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var index struct {
+		TerminalReceipts map[string]json.RawMessage `json:"terminal_receipts"`
+	}
+	if err := json.Unmarshal(indexData, &index); err != nil {
+		t.Fatal(err)
+	}
+	if len(index.TerminalReceipts) != 1 {
+		t.Fatalf("pending tombstones = %d, want one for the driver", len(index.TerminalReceipts))
+	}
+	if _, ok := index.TerminalReceipts[secondJobID]; !ok {
+		t.Fatalf("latest tombstone missing for job %s: %v", secondJobID, index.TerminalReceipts)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted := openChunkedWorkerServerAt(t, dir)
+	if got := request(t, restarted, http.MethodPost, "/api/v1/drivers/bench/poll", workerPoll, workerKey); got.Code != http.StatusOK {
+		t.Fatalf("register worker after restart: %d %s", got.Code, got.Body.String())
+	}
+	if got := request(t, restarted, http.MethodPost, "/api/v1/drivers/bench/poll", secondReceipt, workerKey); got.Code != http.StatusOK {
+		t.Fatalf("latest receipt after deletion and restart: %d %s", got.Code, got.Body.String())
+	}
+	if got := request(t, restarted, http.MethodPost, "/api/v1/drivers/bench/poll", receipt, workerKey); got.Code != http.StatusConflict {
+		t.Fatalf("older receipt after newer terminal receipt: %d %s, want 409", got.Code, got.Body.String())
+	}
+	changedReceipt := strings.Replace(receipt, `"acked":1`, `"acked":2`, 1)
+	if got := request(t, restarted, http.MethodPost, "/api/v1/drivers/bench/poll", changedReceipt, workerKey); got.Code != http.StatusConflict {
+		t.Fatalf("changed receipt after deletion: %d %s, want 409", got.Code, got.Body.String())
+	}
+	wrongDriver := request(t, restarted, http.MethodPost, "/api/v1/drivers/other/poll", receipt, workerKey)
+	if wrongDriver.Code != http.StatusForbidden {
+		t.Fatalf("receipt on unauthorized driver: %d %s, want 403", wrongDriver.Code, wrongDriver.Body.String())
+	}
+	wrongLease := strings.Replace(receipt, lease, strings.Repeat("0", len(lease)), 1)
+	if got := request(t, restarted, http.MethodPost, "/api/v1/drivers/bench/poll", wrongLease, workerKey); got.Code != http.StatusConflict {
+		t.Fatalf("receipt with wrong lease after deletion: %d %s, want 409", got.Code, got.Body.String())
 	}
 }
 
