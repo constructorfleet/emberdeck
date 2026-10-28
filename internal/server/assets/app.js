@@ -46,6 +46,7 @@
   let drivers = [];
   const cameraFrames = new Map();
   let selectedDriver = "";
+  const manualRecords = new Map();
   let shownJobID = "";
   let polling = false;
   let pollTimer = null;
@@ -149,6 +150,7 @@
     renderProjects();
     renderVectorProjects();
     renderLibraryFreshness();
+    renderManualControls(drivers.find((driver) => driver.id === selectedDriver));
   }
 
   function setConnecting(isConnecting) {
@@ -199,6 +201,8 @@
     refreshQueued = false;
     drivers = [];
     selectedDriver = "";
+    manualRecords.clear();
+    $("#manual-confirmation").checked = false;
     toolpathCache.clear();
     toolpathViewports.clear();
     profiles = [];
@@ -1399,6 +1403,7 @@
       selectedDriver = "";
       $("#driver-status").textContent = connected ? "Start a driver worker to run programs." : "Drivers are not loaded.";
       window.EmberDeckControllerSettings?.renderDriver($("#controller-settings"), null); // controller-settings.js
+      renderManualControls(null);
       return;
     }
     for (const driver of drivers) {
@@ -1421,6 +1426,132 @@
     const selected = drivers.find((driver) => driver.id === selectedDriver);
     $("#driver-status").textContent = selected ? (selected.busy ? "Driver has an active job." : `Last seen ${new Date(selected.last_seen).toLocaleTimeString()}`) : "Selected driver is disconnected.";
     window.EmberDeckControllerSettings?.renderDriver($("#controller-settings"), selected); // controller-settings.js
+    renderManualControls(selected);
+  }
+
+  const manualCapabilityByAction = { home: "manual_home", unlock: "manual_unlock", jog: "manual_jog", set_zero: "manual_set_zero", frame: "manual_frame" };
+  function renderManualControls(driver) {
+    const record = driver ? manualRecords.get(driver.id) : null;
+    const capabilities = Array.isArray(driver?.capabilities) ? driver.capabilities : [];
+    const ready = connected && serverAvailable && driver && !driver.busy && !record && $("#manual-confirmation").checked;
+    const idle = driver?.controller_state === "Idle";
+    const canHome = ready && idle && capabilities.includes(manualCapabilityByAction.home);
+    const canUnlock = ready && driver?.controller_state?.startsWith("Alarm") && capabilities.includes(manualCapabilityByAction.unlock);
+    const canSetZero = ready && idle && capabilities.includes(manualCapabilityByAction.set_zero);
+    const canJog = ready && idle && capabilities.includes(manualCapabilityByAction.jog);
+    const canFrame = ready && idle && capabilities.includes(manualCapabilityByAction.frame);
+    $("#manual-confirmation").disabled = !connected || !serverAvailable || !driver || driver.busy || Boolean(record);
+    $("#manual-home").disabled = !canHome;
+    $("#manual-unlock").disabled = !canUnlock;
+    $("#manual-set-zero").disabled = !canSetZero;
+    $("#manual-jog-axis").disabled = !canJog;
+    $("#manual-jog-distance").disabled = !canJog;
+    $("#manual-jog-feed").disabled = !canJog;
+    $("#manual-jog").disabled = !canJog;
+    const frameSelect = $("#manual-frame-job");
+    const priorFrame = frameSelect.value;
+    frameSelect.replaceChildren();
+    const candidates = jobs.filter((job) => job.program_review?.bounds_status === "in_bounds" && !["running", "pausing", "paused", "resuming", "canceling"].includes(job.state));
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = candidates.length ? "Choose an in-bounds job" : "No reviewed in-bounds jobs";
+    frameSelect.append(placeholder);
+    for (const job of candidates) {
+      const option = document.createElement("option");
+      option.value = job.id;
+      option.textContent = job.name;
+      frameSelect.append(option);
+    }
+    if (candidates.some((job) => job.id === priorFrame)) frameSelect.value = priorFrame;
+    frameSelect.disabled = !canFrame || !candidates.length;
+    $("#manual-frame").disabled = frameSelect.disabled || !frameSelect.value;
+    $("#manual-release").hidden = !record;
+    $("#manual-release").disabled = !record || !connected || !serverAvailable;
+    let status = "Select a connected driver.";
+    if (driver) {
+      if (record) status = `Manual control ${record.state}${record.state === "queued" ? " · waiting for worker" : ""}.`;
+      else if (driver.busy) status = "Driver is busy with a job or another control.";
+      else if (!capabilities.some((capability) => Object.values(manualCapabilityByAction).includes(capability))) status = "This worker does not advertise manual-control support.";
+      else if (driver.controller_state !== "Idle" && !String(driver.controller_state || "").startsWith("Alarm")) status = `Controller reports ${driver.controller_state || "unknown"}; motion and zero controls require Idle.`;
+      else if (!$("#manual-confirmation").checked) status = "Check the preparation confirmation to enable controls.";
+      else status = "Laser-off and operator confirmation are required for each action.";
+    }
+    $("#manual-status").textContent = status;
+  }
+
+  async function refreshManualControl() {
+    if (!selectedDriver) return;
+    const driver = drivers.find((candidate) => candidate.id === selectedDriver);
+    const advertisesManual = Array.isArray(driver?.capabilities) && driver.capabilities.some((capability) => Object.values(manualCapabilityByAction).includes(capability));
+    if (!advertisesManual && !manualRecords.has(selectedDriver)) return;
+    try {
+      const record = await api(`/api/v1/drivers/${encodeURIComponent(selectedDriver)}/manual`);
+      manualRecords.set(selectedDriver, record);
+    } catch (error) {
+      if (error.message === "manual-control assignment not found") manualRecords.delete(selectedDriver);
+      else throw error;
+    }
+  }
+
+  function requestManualAction(action, extra = {}) {
+    const driver = drivers.find((candidate) => candidate.id === selectedDriver);
+    const capability = manualCapabilityByAction[action];
+    if (!driver || driver.busy || !connected || !serverAvailable || !Array.isArray(driver.capabilities) || !driver.capabilities.includes(capability)) return;
+    if (!$("#manual-confirmation").checked) { $("#manual-status").textContent = "Check the preparation confirmation first."; $("#manual-confirmation").focus(); return; }
+    const requiredState = action === "unlock" ? String(driver.controller_state || "").startsWith("Alarm") : driver.controller_state === "Idle";
+    if (!requiredState) { $("#manual-status").textContent = action === "unlock" ? "Unlock requires an Alarm controller state." : "This action requires an Idle controller."; return; }
+    if (action === "jog") {
+      extra.axis = $("#manual-jog-axis").value;
+      extra.distance_mm = Number($("#manual-jog-distance").value);
+      extra.feed_mm_min = Number($("#manual-jog-feed").value);
+      if (!Number.isFinite(extra.distance_mm) || extra.distance_mm === 0 || Math.abs(extra.distance_mm) > 25 || !Number.isFinite(extra.feed_mm_min) || extra.feed_mm_min <= 0 || extra.feed_mm_min > 3000) {
+        $("#manual-status").textContent = "Jog distance must be within ±25 mm and feed must be 1–3000 mm/min."; return;
+      }
+    }
+    const frameJob = action === "frame" ? jobs.find((job) => job.id === $("#manual-frame-job").value) : null;
+    if (action === "frame") {
+      if (!frameJob || frameJob.program_review?.bounds_status !== "in_bounds" || !frameJob.program_review?.bounds) { $("#manual-status").textContent = "Choose a job with reviewed in-bounds geometry."; return; }
+      extra.job_id = frameJob.id;
+    }
+    const titles = { home: "Home machine?", unlock: "Unlock controller?", jog: "Jog machine?", set_zero: "Set X/Y work zero?", frame: `Frame ${frameJob?.name || "job"}?` };
+    const descriptions = { home: "The machine will move to its home switches.", unlock: "This clears the controller alarm state; inspect the machine before continuing.", jog: `The machine will move ${extra.distance_mm} mm on ${extra.axis} at ${extra.feed_mm_min} mm/min.`, set_zero: "The current position will become X0 Y0.", frame: "The machine will trace the reviewed job bounds with the laser off." };
+    openActionDialog({
+      eyebrow: "CONFIRM MACHINE PREPARATION", title: titles[action],
+      details: [["Driver", driver.id], ["Controller", driver.controller_state], ...(action === "frame" ? [["Job", frameJob.name]] : [])],
+      body: `${descriptions[action]} Confirm that the area is clear. Moving actions command the laser off before motion. Stay at the machine and supervise.`,
+      confirmLabel: `Confirm ${action.replace("_", " ")}`, confirmClass: action === "unlock" ? "button-danger" : "button-primary", dismissLabel: "Go back",
+      onConfirm: async () => {
+        try {
+          const record = await api(`/api/v1/drivers/${encodeURIComponent(driver.id)}/manual`, { method: "POST", body: JSON.stringify({ action, confirmed: true, ...extra }) });
+          manualRecords.set(driver.id, record);
+          $("#manual-confirmation").checked = false;
+          renderDrivers();
+          notify("success", `Manual ${action.replace("_", " ")} request queued.`);
+          await refresh();
+        } catch (error) { notify("error", error.message); }
+      }, returnFocus: {},
+    });
+  }
+
+  async function releaseManualControl() {
+    const driver = drivers.find((candidate) => candidate.id === selectedDriver);
+    const record = driver && manualRecords.get(driver.id);
+    if (!driver || !record) return;
+    openActionDialog({
+      eyebrow: "CONFIRM RELEASE", title: "Release manual control?", details: [["Driver", driver.id], ["State", record.state]],
+      body: "If the worker has already started motion, it must stop and report its final state before the lease clears. Inspect the machine before starting a job.",
+      confirmLabel: "Release control", confirmClass: "button-danger", dismissLabel: "Keep control",
+      onConfirm: async () => {
+        try {
+          const result = await api(`/api/v1/drivers/${encodeURIComponent(driver.id)}/manual`, { method: "DELETE", body: JSON.stringify({ confirmed: true }) });
+          if (result?.state === "released") manualRecords.delete(driver.id);
+          else manualRecords.set(driver.id, result);
+          $("#manual-confirmation").checked = false;
+          renderDrivers();
+          await refresh();
+        } catch (error) { notify("error", error.message); }
+      }, returnFocus: {},
+    });
   }
 
   // Row controls carry their job and action so focus can follow a control across list re-renders.
@@ -1944,6 +2075,7 @@
       dismissedConnectionError = "";
       setServerAvailable(true);
       clearNotice({ connectionOnly: true });
+      await refreshManualControl();
       renderDrivers();
       renderJobs();
       await refreshToolpathViews();
@@ -2099,11 +2231,20 @@
     } catch (error) { notify("error", error.message); }
   });
 
-  driverSelect.addEventListener("change", () => {
+  driverSelect.addEventListener("change", async () => {
     selectedDriver = driverSelect.value;
+    try { await refreshManualControl(); } catch (error) { notify("error", error.message); }
     renderDrivers();
     renderJobs();
   });
+  $("#manual-confirmation").addEventListener("change", () => renderManualControls(drivers.find((driver) => driver.id === selectedDriver)));
+  $("#manual-home").addEventListener("click", () => requestManualAction("home"));
+  $("#manual-unlock").addEventListener("click", () => requestManualAction("unlock"));
+  $("#manual-set-zero").addEventListener("click", () => requestManualAction("set_zero"));
+  $("#manual-jog").addEventListener("click", () => requestManualAction("jog"));
+  $("#manual-frame-job").addEventListener("change", () => renderManualControls(drivers.find((driver) => driver.id === selectedDriver)));
+  $("#manual-frame").addEventListener("click", () => requestManualAction("frame"));
+  $("#manual-release").addEventListener("click", releaseManualControl);
   confirmation.addEventListener("change", renderJobs);
   let filterTimer = null;
   jobFilterName.addEventListener("input", () => {

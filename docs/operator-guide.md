@@ -37,6 +37,28 @@ different key, or **Disconnect** to forget the session key and stop polling. In
 either case the library controls are disabled until you connect again. Once
 connected, choose the driver assigned to the machine you prepared.
 
+## Prepare the machine
+
+The **Manual controls** panel appears below the driver selector. Controls remain
+disabled until the selected worker advertises the matching `manual_*`
+capability, its controller state is safe for the action, and you check the
+preparation confirmation. Each action opens a second confirmation dialog with
+the driver and motion details. Home, jog, set-zero, and frame require the
+controller to report **Idle**; unlock is available only for an **Alarm** state.
+Jog is limited to 25 mm per move and 3000 mm/min. Frame is offered only for
+jobs with known in-bounds geometry, and traces the reviewed rectangle with the
+laser off. Stay at the machine and supervise. The panel cannot replace physical
+interlocks or an emergency stop.
+
+A queued manual request reserves the driver separately from the job queue. If
+worker support is unavailable, no action capability is advertised and the
+controls remain disabled. Use **Release manual control** only after inspecting
+the machine; a worker-owned move must stop and report before its lease clears.
+The browser sends typed action parameters only and never includes job G-code in
+a manual request.
+
+![Manual machine preparation controls gated by worker capability, controller state, and two operator confirmations](assets/screenshots/operator-console-manual-controls.png)
+
 Action feedback appears in one dismissible notice: informational, warning, and
 successful messages use a polite status announcement; errors use an alert.
 Errors stay until dismissed or replaced, and successes remain for at least five

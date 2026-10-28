@@ -361,6 +361,25 @@ async function main() {
     await expect(page.locator('#job-list li').filter({ hasText: 'Settings mismatch.gcode' })).toContainText('Start will be refused');
     await expect(page.locator('#job-list li').filter({ hasText: 'constant-power-m3.gcode' })).toContainText('Program uses M3 constant power');
     await captureElement(page, '.driver-controls', 'operator-console-controller-settings.png');
+    await page.route('**/api/v1/drivers', (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([{ id: 'simulator', busy: false, last_seen: new Date().toISOString(), capabilities: ['manual_home', 'manual_unlock', 'manual_jog', 'manual_set_zero', 'manual_frame'], controller_state: 'Idle', camera_available: false }]),
+    }));
+    await page.route('**/api/v1/jobs?*', (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ jobs: [{ id: 'manual-frame-guide', name: 'Reviewed frame sample.gcode', state: 'queued', created: new Date().toISOString(), acked: 0, total: 0, program_review: { bounds_status: 'in_bounds', bounds: { min: { x: 10, y: 10 }, max: { x: 30, y: 25 } } } }], total: 1 }),
+    }));
+    await page.locator('#refresh').click();
+    await page.locator('#manual-confirmation').check();
+    await expect(page.locator('#manual-frame-job option').filter({ hasText: 'Reviewed frame sample.gcode' })).toHaveCount(1);
+    await page.locator('#manual-frame-job').selectOption({ label: 'Reviewed frame sample.gcode' });
+    await expect(page.locator('#manual-home')).toBeEnabled();
+    await expect(page.locator('#manual-frame')).toBeEnabled();
+    await captureElement(page, '.manual-controls', 'operator-console-manual-controls.png');
+    await page.unroute('**/api/v1/drivers');
+    await page.unroute('**/api/v1/jobs?*');
     await docsApi('DELETE', `/api/v1/jobs/${mismatchJob.id}`);
     await docsApi('DELETE', `/api/v1/jobs/${constantJob.id}`);
     await docsApi('DELETE', `/api/v1/projects/${mismatchProject.id}`, { revision: 1 });
