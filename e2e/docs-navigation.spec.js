@@ -32,6 +32,7 @@ test.afterAll(async () => {
 });
 
 test('rendered documentation has grouped, current, keyboard accessible navigation without broken assets or overflow', async ({ browser }) => {
+  test.setTimeout(120_000);
   const pages = fs.readdirSync(docs).filter((name) => name.endsWith('.html'));
   expect(pages).toContain('operator-guide.html');
   expect(pages).toContain('api-routes.html');

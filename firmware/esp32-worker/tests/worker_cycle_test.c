@@ -20,15 +20,95 @@ typedef struct {
     int open_calls;
     int poll_calls;
     int fetch_calls;
-    int wait_calls;
     int report_calls;
     int close_calls;
     int callback_error;
     ed_terminal_state reported_state;
     char reported_error[ED_WORKER_ERROR_BYTES];
+    char reported_controller_state[ED_WORKER_CONTROLLER_STATE_BYTES];
+    char active_controller_state[ED_WORKER_CONTROLLER_STATE_BYTES];
     char session[ED_WORKER_SESSION_BYTES];
     const char *expected_lease;
+    int active_calls;
+    int active_fail_at;
+    int wrong_response_at;
+    int cancel_at;
+    size_t last_acked;
 } fixture;
+
+static int uart_sink(void *context, const unsigned char *bytes, size_t length);
+
+static int poll_active(void *context, const char *session, const char *job_id,
+                       const char *lease, size_t acked, size_t total,
+                       const char *controller_state,
+                       ed_active_response *response) {
+    fixture *f = (fixture *)context;
+    f->active_calls++;
+    if (strcmp(session, f->session) != 0 || strcmp(job_id, "job-7") != 0 ||
+        strcmp(lease, f->expected_lease) != 0 || acked < f->last_acked ||
+        acked > total || strcmp(controller_state, f->active_controller_state) != 0) {
+        f->callback_error = 1;
+        return -1;
+    }
+    f->last_acked = acked;
+    if (f->active_fail_at == f->active_calls) return -1;
+    strcpy(response->job_id, "job-7");
+    strcpy(response->lease, "lease-one");
+    if (f->wrong_response_at == f->active_calls) strcpy(response->lease, "other-lease");
+    response->command = f->cancel_at == f->active_calls ?
+                        ED_ACTIVE_CANCEL : ED_ACTIVE_CONTINUE;
+    return 0;
+}
+
+typedef struct {
+    fixture *f;
+    ed_active_poll active_poll;
+    void *poll_context;
+} stream_fixture;
+
+static int controller_send(void *context, const unsigned char *bytes, size_t length) {
+    stream_fixture *stream = (stream_fixture *)context;
+    size_t i;
+    for (i = 0; i < length; i++) {
+        ed_active_command command;
+        if (uart_sink(stream->f, bytes + i, 1) != 0) return -1;
+        if (bytes[i] == '\n') {
+            size_t acked = stream->f->last_acked + 1;
+            if (stream->active_poll(stream->poll_context, acked, 2,
+                                    stream->f->active_controller_state,
+                                    &command) != 0) return -1;
+            if (command == ED_ACTIVE_CANCEL) {
+                stream->f->cancel_at = -1;
+                stream->f->active_fail_at = -1;
+                stream->f->reported_state = ED_TERMINAL_CANCELED;
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int stream_verified(void *context, ed_verified_job *verified,
+                           ed_active_poll active_poll, void *poll_context,
+                           ed_terminal_receipt *receipt) {
+    fixture *f = (fixture *)context;
+    stream_fixture stream = {f, active_poll, poll_context};
+    ed_result sent = ed_verified_send_uart(verified, controller_send, &stream);
+    if (f->reported_state == ED_TERMINAL_CANCELED) {
+        receipt->state = ED_TERMINAL_CANCELED;
+        receipt->acked = f->last_acked;
+        receipt->total = 2;
+        strcpy(receipt->controller_state, "Idle");
+        return 1;
+    }
+    if (sent != ED_OK) return -1;
+    receipt->acked = f->incomplete_terminal ? 1u : 2u;
+    receipt->state = ED_TERMINAL_COMPLETED;
+    receipt->total = 2;
+    receipt->controller_idle = f->incomplete_terminal ? 0 : 1;
+    strcpy(receipt->controller_state, f->incomplete_terminal ? "Run" : "Idle");
+    return 0;
+}
 
 static int open_session(void *context, char *session, size_t capacity) {
     fixture *f = (fixture *)context;
@@ -120,25 +200,13 @@ static int uart_sink(void *context, const unsigned char *bytes, size_t length) {
     return 0;
 }
 
-static int wait_terminal(void *context, ed_terminal_receipt *receipt) {
-    fixture *f = (fixture *)context;
-    f->wait_calls++;
-    if (f->uart_size != f->source_size ||
-        memcmp(f->uart, f->source, f->source_size) != 0) return -1;
-    receipt->state = ED_TERMINAL_COMPLETED;
-    receipt->acked = f->incomplete_terminal ? 1u : 2u;
-    receipt->total = 2;
-    receipt->controller_idle = f->incomplete_terminal ? 0 : 1;
-    strcpy(receipt->controller_state, f->incomplete_terminal ? "Run" : "Idle");
-    return 0;
-}
-
 static int report_terminal(void *context, const char *session,
                            const char *job_id, const char *lease,
                            const ed_terminal_receipt *receipt) {
     fixture *f = (fixture *)context;
     f->report_calls++;
     f->reported_state = receipt->state;
+    strcpy(f->reported_controller_state, receipt->controller_state);
     if (strcmp(session, f->session) != 0 || strcmp(job_id, "job-7") != 0 ||
         strcmp(lease, f->expected_lease) != 0) {
         if (strcmp(lease, f->expected_lease) != 0) f->report_rejected = 1;
@@ -184,22 +252,22 @@ static void prepare(fixture *f, ed_worker_adapters *adapters,
     f->source = program;
     f->source_size = length;
     f->expected_lease = "lease-one";
+    strcpy(f->active_controller_state, "Run");
     adapters->http.context = f;
     adapters->http.open_fresh_session = open_session;
     adapters->http.poll_assignment = poll_assignment;
+    adapters->http.poll_active = poll_active;
     adapters->http.fetch_range = fetch_range;
     adapters->http.report_terminal = report_terminal;
     adapters->http.close_session = close_session;
     adapters->controller.context = f;
-    adapters->controller.wait_terminal = wait_terminal;
+    adapters->controller.stream_verified = stream_verified;
     adapters->storage.context = f;
     adapters->storage.reset = storage_reset;
     adapters->storage.write = storage_write;
     adapters->storage.read = storage_read;
     adapters->storage.seal = storage_seal;
     adapters->storage.unseal = storage_unseal;
-    adapters->uart_sink = uart_sink;
-    adapters->uart_context = f;
 }
 
 static int test_successful_assignment(void) {
@@ -215,12 +283,13 @@ static int test_successful_assignment(void) {
     if (!check(status == ED_OK, "one valid assignment completes")) return 0;
     if (!check(result.outcome == ED_WORKER_COMPLETED && result.acked == 2 &&
                result.total == 2, "terminal result is returned")) return 0;
-    if (!check(f.open_calls == 1 && f.poll_calls == 1,
-               "one fresh session and one poll are used")) return 0;
+    if (!check(f.open_calls == 1 && f.poll_calls == 1 && f.active_calls == 2 &&
+               f.last_acked == 2,
+               "repeated active polls report monotonic acknowledged progress")) return 0;
     if (!check(f.fetch_calls == 1 && f.next_offset == f.source_size,
                "content is fetched under the one assignment")) return 0;
-    if (!check(f.uart_size == f.source_size && f.wait_calls == 1 &&
-               f.report_calls == 1, "verified content reaches UART before report")) return 0;
+    if (!check(f.uart_size == f.source_size && f.report_calls == 1,
+               "verified content reaches UART before report")) return 0;
     if (!check(f.close_calls == 1 && !f.callback_error,
                "session closes after terminal report")) return 0;
     return 1;
@@ -250,7 +319,7 @@ static int test_wrong_lease_is_rejected(void) {
     f.expected_lease = "different-lease";
     if (!check(ed_worker_run_one(&adapters, &result) == ED_ERR_REPORT,
                "wrong lease prevents the failure receipt from releasing it")) return 0;
-    return check(f.fetch_calls == 1 && f.uart_size == 0 && f.wait_calls == 0 &&
+    return check(f.fetch_calls == 1 && f.uart_size == 0 &&
                  f.report_calls == 1 && f.reported_state == ED_TERMINAL_FAILED &&
                  f.fetch_rejected && f.report_rejected &&
                  f.close_calls == 1,
@@ -273,7 +342,7 @@ static int test_invalid_content_never_reaches_uart_or_completion(void) {
         prepare(&f, &adapters, programs[i], lengths[i]);
         f.short_fetch = short_fetch[i];
         if (!check(ed_worker_run_one(&adapters, &result) == expected[i], names[i])) return 0;
-        if (!check(f.uart_size == 0 && f.wait_calls == 0 && f.report_calls == 1 &&
+        if (!check(f.uart_size == 0 && f.report_calls == 1 &&
                    f.reported_state == ED_TERMINAL_FAILED && f.close_calls == 1,
                    "invalid or truncated content cannot reach UART/completed report")) return 0;
     }
@@ -289,11 +358,57 @@ static int test_incomplete_controller_result_is_not_reported_completed(void) {
     f.incomplete_terminal = 1;
     if (!check(ed_worker_run_one(&adapters, &result) == ED_ERR_PROTOCOL,
                "completed requires all acknowledgments and controller Idle")) return 0;
-    return check(f.uart_size == f.source_size && f.wait_calls == 1 &&
+    return check(f.uart_size == f.source_size &&
                  f.report_calls == 1 && f.reported_state == ED_TERMINAL_FAILED &&
                  f.close_calls == 1 &&
                  result.outcome == ED_WORKER_ERROR,
                  "incomplete controller result is not reported as terminal");
+}
+
+static int test_active_cancel_stops_stream_and_reports_canceled(void) {
+    static const unsigned char program[] = "G1 X1\nM5\n";
+    fixture f;
+    ed_worker_adapters adapters;
+    ed_worker_result result;
+    prepare(&f, &adapters, program, sizeof(program) - 1);
+    f.cancel_at = 1;
+    if (!check(ed_worker_run_one(&adapters, &result) == ED_OK,
+               "active cancellation is a successful terminal cycle")) return 0;
+    return check(result.outcome == ED_WORKER_CANCELED && f.active_calls == 1 &&
+                 f.uart_size == 6 && f.report_calls == 1 &&
+                 f.reported_state == ED_TERMINAL_CANCELED && f.close_calls == 1,
+                 "cancel stops later output, reports canceled, and does not replay");
+}
+
+static int test_active_poll_failure_stops_stream_and_reports_failure(void) {
+    static const unsigned char program[] = "G1 X1\nM5\n";
+    fixture f;
+    ed_worker_adapters adapters;
+    ed_worker_result result;
+    prepare(&f, &adapters, program, sizeof(program) - 1);
+    f.active_fail_at = 1;
+    strcpy(f.active_controller_state, "Hold");
+    if (!check(ed_worker_run_one(&adapters, &result) == ED_ERR_SESSION,
+               "failed active poll halts the claimed lease")) return 0;
+    return check(f.active_calls == 1 && f.uart_size == 6 && f.report_calls == 1 &&
+                 f.reported_state == ED_TERMINAL_FAILED && f.close_calls == 1 &&
+                 f.open_calls == 1 && f.fetch_calls == 1 &&
+                 strcmp(f.reported_controller_state, "Hold") == 0,
+                 "poll failure halts output, preserves state, and does not replay");
+}
+
+static int test_active_poll_identity_change_stops_stream(void) {
+    static const unsigned char program[] = "G1 X1\nM5\n";
+    fixture f;
+    ed_worker_adapters adapters;
+    ed_worker_result result;
+    prepare(&f, &adapters, program, sizeof(program) - 1);
+    f.wrong_response_at = 1;
+    if (!check(ed_worker_run_one(&adapters, &result) == ED_ERR_SESSION,
+               "changed lease in active response is rejected")) return 0;
+    return check(f.active_calls == 1 && f.uart_size == 6 && f.report_calls == 1 &&
+                 f.reported_state == ED_TERMINAL_FAILED && f.close_calls == 1,
+                 "identity change stops output and does not replay assignment");
 }
 
 int main(void) {
@@ -302,5 +417,8 @@ int main(void) {
     if (!test_wrong_lease_is_rejected()) return 1;
     if (!test_invalid_content_never_reaches_uart_or_completion()) return 1;
     if (!test_incomplete_controller_result_is_not_reported_completed()) return 1;
+    if (!test_active_cancel_stops_stream_and_reports_canceled()) return 1;
+    if (!test_active_poll_failure_stops_stream_and_reports_failure()) return 1;
+    if (!test_active_poll_identity_change_stops_stream()) return 1;
     return 0;
 }
