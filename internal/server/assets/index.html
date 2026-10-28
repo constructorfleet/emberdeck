@@ -75,6 +75,37 @@
           </form>
         </section>
       </div>
+      <section class="designer-section vector-section" aria-labelledby="vector-projects-title">
+        <div class="designer-heading"><div><h3 id="vector-projects-title">Multi-path vector projects</h3><p class="hint">Create editable rectangle, ellipse, and line paths. Add ordered engraving or cutting operations, then assign each shape.</p></div><button id="new-vector-project" class="button button-small" type="button" disabled>New vector project</button></div>
+        <ul id="vector-project-list" class="project-list" aria-label="Saved multi-path vector projects"></ul>
+        <form id="vector-form" class="designer-form" hidden>
+          <h4 id="vector-form-title">New vector project</h4>
+          <label for="vector-name">Project name</label><input id="vector-name" maxlength="120" required>
+          <p id="vector-validation" class="designer-warning" role="alert" hidden></p>
+          <div class="vector-editor-grid">
+            <div>
+              <div class="vector-toolbar" aria-label="Add vector primitive">
+                <button class="button button-small" type="button" data-add-shape="rectangle">Add rectangle</button>
+                <button class="button button-small" type="button" data-add-shape="ellipse">Add ellipse</button>
+                <button class="button button-small" type="button" data-add-shape="line">Add line</button>
+              </div>
+              <h4 class="vector-subhead">Shapes</h4><ul id="vector-object-list" class="vector-list" aria-label="Project shapes"></ul>
+              <div id="vector-geometry" class="numeric-grid vector-fields" hidden>
+                <label>X (mm)<input id="vector-x" type="number" min="0" step="0.001"></label>
+                <label>Y (mm)<input id="vector-y" type="number" min="0" step="0.001"></label>
+                <label>Width (mm)<input id="vector-width" type="number" min="0.001" step="0.001"></label>
+                <label>Height (mm)<input id="vector-height" type="number" min="0.001" step="0.001"></label>
+                <label>Operation layer<select id="vector-object-operation"></select></label>
+              </div>
+              <div class="layer-heading"><h4 class="vector-subhead">Ordered operation layers</h4><button id="add-operation" class="button button-small" type="button">Add layer</button></div>
+              <ol id="vector-operation-list" class="vector-list vector-layers" aria-label="Ordered operation layers"></ol>
+            </div>
+            <div class="preview-wrap"><svg id="vector-preview" viewBox="0 0 620 360" role="img" aria-label="Multi-path design preview in declared workspace"><title>Multi-path design preview</title><desc>Vector paths are shown in the selected profile workspace and colored by operation type.</desc><g id="vector-preview-content"></g></svg><p>Workspace uses the selected declared profile and lower-left origin. Paths are design geometry; starting position remains unknown.</p></div>
+          </div>
+          <p id="vector-save-hint" class="hint" hidden>Save changes before generating. Generation only queues a job; use the existing explicit Start control after reviewing it.</p>
+          <div class="designer-actions"><button class="button button-primary" type="submit">Save vector project</button><button id="generate-vector-project" class="button button-start" type="button" disabled>Generate queued job</button><button id="delete-vector-project" class="button button-small button-danger" type="button" hidden>Delete project</button><button id="close-vector-project" class="button button-small" type="button">Close editor</button></div>
+        </form>
+      </section>
     </section>
     <div class="workspace">
       <section class="panel upload-panel" aria-labelledby="upload-title">

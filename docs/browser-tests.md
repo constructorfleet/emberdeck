@@ -20,8 +20,16 @@ while edits are unsaved and clears an already checked readiness box when a new
 program is generated. The test then checks the existing readiness gate,
 dispatches explicitly to the simulator, and verifies the job completes. It also
 checks narrow-screen overflow with both editor forms open at tablet boundaries.
-An open profile draft also blocks generation until it is saved or canceled. The
-browser test uses the rendered UI and real HTTP API rather than mocking storage.
+An open profile draft also blocks generation until it is saved or canceled.
+
+The schema-v2 vector workflow creates rectangle, ellipse, and line paths, adds
+and edits ordered engraving/cutting layers, assigns paths, validates the
+profile-aware preview, and saves/reopens the project. It verifies that generation
+creates a queued job with per-layer provenance but sends no start request, then
+uses the existing confirmation/Start flow to complete on the simulator. A
+generic multi-subpath imported path fixture verifies that resizing preserves
+kind and all subpaths. Tests use the rendered UI and real HTTP API rather than
+mocking storage.
 
 ## Run locally
 

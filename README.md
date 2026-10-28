@@ -60,12 +60,13 @@ control and job state.
   line progress, controller completion, and failure reporting.
 - Live controller status distinguishes pause requests, deceleration, confirmed
   holds, and resumed execution. The same connection and lease span a pause.
-- Declared GRBL profiles and saved rectangle vector-engraving projects, with a
-  bounded static preview and separate generated jobs for review and explicit
-  dispatch. SVG/text import, multi-object editing, cutting layers, raster
-  engraving, live toolpath execution tracking, and driver-adapter configuration
-  remain future work; the [operator guide](docs/operator-guide.md) illustrates
-  the available controls and calls out these missing UI surfaces.
+- Declared GRBL profiles, saved rectangle projects, and schema-v2 multi-path
+  vector projects with editable rectangle/ellipse/line paths, ordered engraving
+  and cutting layers, bounded profile preview, and separate generated jobs for
+  review and explicit dispatch. SVG/text import, transforms, raster engraving,
+  live toolpath execution tracking, and driver-adapter configuration remain
+  future work; the [operator guide](docs/operator-guide.md) illustrates the
+  available controls and calls out the missing UI surfaces.
 - One active job per online driver; assignment leases and unique worker sessions.
 - Fail-closed worker behavior on server communication failures. Restarted or
   disconnected work becomes interrupted, with no automatic replay.

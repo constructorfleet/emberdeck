@@ -24,6 +24,11 @@
   let projects = [];
   let editingProfile = null;
   let openProject = null;
+  let openVectorProject = null;
+  let vectorObjects = [];
+  let vectorOperations = [];
+  let selectedVectorObject = "";
+  let vectorIDSequence = 0;
 
   function message(text) {
     notice.textContent = text;
@@ -102,14 +107,17 @@
     $("#edit-profile").disabled = !hasProfile;
     $("#delete-profile").disabled = !hasProfile;
     $("#new-project").disabled = !hasProfile;
+    $("#new-vector-project").disabled = !hasProfile;
     renderProjects();
+    renderVectorProjects();
     updateProjectValidation();
+    updateVectorValidation();
   }
 
   function renderProjects() {
     const list = $("#project-list");
     list.replaceChildren();
-    for (const project of projects) {
+    for (const project of projects.filter((candidate) => candidate.schema_version === 1)) {
       const row = document.createElement("li");
       const label = document.createElement("strong");
       label.textContent = `${project.name} · r${project.revision}`;
@@ -337,10 +345,339 @@
     } catch (error) { setDesignerError(error.message); }
   }
 
+  function vectorID(prefix) {
+    vectorIDSequence += 1;
+    return `${prefix}-${Date.now().toString(36)}-${vectorIDSequence}`;
+  }
+
+  function currentVectorPayload(profile) {
+    return {
+      schema_version: 2,
+      name: $("#vector-name").value.trim(),
+      units: "mm",
+      profile_id: profile.id,
+      profile_revision: profile.revision,
+      objects: vectorObjects.map(({ id, kind, operation_id, subpaths }) => ({ id, kind: kind || "path", ...(operation_id ? { operation_id } : {}), subpaths })),
+      operations: vectorOperations.map(({ id, type, feed_mm_min, power_percent }) => ({ id, type, feed_mm_min, power_percent })),
+    };
+  }
+
+  function objectKind(object) { return object.kind || "path"; }
+
+  function boundsFor(object) {
+    const points = object.subpaths.flatMap((path) => path.points);
+    return {
+      x: Math.min(...points.map((point) => point.x_mm)),
+      y: Math.min(...points.map((point) => point.y_mm)),
+      width: Math.max(...points.map((point) => point.x_mm)) - Math.min(...points.map((point) => point.x_mm)),
+      height: Math.max(...points.map((point) => point.y_mm)) - Math.min(...points.map((point) => point.y_mm)),
+    };
+  }
+
+  function shapePoints(type, x, y, width, height) {
+    const point = (x_mm, y_mm) => ({ x_mm: Math.round(x_mm * 1000) / 1000, y_mm: Math.round(y_mm * 1000) / 1000 });
+    if (type === "line") return [point(x, y), point(x + width, y + height)];
+    if (type === "ellipse") {
+      return Array.from({ length: 32 }, (_, index) => {
+        const angle = (index * 2 * Math.PI) / 32;
+        return point(x + width / 2 + Math.cos(angle) * width / 2, y + height / 2 + Math.sin(angle) * height / 2);
+      });
+    }
+    return [point(x, y), point(x + width, y), point(x + width, y + height), point(x, y + height)];
+  }
+
+  function pathHasArea(points) {
+    let twiceArea = 0;
+    points.forEach((point, index) => {
+      const next = points[(index + 1) % points.length];
+      twiceArea += milli(point.x_mm) * milli(next.y_mm) - milli(next.x_mm) * milli(point.y_mm);
+    });
+    return twiceArea !== 0;
+  }
+
+  function renderVectorObjectList() {
+    const list = $("#vector-object-list");
+    list.replaceChildren();
+    vectorObjects.forEach((object, index) => {
+      const row = document.createElement("li");
+      row.className = object.id === selectedVectorObject ? "selected" : "";
+      const select = button(`${index + 1}. ${objectKind(object)}`, "vector-select", () => {
+        selectedVectorObject = object.id;
+        renderVectorEditor();
+      });
+      const assigned = vectorOperations.find((operation) => operation.id === object.operation_id);
+      const detail = document.createElement("span");
+      detail.textContent = assigned ? assigned.type.replace("vector-", "") : "Unassigned";
+      const remove = button("Remove", "button button-small button-danger", () => {
+        vectorObjects = vectorObjects.filter((candidate) => candidate.id !== object.id);
+        selectedVectorObject = vectorObjects[0]?.id || "";
+        renderVectorEditor();
+      }, `Remove shape ${index + 1}`);
+      row.append(select, detail, remove);
+      list.append(row);
+    });
+    const object = vectorObjects.find((candidate) => candidate.id === selectedVectorObject);
+    $("#vector-geometry").hidden = !object;
+    if (!object) return;
+    const bounds = boundsFor(object);
+    $("#vector-x").value = bounds.x.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+    $("#vector-y").value = bounds.y.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+    $("#vector-width").value = Math.max(0.001, bounds.width).toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+    $("#vector-height").value = Math.max(0.001, bounds.height).toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+    const assignment = $("#vector-object-operation");
+    assignment.replaceChildren(new Option("Unassigned", ""));
+    vectorOperations.forEach((operation, index) => assignment.append(new Option(`${index + 1}. ${operation.type.replace("vector-", "")}`, operation.id)));
+    assignment.value = object.operation_id || "";
+  }
+
+  function renderVectorOperations() {
+    const list = $("#vector-operation-list");
+    list.replaceChildren();
+    vectorOperations.forEach((operation, index) => {
+      const row = document.createElement("li");
+      row.className = "layer-row";
+      const number = document.createElement("span");
+      number.className = "layer-number";
+      number.textContent = String(index + 1).padStart(2, "0");
+      const type = document.createElement("select");
+      type.setAttribute("aria-label", `Operation ${index + 1} type`);
+      [["vector-engrave", "Engrave"], ["vector-cut", "Cut"]].forEach(([value, label]) => type.append(new Option(label, value)));
+      type.value = operation.type;
+      type.addEventListener("change", () => { operation.type = type.value; renderVectorEditor(); });
+      const feed = document.createElement("input");
+      feed.type = "number"; feed.min = "0.001"; feed.step = "0.001"; feed.value = operation.feed_mm_min;
+      feed.setAttribute("aria-label", `Operation ${index + 1} feed (mm/min)`);
+      feed.addEventListener("input", () => { operation.feed_mm_min = Number(feed.value); updateVectorValidation(); });
+      const power = document.createElement("input");
+      power.type = "number"; power.min = "0.001"; power.max = "100"; power.step = "0.001"; power.value = operation.power_percent;
+      power.setAttribute("aria-label", `Operation ${index + 1} power (%)`);
+      power.addEventListener("input", () => { operation.power_percent = Number(power.value); updateVectorValidation(); });
+      const up = button("↑", "button button-small", () => moveVectorOperation(index, -1), `Move operation ${index + 1} up`);
+      up.disabled = index === 0;
+      const down = button("↓", "button button-small", () => moveVectorOperation(index, 1), `Move operation ${index + 1} down`);
+      down.disabled = index === vectorOperations.length - 1;
+      const remove = button("×", "button button-small button-danger", () => {
+        const removed = vectorOperations.splice(index, 1)[0];
+        vectorObjects.forEach((object) => { if (object.operation_id === removed.id) delete object.operation_id; });
+        renderVectorEditor();
+      }, `Delete operation ${index + 1}`);
+      row.append(number, type, feed, power, up, down, remove);
+      list.append(row);
+    });
+  }
+
+  function moveVectorOperation(index, direction) {
+    const target = index + direction;
+    if (target < 0 || target >= vectorOperations.length) return;
+    [vectorOperations[index], vectorOperations[target]] = [vectorOperations[target], vectorOperations[index]];
+    renderVectorEditor();
+  }
+
+  function renderVectorPreview(profile) {
+    const content = $("#vector-preview-content");
+    content.replaceChildren();
+    const W = Number(profile?.width_mm), H = Number(profile?.height_mm);
+    if (!(W > 0 && H > 0)) return;
+    const scale = Math.min(550 / W, 290 / H), left = 35, bottom = 325;
+    content.append(svgElement("rect", { class: "workspace-shape", x: left, y: bottom - H * scale, width: W * scale, height: H * scale }));
+    content.append(svgElement("text", { x: left + 4, y: bottom - H * scale + 14 }, `Declared workspace · ${W} × ${H} mm`));
+    vectorObjects.forEach((object) => {
+      const operation = vectorOperations.find((candidate) => candidate.id === object.operation_id);
+      const commands = [];
+      object.subpaths.forEach((path) => {
+        path.points.forEach((point, index) => commands.push(`${index ? "L" : "M"} ${left + point.x_mm * scale} ${bottom - point.y_mm * scale}`));
+        if (path.closed) commands.push("Z");
+      });
+      const path = svgElement("path", { class: `vector-path ${operation ? (operation.type === "vector-cut" ? "cut-path" : "engrave-path") : "unassigned-path"}`, d: commands.join(" ") });
+      if (!operation) {
+        path.style.stroke = "#aab3a9";
+        path.style.strokeDasharray = "2 3";
+      }
+      content.append(path);
+    });
+    content.append(svgElement("text", { x: left, y: 349 }, "Engrave · green   Cut · red dashed   Unassigned · gray dotted"));
+  }
+
+  function vectorValidation() {
+    const profile = selectedProfile();
+    if (!profile) return "Select or create a declared profile first.";
+    if (!$("#vector-name").value.trim()) return "Enter a project name.";
+    if (!vectorObjects.length) return "Add at least one shape.";
+    if (vectorObjects.length > 500 || vectorOperations.length > 100) return "The project exceeds the supported shape or operation count.";
+    if (vectorObjects.some((object) => object.id === selectedVectorObject)) {
+      const geometry = ["#vector-x", "#vector-y", "#vector-width", "#vector-height"].map(finiteField);
+      if (geometry.some((value) => value === null)) return "Enter finite position and size values with at most three decimal places.";
+      if (geometry[0] < 0 || geometry[1] < 0 || geometry[2] <= 0 || geometry[3] <= 0) return "Position must be nonnegative and shape width and height must be positive.";
+    }
+    for (const operation of vectorOperations) {
+      if (!Number.isFinite(operation.feed_mm_min) || operation.feed_mm_min < profile.min_feed_mm_min || operation.feed_mm_min > profile.max_feed_mm_min) return "Operation feed is outside the selected profile range.";
+      if (!Number.isFinite(operation.power_percent) || operation.power_percent <= 0 || operation.power_percent > profile.max_power_percent) return "Operation power is outside the selected profile limit.";
+      if (!decimalPlacesAtMostThree(String(operation.feed_mm_min)) || !decimalPlacesAtMostThree(String(operation.power_percent))) return "Operation values must use at most three decimal places.";
+      if (Math.floor((profile.max_s * milli(operation.power_percent) + 50000) / 100000) < 1) return "An operation power rounds to S0; increase commanded power before saving.";
+    }
+    for (const object of vectorObjects) {
+      if (!object.subpaths.length || object.subpaths.some((path) => path.points.length < (path.closed ? 3 : 2))) return "Each shape needs a valid path.";
+      for (const point of object.subpaths.flatMap((path) => path.points)) {
+        if (![point.x_mm, point.y_mm].every(Number.isFinite) || !decimalPlacesAtMostThree(String(point.x_mm)) || !decimalPlacesAtMostThree(String(point.y_mm)) || point.x_mm < 0 || point.y_mm < 0 || milli(point.x_mm) > milli(profile.width_mm) || milli(point.y_mm) > milli(profile.height_mm)) return "A shape is outside the declared workspace or uses unsupported coordinate precision.";
+      }
+      if (object.operation_id) {
+        const operation = vectorOperations.find((candidate) => candidate.id === object.operation_id);
+        if (!operation) return "A shape refers to a missing operation layer.";
+        if (operation.type === "vector-cut" && object.subpaths.some((path) => !path.closed || !pathHasArea(path.points))) return "Cut operations require closed shapes with nonzero area. Assign this path to an engraving layer or change its geometry.";
+      }
+    }
+    return "";
+  }
+
+  function vectorMatchesSaved(profile) {
+    if (!openVectorProject || !profile) return false;
+    return JSON.stringify(currentVectorPayload(profile)) === JSON.stringify({
+      schema_version: 2, name: openVectorProject.name, units: openVectorProject.units, profile_id: openVectorProject.profile_id,
+      profile_revision: openVectorProject.profile_revision,
+      objects: openVectorProject.objects.map(({ id, kind, operation_id, subpaths }) => ({ id, kind: kind || "path", ...(operation_id ? { operation_id } : {}), subpaths })),
+      operations: openVectorProject.operations,
+    });
+  }
+
+  function updateVectorValidation() {
+    if ($("#vector-form").hidden) return;
+    const profile = selectedProfile();
+    const error = vectorValidation();
+    const stale = Boolean(openVectorProject && profile && (openVectorProject.profile_id !== profile.id || openVectorProject.profile_revision !== profile.revision));
+    const warning = $("#vector-validation");
+    warning.textContent = stale ? "Profile revision changed. Review this project against the current declared workspace and save it before generating." : error;
+    warning.hidden = !stale && !error;
+    const saveButton = $("#vector-form").querySelector('button[type="submit"]');
+    saveButton.disabled = Boolean(error) || !$("#profile-form").hidden;
+    const complete = vectorObjects.every((object) => object.operation_id && vectorOperations.some((operation) => operation.id === object.operation_id));
+    const matches = vectorMatchesSaved(profile);
+    $("#vector-save-hint").hidden = matches;
+    $("#generate-vector-project").disabled = Boolean(error) || !openVectorProject || stale || !matches || !complete || !$("#profile-form").hidden;
+    renderVectorPreview(profile);
+  }
+
+  function renderVectorEditor() {
+    renderVectorObjectList();
+    renderVectorOperations();
+    updateVectorValidation();
+  }
+
+  function fillVectorProject(project = null) {
+    openVectorProject = project;
+    vectorObjects = project ? project.objects.map((object) => ({ ...object, kind: objectKind(object), subpaths: object.subpaths.map((path) => ({ ...path, points: path.points.map((point) => ({ ...point })) })) })) : [];
+    vectorOperations = project ? project.operations.map((operation) => ({ ...operation })) : [{ id: vectorID("operation"), type: "vector-engrave", feed_mm_min: 600, power_percent: 25 }];
+    selectedVectorObject = vectorObjects[0]?.id || "";
+    $("#vector-form").hidden = false;
+    $("#vector-name").value = project ? project.name : "Untitled vector design";
+    $("#vector-form-title").textContent = project ? `Edit ${project.name}` : "New multi-path vector project";
+    $("#delete-vector-project").hidden = !project;
+    renderVectorEditor();
+  }
+
+  function addVectorShape(type) {
+    const profile = selectedProfile();
+    if (!profile) return;
+    const x = Math.min(10 + vectorObjects.length * 5, Math.max(0, profile.width_mm - 20));
+    const y = Math.min(10 + vectorObjects.length * 5, Math.max(0, profile.height_mm - 20));
+    const width = Math.min(30, profile.width_mm - x), height = Math.min(20, profile.height_mm - y);
+    const closed = type !== "line";
+    const object = { id: vectorID("shape"), kind: type, subpaths: [{ points: shapePoints(type, x, y, width, height), closed }] };
+    if (vectorOperations[0]) object.operation_id = vectorOperations[0].id;
+    vectorObjects.push(object);
+    selectedVectorObject = object.id;
+    renderVectorEditor();
+  }
+
+  function updateSelectedGeometry() {
+    const object = vectorObjects.find((candidate) => candidate.id === selectedVectorObject);
+    if (!object) return;
+    const vals = ["#vector-x", "#vector-y", "#vector-width", "#vector-height"].map(finiteField);
+    if (vals.some((value) => value === null) || vals[2] <= 0 || vals[3] <= 0) return updateVectorValidation();
+    const [x, y, width, height] = vals;
+    const kind = objectKind(object);
+    if (kind === "path") {
+      const previous = boundsFor(object);
+      const round = (value) => Math.round(value * 1000) / 1000;
+      object.subpaths = object.subpaths.map((path) => ({
+        ...path,
+        points: path.points.map((point) => ({
+          x_mm: round(previous.width > 0 ? x + (point.x_mm - previous.x) * width / previous.width : x + width / 2),
+          y_mm: round(previous.height > 0 ? y + (point.y_mm - previous.y) * height / previous.height : y + height / 2),
+        })),
+      }));
+    } else {
+      object.subpaths = [{ points: shapePoints(kind, x, y, width, height), closed: object.subpaths[0].closed }];
+    }
+    updateVectorValidation();
+  }
+
+  function renderVectorProjects() {
+    const list = $("#vector-project-list");
+    list.replaceChildren();
+    projects.filter((project) => project.schema_version === 2).forEach((project) => {
+      const row = document.createElement("li");
+      const label = document.createElement("strong");
+      label.textContent = `${project.name} · r${project.revision} · ${project.objects.length} shapes`;
+      const actions = document.createElement("div"); actions.className = "designer-actions";
+      actions.append(button(`Reopen vector ${project.name}`, "button button-small", () => {
+        const profile = profiles.find((candidate) => candidate.id === project.profile_id);
+        if (profile) $("#profile-select").value = profile.id;
+        fillVectorProject(project);
+        $("#vector-form").scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }));
+      actions.append(button("Delete", "button button-small button-danger", () => deleteVectorProject(project.id, project.name), `Delete vector project ${project.name}`));
+      row.append(label, actions); list.append(row);
+    });
+  }
+
+  async function saveVectorProject(event) {
+    event.preventDefault();
+    const profile = selectedProfile();
+    if (!profile || vectorValidation()) { updateVectorValidation(); return; }
+    const payload = currentVectorPayload(profile);
+    if (openVectorProject) payload.revision = openVectorProject.revision;
+    try {
+      const saved = await api(openVectorProject ? `/api/v1/projects/${encodeURIComponent(openVectorProject.id)}` : "/api/v1/projects", {
+        method: openVectorProject ? "PUT" : "POST", body: JSON.stringify(payload),
+      });
+      await refreshDesigner();
+      openVectorProject = projects.find((project) => project.id === saved.id) || saved;
+      vectorObjects = openVectorProject.objects.map((object) => ({ ...object, kind: objectKind(object) }));
+      vectorOperations = openVectorProject.operations.map((operation) => ({ ...operation }));
+      $("#vector-form-title").textContent = `Edit ${saved.name}`;
+      $("#delete-vector-project").hidden = false;
+      renderVectorEditor();
+      setDesignerStatus("Vector project saved.");
+    } catch (error) { setDesignerError(error.message); }
+  }
+
+  async function deleteVectorProject(id, name) {
+    const project = projects.find((candidate) => candidate.id === id);
+    if (!project || !window.confirm(`Delete vector project “${name}”? Generated jobs remain unchanged.`)) return;
+    try {
+      await api(`/api/v1/projects/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({ revision: project.revision }) });
+      if (openVectorProject?.id === id) { openVectorProject = null; $("#vector-form").hidden = true; }
+      await refreshDesigner();
+      setDesignerStatus("Vector project deleted. Generated jobs are unchanged.");
+    } catch (error) { setDesignerError(error.message); }
+  }
+
+  async function generateVectorProject() {
+    if (!openVectorProject || !vectorMatchesSaved(selectedProfile()) || vectorValidation()) return updateVectorValidation();
+    try {
+      const job = await api(`/api/v1/projects/${encodeURIComponent(openVectorProject.id)}/generate`, { method: "POST", body: JSON.stringify({ revision: openVectorProject.revision }) });
+      confirmation.checked = false;
+      await refresh();
+      await showProgram(job.id);
+      setDesignerStatus("Generated job added to the library as queued. Review it and dispatch explicitly when ready.");
+    } catch (error) { setDesignerError(error.message); }
+  }
+
   $("#new-profile").addEventListener("click", () => beginProfileEdit());
   $("#edit-profile").addEventListener("click", () => beginProfileEdit(selectedProfile()));
   $("#cancel-profile").addEventListener("click", () => { $("#profile-form").hidden = true; updateProjectValidation(); });
   $("#profile-select").addEventListener("change", () => { if (!$("#project-form").hidden) updateProjectValidation(); });
+  $("#profile-select").addEventListener("change", updateVectorValidation);
   $("#profile-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const payload = profilePayload();
@@ -351,6 +688,7 @@
       $("#profile-select").value = saved.id;
       $("#profile-form").hidden = true;
       if (!$("#project-form").hidden) updateProjectValidation();
+      if (!$("#vector-form").hidden) updateVectorValidation();
       setDesignerStatus("Profile saved. Confirm it matches the prepared machine before use.");
     } catch (error) { setDesignerError(error.message); }
   });
@@ -371,6 +709,28 @@
   $("#cancel-project").addEventListener("click", () => { openProject = null; $("#project-form").hidden = true; });
   $("#delete-project").addEventListener("click", () => { if (openProject) deleteProject(openProject.id, openProject.name); });
   $("#generate-project").addEventListener("click", generateProject);
+  $("#new-vector-project").addEventListener("click", () => fillVectorProject());
+  document.querySelectorAll("[data-add-shape]").forEach((control) => control.addEventListener("click", () => addVectorShape(control.dataset.addShape)));
+  $("#add-operation").addEventListener("click", () => {
+    const operation = { id: vectorID("operation"), type: "vector-engrave", feed_mm_min: 600, power_percent: 25 };
+    vectorOperations.push(operation);
+    renderVectorEditor();
+  });
+  $("#vector-form").addEventListener("submit", saveVectorProject);
+  $("#vector-form").addEventListener("input", (event) => {
+    if (event.target.matches("#vector-x, #vector-y, #vector-width, #vector-height")) updateSelectedGeometry();
+    else updateVectorValidation();
+  });
+  $("#vector-form").addEventListener("change", (event) => {
+    if (event.target.id === "vector-object-operation") {
+      const object = vectorObjects.find((candidate) => candidate.id === selectedVectorObject);
+      if (object) { if (event.target.value) object.operation_id = event.target.value; else delete object.operation_id; }
+      renderVectorEditor();
+    } else updateVectorValidation();
+  });
+  $("#close-vector-project").addEventListener("click", () => { openVectorProject = null; $("#vector-form").hidden = true; });
+  $("#delete-vector-project").addEventListener("click", () => { if (openVectorProject) deleteVectorProject(openVectorProject.id, openVectorProject.name); });
+  $("#generate-vector-project").addEventListener("click", generateVectorProject);
 
   function renderDrivers() {
     const prior = selectedDriver;
@@ -560,12 +920,28 @@
       if (job.provenance) {
         const source = job.provenance.project || {};
         const profile = job.provenance.profile || {};
-        const rectangle = source.rectangle || {};
-        const operation = source.operation || {};
+        let operationSummary;
+        if (source.schema_version === 2) {
+          const objects = Array.isArray(source.objects) ? source.objects : [];
+          const operations = Array.isArray(source.operations) ? source.operations : [];
+          const pathCount = objects.reduce((total, object) => total + (Array.isArray(object.subpaths) ? object.subpaths.length : 0), 0);
+          const unassigned = objects.filter((object) => !object.operation_id).length;
+          const layers = operations.map((operation, index) => {
+            const count = objects.filter((object) => object.operation_id === operation.id).length;
+            const kind = operation.type === "vector-cut" ? "Cut" : "Engrave";
+            return `${index + 1}. ${kind} · ${count} ${count === 1 ? "object" : "objects"} · feed ${operation.feed_mm_min ?? "?"} mm/min · commanded power ${operation.power_percent ?? "?"}%`;
+          });
+          operationSummary = `Geometry snapshot: ${objects.length} ${objects.length === 1 ? "object" : "objects"} · ${pathCount} ${pathCount === 1 ? "path" : "paths"}${unassigned ? ` · ${unassigned} unassigned` : ""}`;
+          operationSummary += ` · Operation layers: ${layers.length ? layers.join(" | ") : "none"}`;
+        } else {
+          const rectangle = source.rectangle || {};
+          const operation = source.operation || {};
+          operationSummary = "Operation snapshot: " + (operation.type || "vector engraving") + " · rectangle X" + (rectangle.x_mm ?? "?") + " Y" + (rectangle.y_mm ?? "?") + " mm · " + (rectangle.width_mm ?? "?") + " × " + (rectangle.height_mm ?? "?") + " mm · feed " + (operation.feed_mm_min ?? "?") + " mm/min · commanded power " + (operation.power_percent ?? "?") + "%";
+        }
         const details = [
           "Project snapshot: " + (source.name || "saved project") + (source.revision ? " · revision " + source.revision : ""),
           "Profile snapshot: " + (profile.name || "declared profile") + (profile.revision ? " · revision " + profile.revision : "") + " · " + (profile.width_mm ?? "?") + " × " + (profile.height_mm ?? "?") + " " + (profile.units || "mm") + " · " + (profile.origin || "lower-left") + " origin · $30=" + (profile.max_s ?? "?") + " · $31=" + (profile.min_s ?? "?") + " · $32=1 · feed " + (profile.min_feed_mm_min ?? "?") + "–" + (profile.max_feed_mm_min ?? "?") + " mm/min · max commanded power " + (profile.max_power_percent ?? "?") + "%",
-          "Operation snapshot: " + (operation.type || "vector engraving") + " · rectangle X" + (rectangle.x_mm ?? "?") + " Y" + (rectangle.y_mm ?? "?") + " mm · " + (rectangle.width_mm ?? "?") + " × " + (rectangle.height_mm ?? "?") + " mm · feed " + (operation.feed_mm_min ?? "?") + " mm/min · commanded power " + (operation.power_percent ?? "?") + "%",
+          operationSummary,
           "Generator version: " + (job.provenance.generator_version || "unknown") + ". The generated program and source snapshots are immutable.",
         ];
         for (const detail of details) {

@@ -25,7 +25,7 @@ select **Reopen** to continue editing.
 | Area | Controls | What they do |
 | --- | --- | --- |
 | Machine profiles | **New profile**, **Edit profile**, **Delete profile** | Store the declared GRBL work area and limits used by the rectangle editor. |
-| Rectangle projects | **New rectangle project**, **Reopen**, **Save project**, **Generate queued job**, **Delete project** | Edit a saved rectangle engraving source, preview its declared envelope, or create a separate queued program. |
+| Design projects | **New rectangle project** or **New vector project**, **Reopen**, **Save**, **Generate queued job**, **Delete** | Edit a v1 rectangle engraving source or a v2 multi-path design with ordered engraving/cutting layers, preview its declared envelope, or create a separate queued program. |
 | Add a program | File chooser, display name, **Add to library** | Upload plain-text G-code (up to 4 MiB) for inspection and dispatch. |
 | Stored programs | Driver selector, readiness checkbox, **View**, **Start**, **Pause**, **Resume**, **Cancel**, **Delete** | Inspect and manage jobs through the existing explicit-confirmation workflow. Available controls depend on job state and driver capabilities. |
 
@@ -64,8 +64,9 @@ declared workspace, outline path, and laser-off approach endpoint. The actual
 starting position is unknown, so the preview does not draw a travel path to the
 endpoint. Geometry outside the declared envelope, invalid feed or power, and
 values with more than three decimal places block saving and generation.
-This initial editor supports one rectangle and vector engraving only. It does
-not import SVG or text, generate cutting operations, or process raster images.
+The version 1 rectangle editor supports one rectangle and vector engraving.
+Version 2 supports multiple rectangle, ellipse, and line paths, described below.
+Neither workflow imports SVG or text or processes raster images.
 
 ![Editable rectangle project with declared workspace and laser-off approach endpoint](assets/screenshots/designer-project.png)
 
@@ -93,6 +94,29 @@ confirmation and **Start** control when ready.
 ![Generated rectangle program with immutable source provenance](assets/screenshots/designer-generated-review.png)
 
 ![Rectangle designer controls and preview on a narrow screen](assets/screenshots/designer-mobile.png)
+
+## Create a multi-path vector project
+
+Select **New vector project** to add multiple rectangle, ellipse, and line
+shapes. Select a shape to edit its X/Y position and width/height, assign it to
+an operation layer, or remove it. Add engraving or cutting layers, set each
+layer's feed and commanded power, and move layers to change execution order.
+Every path must be assigned before generation. Lines can be engraved; cutting
+requires closed shapes with nonzero area. The preview uses green for engraving,
+red dashed outlines for cutting, and gray dotted paths for unassigned geometry.
+
+![Multi-path designer with editable shapes, ordered engraving and cutting layers, and profile-aware preview](assets/screenshots/designer-vector-project.png)
+
+Generation creates an immutable queued G-code program with the project, profile,
+and operation layer values in its provenance. Both cutting and engraving use
+GRBL dynamic laser mode (`M4`), which turns output off when motion stops or is
+held. This behavior and the declared machine profile still require verification
+on the target controller and machine. Review the G-code and setup, then use the
+existing readiness confirmation and **Start** control to dispatch.
+
+![Generated multi-path program showing ordered operation provenance](assets/screenshots/designer-vector-review.png)
+
+![Multi-path vector editor on a narrow screen](assets/screenshots/designer-vector-mobile.png)
 
 ## Monitor a running program
 
@@ -147,12 +171,12 @@ Regenerate the screenshots from the current console and simulator with
 
 ## Requested UI that is not available yet
 
-The current designer does not have multi-object selection and transforms, text
-or SVG import, ordered cut/engrave layers, or raster engraving. The console also
-does not show live completed/remaining toolpaths or head position, and it has
-no driver-adapter or importer-plugin configuration screens. Existing plugins
-are trusted preflight processes; they are not machine drivers or file
-converters. See the [designer plan](research/designer-architecture.md),
+The current designer does not have multi-selection, rotation/alignment, text or
+SVG import, undo/redo, or raster engraving. The console also does not show live
+completed/remaining toolpaths or head position, and it has no driver-adapter or
+importer-plugin configuration screens. Existing plugins are trusted preflight
+processes; they are not machine drivers or file converters. See the [designer
+plan](research/designer-architecture.md),
 [feature roadmap](roadmap.md#feature-requests), and the open requests for
 [#4](https://github.com/ConstructorFleet/emberdeck/issues/4),
 [#7](https://github.com/ConstructorFleet/emberdeck/issues/7),

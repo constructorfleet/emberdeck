@@ -1,6 +1,6 @@
 # Browser laser designer: architecture review
 
-**Status:** the first rectangle vector-engraving milestone is implemented; this document also retains the source review and remaining architecture for [issue #4](https://github.com/constructorfleet/emberdeck/issues/4). The full issue remains open. Issue #4 asks for creation/import, editing, operations, profile-aware preview, editable projects, generated jobs, explicit dispatch, public-seam geometry tests, browser workflow tests, and illustrated operator instructions. It specifically requires separate milestones for vector cutting, vector engraving, and raster engraving.
+**Status:** version 1 rectangle engraving and version 2 multi-path vector projects are implemented; this document also retains the source review and remaining architecture for [issue #4](https://github.com/constructorfleet/emberdeck/issues/4). The full issue remains open. Issue #4 asks for creation/import, editing, operations, profile-aware preview, editable projects, generated jobs, explicit dispatch, public-seam geometry tests, browser workflow tests, and illustrated operator instructions. It specifically requires separate milestones for vector cutting, vector engraving, and raster engraving.
 
 ## Implemented rectangle milestone
 
@@ -17,6 +17,27 @@ It does not implement SVG import, text, multiple objects, rotation/alignment,
 cutting layers, or raster engraving. The remaining sections describe the broader
 design, not additional available controls. The static preview is not execution
 monitoring for [issue #7](https://github.com/constructorfleet/emberdeck/issues/7).
+
+## Implemented multi-path vector milestone
+
+Schema version 2 adds rectangle, ellipse, and line primitives stored as bounded
+millimetre path points. Operators can create multiple shapes, edit their numeric
+position/size, assign them to ordered vector-engrave/vector-cut operation
+layers, edit/reorder/delete layers, preview operation types in the declared
+profile, save/reopen the source, and generate a separate queued job. Generation
+requires every path assigned; open cuts and closed zero-area cuts are rejected.
+Both operation types use GRBL dynamic laser mode (`M4`) so output is disabled
+when motion is stopped or held. This is a software contract, not physical
+qualification. Generated jobs carry immutable schema-v2 source/profile snapshots
+and use the existing explicit operator confirmation and dispatch path. Saved
+unassigned paths are available for a future importer to preserve source geometry
+without guessing machining settings.
+
+The v2 model does not yet support arbitrary SVG paths/curves, transforms,
+rotation, alignment, multi-selection, text, undo/redo, kerf compensation, tabs,
+passes, or raster engraving. The current editor creates polygonal ellipses and
+does not claim live execution progress. Version 1 projects and `rectangle-v1`
+jobs remain supported with their original data and G-code.
 
 ## Pre-designer baseline
 

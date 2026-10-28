@@ -51,11 +51,12 @@ their implementation status and evidence:
   and explicit dispatch. Verify geometry/toolpaths at public interfaces and the
   complete browser workflow, and add screenshots from the implemented designer.
   Distinguish vector cutting, vector engraving, and raster engraving milestones.
-  The first end-to-end milestone supports declared profiles and one saved
-  rectangle vector-engraving operation through preview, immutable generated job,
-  review, and explicit dispatch. [Source review and remaining architecture](research/designer-architecture.md)
-  distinguish this milestone from the remaining multi-object editing, transforms,
-  SVG/text, cutting operations, and raster evaluation. The full issue stays open.
+  Implemented end-to-end milestones support the original saved rectangle and a
+  schema-v2 multi-path editor with rectangle/ellipse/line primitives, ordered
+  vector engrave/cut layers, profile preview, immutable generated jobs, and
+  explicit dispatch. [Source review and remaining architecture](research/designer-architecture.md)
+  track the remaining rotation/alignment, multi-selection/transforms, SVG/text
+  import, arbitrary path editing, and raster evaluation. The full issue stays open.
 - [ ] [#7: Live completed/remaining toolpath progress](https://github.com/constructorfleet/emberdeck/issues/7).
   Implement camera-independent execution monitoring for supported uploaded G-code
   as well as designer-generated jobs. Share the coordinate/toolpath renderer
