@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ConstructorFleet/emberdeck/driver"
@@ -137,6 +138,9 @@ func runManualLease(ctx context.Context, client *http.Client, endpoint, key, ses
 				}
 				report.probeStatus(ctx, connect)
 				controllerState = report.currentControllerState()
+				if strings.Contains(err.Error(), "parser reset cleared the partial command") && (controllerState == "Idle" || controllerState == "Alarm") {
+					report.setParserResetFresh(controllerState)
+				}
 			}
 			return postManualTerminal(ctx, client, endpoint, key, report, sessionID, a.Lease, state, message, controllerState)
 		case <-ctx.Done():

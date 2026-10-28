@@ -129,6 +129,22 @@ func OpenWithOptions(dir, key string, options Options) (*Server, error) {
 			return nil, errors.New("invalid parser quarantine entry")
 		}
 	}
+	reservationInterrupted := false
+	for id, reason := range s.parserQuarantine {
+		if strings.HasPrefix(reason, "manual-reserved:") {
+			s.parserQuarantine[id] = "parser reset required: server restarted before a terminal manual receipt"
+			reservationInterrupted = true
+		}
+	}
+	if reservationInterrupted {
+		published, err := durableJSON(filepath.Join(dir, "parser-quarantine.json"), s.parserQuarantine)
+		if err != nil {
+			return nil, fmt.Errorf("persist interrupted manual parser quarantine: %w", err)
+		}
+		if !published {
+			return nil, errors.New("manual parser quarantine was not persisted")
+		}
+	}
 	if err := loadOptionalJSON(filepath.Join(dir, "profiles.json"), &s.profiles); err != nil {
 		return nil, err
 	}

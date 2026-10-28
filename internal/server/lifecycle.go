@@ -549,6 +549,13 @@ func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCa
 				fail(w, http.StatusConflict, "manual-control cancellation was not requested")
 				return nil, false, false
 			}
+			resetWasRequired := strings.Contains(in.ManualError, "parser reset cleared the partial command") || strings.Contains(in.ManualError, "manual command parser reset was not confirmed")
+			if in.ControllerState == "Idle" && (!resetWasRequired || in.ControllerParserResetFresh) && !strings.Contains(in.ManualError, "manual command parser reset was not confirmed") && s.parserQuarantine[id] != "" {
+				if err := s.updateParserQuarantine(id, ""); err != nil {
+					fail(w, http.StatusInternalServerError, "could not persist manual-control completion")
+					return nil, false, false
+				}
+			}
 			if strings.Contains(in.ManualError, "manual command parser reset was not confirmed") {
 				if err := s.updateParserQuarantine(id, in.ManualError); err != nil {
 					fail(w, http.StatusInternalServerError, "could not persist parser reset quarantine")
@@ -560,6 +567,10 @@ func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCa
 				d.ControllerState = ""
 				manual.Error = in.ManualError
 			} else if manualMotion(manual.Action) && in.ControllerState != "Idle" {
+				if err := s.updateParserQuarantine(id, "parser reset required: manual motion ended without confirmed Idle"); err != nil {
+					fail(w, http.StatusInternalServerError, "could not persist interrupted manual parser quarantine")
+					return nil, false, false
+				}
 				manual.State = manualStateInterrupted
 				manual.RequireFreshStatus = true
 				d.ControllerState = ""

@@ -129,7 +129,7 @@ func registerManualTestDriver(t *testing.T, s http.Handler, state string, capabi
 	}
 }
 
-func TestManualCancelRequiresFreshIdleBeforeReleaseAfterUnsafeStop(t *testing.T) {
+func TestManualCancelRequiresResetProofAndFreshIdleBeforeReleaseAfterUnsafeStop(t *testing.T) {
 	s := openServer(t)
 	registerManualTestDriver(t, s, "Idle", []string{"manual_jog"})
 	created := request(t, s, http.MethodPost, "/api/v1/drivers/bench/manual", `{"action":"jog","confirmed":true,"axis":"X","distance_mm":2,"feed_mm_min":300}`, "test-key")
@@ -154,7 +154,7 @@ func TestManualCancelRequiresFreshIdleBeforeReleaseAfterUnsafeStop(t *testing.T)
 	}
 	terminal := `{"session":"owner","capabilities":["manual_jog"],"controller_state":"Run","manual_lease":"` + assignment.Lease + `","manual_state":"canceled"}`
 	response = request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll", terminal, "test-key")
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"command":"idle"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"command":"idle"`) || !strings.Contains(response.Body.String(), `"read_parser_reset":true`) {
 		t.Fatalf("unsafe stop receipt: %d %s", response.Code, response.Body.String())
 	}
 	state := request(t, s, http.MethodGet, "/api/v1/drivers/bench/manual", "", "test-key")
@@ -170,7 +170,7 @@ func TestManualCancelRequiresFreshIdleBeforeReleaseAfterUnsafeStop(t *testing.T)
 	if start.Code != http.StatusConflict {
 		t.Fatalf("job start before fresh Idle = %d %s", start.Code, start.Body.String())
 	}
-	request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll", `{"session":"owner","capabilities":["manual_jog"],"controller_state":"Idle","controller_status_fresh":true}`, "test-key")
+	request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll", `{"session":"owner","capabilities":["manual_jog"],"controller_state":"Idle","controller_status_fresh":true,"controller_parser_reset_fresh":true}`, "test-key")
 	released := request(t, s, http.MethodDelete, "/api/v1/drivers/bench/manual", `{"confirmed":true}`, "test-key")
 	if released.Code != http.StatusOK {
 		t.Fatalf("release after Idle = %d %s", released.Code, released.Body.String())
@@ -211,28 +211,43 @@ func TestUnconfirmedParserResetKeepsManualLeaseBlockedAfterFreshIdle(t *testing.
 	}
 }
 
+func TestQueuedManualLeaseCanBeReleasedAndClearsReservation(t *testing.T) {
+	s := openServer(t)
+	registerManualTestDriver(t, s, "Idle", []string{"manual_set_zero", "manual_unlock"})
+	created := request(t, s, http.MethodPost, "/api/v1/drivers/bench/manual", `{"action":"set_zero","confirmed":true}`, "test-key")
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create queued zero: %d %s", created.Code, created.Body.String())
+	}
+	released := request(t, s, http.MethodDelete, "/api/v1/drivers/bench/manual", `{"confirmed":true}`, "test-key")
+	if released.Code != http.StatusOK {
+		t.Fatalf("release queued manual lease: %d %s", released.Code, released.Body.String())
+	}
+	created = request(t, s, http.MethodPost, "/api/v1/drivers/bench/manual", `{"action":"set_zero","confirmed":true}`, "test-key")
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create manual lease after queued release: %d %s", created.Code, created.Body.String())
+	}
+}
+
 func TestParserResetQuarantineSurvivesRestartAndRequiresWorkerResetProof(t *testing.T) {
 	dir := t.TempDir()
 	s, err := server.Open(dir, "test-key")
 	if err != nil {
 		t.Fatal(err)
 	}
-	registerManualTestDriver(t, s, "Idle", []string{"manual_set_zero"})
+	registerManualTestDriver(t, s, "Idle", []string{"manual_set_zero", "manual_unlock"})
 	created := request(t, s, http.MethodPost, "/api/v1/drivers/bench/manual", `{"action":"set_zero","confirmed":true}`, "test-key")
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create zero: %d %s", created.Code, created.Body.String())
 	}
-	pickup := request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll", `{"session":"owner","capabilities":["manual_set_zero"],"controller_state":"Idle"}`, "test-key")
+	pickup := request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll", `{"session":"owner","capabilities":["manual_set_zero","manual_unlock"],"controller_state":"Idle"}`, "test-key")
 	var assignment struct {
 		Lease string `json:"lease"`
 	}
 	if err := json.Unmarshal(pickup.Body.Bytes(), &assignment); err != nil || assignment.Lease == "" {
 		t.Fatalf("pickup: %s (%v)", pickup.Body.String(), err)
 	}
-	terminal := `{"session":"owner","capabilities":["manual_set_zero"],"controller_state":"Idle","controller_status_fresh":true,"manual_lease":"` + assignment.Lease + `","manual_state":"failed","manual_error":"driver: manual command parser reset was not confirmed"}`
-	if response := request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll", terminal, "test-key"); response.Code != http.StatusOK {
-		t.Fatalf("unconfirmed parser reset receipt: %d %s", response.Code, response.Body.String())
-	}
+	// Simulate a server crash after assignment but before the worker can submit
+	// its terminal receipt. The durable reservation must already exist.
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +257,7 @@ func TestParserResetQuarantineSurvivesRestartAndRequiresWorkerResetProof(t *test
 		t.Fatalf("reopen server with parser quarantine: %v", err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	registerManualTestDriver(t, s, "Idle", []string{"manual_set_zero"})
+	registerManualTestDriver(t, s, "Idle", []string{"manual_set_zero", "manual_unlock"})
 	job := request(t, s, http.MethodPost, "/api/v1/jobs", `{"name":"queued.gcode","gcode":"M5"}`, "test-key")
 	var queued struct {
 		ID string `json:"id"`
@@ -254,19 +269,27 @@ func TestParserResetQuarantineSurvivesRestartAndRequiresWorkerResetProof(t *test
 	if start.Code != http.StatusConflict || !strings.Contains(start.Body.String(), "parser reset is unconfirmed") {
 		t.Fatalf("job start while parser quarantined = %d %s; want conflict", start.Code, start.Body.String())
 	}
+	manual := request(t, s, http.MethodPost, "/api/v1/drivers/bench/manual", `{"action":"unlock","confirmed":true}`, "test-key")
+	if manual.Code != http.StatusConflict || !strings.Contains(manual.Body.String(), "parser reset is unconfirmed") {
+		t.Fatalf("manual action while parser quarantined = %d %s; want conflict", manual.Code, manual.Body.String())
+	}
 	if released := request(t, s, http.MethodDelete, "/api/v1/drivers/bench/manual", `{"confirmed":true}`, "test-key"); released.Code != http.StatusConflict || !strings.Contains(released.Body.String(), "parser reset is unconfirmed") {
 		t.Fatalf("release after server restart without parser proof = %d %s; want conflict", released.Code, released.Body.String())
 	}
-	probe := request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll", `{"session":"owner","capabilities":["manual_set_zero"],"controller_state":"Idle"}`, "test-key")
+	probe := request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll", `{"session":"owner","capabilities":["manual_set_zero","manual_unlock"],"controller_state":"Idle"}`, "test-key")
 	if !strings.Contains(probe.Body.String(), `"read_parser_reset":true`) {
 		t.Fatalf("quarantined worker command = %s; want reset recovery", probe.Body.String())
 	}
-	proof := `{"session":"owner","capabilities":["manual_set_zero"],"controller_state":"Alarm","controller_status_fresh":true,"controller_parser_reset_fresh":true}`
+	proof := `{"session":"owner","capabilities":["manual_set_zero","manual_unlock"],"controller_state":"Alarm","controller_status_fresh":true,"controller_parser_reset_fresh":true}`
 	if response := request(t, s, http.MethodPost, "/api/v1/drivers/bench/poll", proof, "test-key"); response.Code != http.StatusOK {
 		t.Fatalf("confirmed parser reset report: %d %s", response.Code, response.Body.String())
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "parser-quarantine.json"))
 	if err != nil || strings.Contains(string(data), "bench") {
 		t.Fatalf("parser quarantine after confirmed reset = %s, %v; want cleared", data, err)
+	}
+	manual = request(t, s, http.MethodPost, "/api/v1/drivers/bench/manual", `{"action":"unlock","confirmed":true}`, "test-key")
+	if manual.Code != http.StatusCreated {
+		t.Fatalf("manual unlock after reset proof = %d %s; want recoverable Alarm flow", manual.Code, manual.Body.String())
 	}
 }

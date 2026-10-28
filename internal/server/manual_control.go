@@ -204,6 +204,10 @@ func (s *Server) createManualControl(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, "could not allocate manual-control ID")
 		return
 	}
+	if err := s.updateParserQuarantine(id, "manual-reserved: pending terminal receipt"); err != nil {
+		fail(w, http.StatusInternalServerError, "could not persist manual-control safety reservation")
+		return
+	}
 	now := time.Now().UTC()
 	record := &manualControlLease{
 		ID: hex.EncodeToString(idBytes), Lease: hex.EncodeToString(secret), DriverID: id,
@@ -248,18 +252,29 @@ func (s *Server) releaseManualControl(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.parserQuarantine[id] != "" {
-		fail(w, http.StatusConflict, "controller parser reset is unconfirmed; worker recovery or physical controller inspection is required")
-		return
-	}
 	record := s.manualControls[id]
 	if record == nil {
+		if s.parserQuarantine[id] != "" {
+			fail(w, http.StatusConflict, "controller parser reset is unconfirmed; worker recovery or physical controller inspection is required")
+			return
+		}
 		fail(w, http.StatusNotFound, "manual-control assignment not found")
 		return
 	}
 	d, online := s.drivers[id]
 	if !online {
 		fail(w, http.StatusConflict, "driver is offline; inspect the machine before releasing its manual-control lease")
+		return
+	}
+	if record.State == manualStateQueued && strings.HasPrefix(s.parserQuarantine[id], "manual-reserved:") {
+		if err := s.updateParserQuarantine(id, ""); err != nil {
+			fail(w, http.StatusInternalServerError, "could not persist manual-control release")
+			return
+		}
+		delete(s.manualControls, id)
+		d.Busy = false
+		s.drivers[id] = d
+		respond(w, http.StatusOK, map[string]string{"state": "released"})
 		return
 	}
 	if manualAssignmentActive(record.State) && record.State != manualStateQueued && record.State != manualStateInterrupted {
@@ -269,6 +284,10 @@ func (s *Server) releaseManualControl(w http.ResponseWriter, r *http.Request) {
 		d.Busy = true
 		s.drivers[id] = d
 		respond(w, http.StatusAccepted, record)
+		return
+	}
+	if s.parserQuarantine[id] != "" {
+		fail(w, http.StatusConflict, "controller parser reset is unconfirmed; worker recovery or physical controller inspection is required")
 		return
 	}
 	if record.State == manualStateInterrupted && record.RequireParserReset {
