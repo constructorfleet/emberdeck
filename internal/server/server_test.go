@@ -112,6 +112,70 @@ func TestUploadedProgramReviewReportsProfileBoundsAndUnknownMotion(t *testing.T)
 	}
 }
 
+func TestUploadedAbsoluteProgramInsideChosenProfileStartsWithoutOverride(t *testing.T) {
+	s, err := server.Open(t.TempDir(), "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	w := request(t, s, "POST", "/api/v1/profiles", profileBody, "test-key")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create profile: %d %s", w.Code, w.Body.String())
+	}
+	var profile struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &profile); err != nil {
+		t.Fatal(err)
+	}
+	upload := func(name, gcode string) string {
+		t.Helper()
+		w := request(t, s, "POST", "/api/v1/jobs", `{"name":"`+name+`","profile_id":"`+profile.ID+`","gcode":"`+gcode+`"}`, "test-key")
+		if w.Code != http.StatusCreated {
+			t.Fatalf("upload %s: %d %s", name, w.Code, w.Body.String())
+		}
+		var job struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &job); err != nil {
+			t.Fatal(err)
+		}
+		return job.ID
+	}
+	// The first move positions the head with the laser off, so its unknown
+	// starting point cannot mark the work area. Every burned point is known.
+	inside := upload("inside.gcode", `G21 G90\nG0 X10 Y10\nM4 S100\nG1 X50 Y40 F300\nG1 X10 Y40\nM5\nG0 X0 Y0`)
+	w = request(t, s, "GET", "/api/v1/jobs/"+inside+"/review", "", "test-key")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"bounds_status":"in_bounds"`) || !strings.Contains(w.Body.String(), `"min":{"x":0,"y":0},"max":{"x":50,"y":40}`) || !strings.Contains(w.Body.String(), `"profile_id":"`+profile.ID+`"`) {
+		t.Fatalf("in-bounds review = %d %s", w.Code, w.Body.String())
+	}
+	request(t, s, "POST", "/api/v1/drivers/bench/poll", `{"session":"session-a"}`, "test-key")
+	w = request(t, s, "POST", "/api/v1/jobs/"+inside+"/start", `{"driver_id":"bench","confirmed":true}`, "test-key")
+	if w.Code != http.StatusOK {
+		t.Fatalf("in-bounds start without override = %d %s", w.Code, w.Body.String())
+	}
+
+	// A first move that may burn from an unknown position stays unknown.
+	burning := upload("burning-start.gcode", `G21 G90\nM4 S100\nG1 X10 Y10 F300\nG1 X50 Y40\nM5`)
+	w = request(t, s, "GET", "/api/v1/jobs/"+burning+"/review", "", "test-key")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"bounds_status":"unknown"`) || !strings.Contains(w.Body.String(), "unknown position") {
+		t.Fatalf("laser-on initial move review = %d %s", w.Code, w.Body.String())
+	}
+
+	for name, gcode := range map[string]string{
+		"home.gcode":    `G21 G90\nG0 X10 Y10\nG28\nG0 X20 Y20`,
+		"second.gcode":  `G21 G90\nG0 X10 Y10\nG30\nG0 X20 Y20`,
+		"offset.gcode":  `G21 G90\nG10 L20 P1 X0 Y0\nG0 X10 Y10\nG0 X20 Y20`,
+		"machine.gcode": `G21 G90\nG0 X10 Y10\nG53 G0 X20 Y20`,
+	} {
+		id := upload(name, gcode)
+		w = request(t, s, "GET", "/api/v1/jobs/"+id+"/review", "", "test-key")
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"bounds_status":"unknown"`) {
+			t.Fatalf("%s review must stay unknown = %d %s", name, w.Code, w.Body.String())
+		}
+	}
+}
+
 func TestUploadedJobWithUnknownBoundsRequiresExplicitStartOverride(t *testing.T) {
 	s, err := server.Open(t.TempDir(), "test-key")
 	if err != nil {
@@ -213,7 +277,7 @@ func TestJobToolpathEndpointParsesUploadedProgramWithoutChangingIt(t *testing.T)
 	if err := json.Unmarshal(w.Body.Bytes(), &path); err != nil {
 		t.Fatal(err)
 	}
-	if !path.Supported || path.Complete || len(path.Segments) != 1 || path.Segments[0].SourceLine != 4 || !path.Segments[0].LaserOn || path.Segments[0].Rapid || len(path.Warnings) == 0 {
+	if !path.Supported || !path.Complete || len(path.Segments) != 1 || path.Segments[0].SourceLine != 4 || !path.Segments[0].LaserOn || path.Segments[0].Rapid || len(path.Warnings) != 1 || !strings.Contains(path.Warnings[0], "laser off") {
 		t.Fatalf("toolpath does not describe supported geometry and its unknown start honestly: %s", w.Body.String())
 	}
 	w = request(t, s, "GET", "/api/v1/jobs/not-found/toolpath", "", "test-key")

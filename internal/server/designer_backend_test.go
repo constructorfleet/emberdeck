@@ -641,7 +641,7 @@ func TestGenerateCreatesValidatedQueuedJobWithImmutableSourceSnapshots(t *testin
 		t.Fatalf("incomplete provenance: %+v", job.Provenance)
 	}
 	review := request(t, s, "GET", "/api/v1/jobs/"+job.ID+"/review", "", "test-key")
-	if review.Code != http.StatusOK || !strings.Contains(review.Body.String(), `"bounds_status":"unknown"`) || !strings.Contains(review.Body.String(), `"program":{"segments"`) {
+	if review.Code != http.StatusOK || !strings.Contains(review.Body.String(), `"bounds_status":"in_bounds"`) || !strings.Contains(review.Body.String(), `"program":{"segments"`) {
 		t.Fatalf("generated program review response is incomplete: %d %s", review.Code, review.Body.String())
 	}
 	expectedProject := server.DesignerProject{SchemaVersion: 1, ID: project.ID, Revision: 1, Name: "Panel outline", ProfileID: profileID, ProfileRevision: 1,

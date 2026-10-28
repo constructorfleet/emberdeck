@@ -13,6 +13,13 @@ Resume, it verifies acknowledged progress advances and accepts either a sampled
 job can finish between UI polls. It does not connect to or qualify physical
 hardware.
 
+The upload review check creates a declared profile, chooses it in the upload
+form, and adds two programs. The one that leaves the work area reviews out of
+bounds and shows the override control. The one whose points are all known and
+inside the profile (after a laser-off first positioning move) reviews in bounds
+with its bounds, profile envelope, and path preview. It has no override control,
+starts with `bounds_override` false, and completes on the simulator.
+
 The library refresh checks verify that unchanged jobs retain their row and
 controls, saved-project row actions keep focus through at least two job refresh
 cycles, visible job polling continues every two seconds, designer data refreshes
