@@ -1,10 +1,8 @@
 # HTTP API and worker contract
 
-API prefix: `/api/v1`. Every API request requires `Authorization: Bearer KEY`
-using `EMBERDECK_API_KEY`. The HTML, CSS, and JavaScript console shell are public;
-job data is private. The browser keeps the key in session storage for the browser tab session.
-Use a long random secret. Operators and trusted workers currently share the key;
-do not give it to untrusted users or plugins. There is no multi-user RBAC yet.
+API prefix: `/api/v1`. Every API request requires `Authorization: Bearer KEY`.
+The HTML, CSS, and JavaScript console shell are public; API data is private. The
+browser keeps the entered key in session storage for the browser tab session.
 Use HTTPS through a TLS reverse proxy for remote access. The native listener is
 loopback-only by default and does not terminate TLS itself.
 
@@ -12,6 +10,115 @@ Optional Prometheus metrics are served from `/metrics` on the separately
 configured `serve -metrics-listen` listener, not on the authenticated API mux or
 in the generated API route index. See [metrics and monitoring](metrics.md) for
 the contract, access control, and scrape examples.
+
+## Credential roles and lifecycle
+
+Credentials are named, independently revocable bearer secrets. The server stores
+only SHA-256 hashes of secrets in `credentials.json`, written atomically in the
+data directory. Generated secrets contain 256 bits of randomness and are
+compared in constant time. Treat the one-time secret response like a password;
+EmberDeck never returns it again, and list/auth responses never include secrets
+or hashes.
+
+| Role | Read jobs, drivers, profiles, projects, plugins | Mutate jobs/profiles/projects or generate | Worker polling | Manage credentials |
+| --- | --- | --- | --- | --- |
+| `viewer` | Yes | No | No | No |
+| `operator` | Yes | Yes | No | No |
+| `admin` | Yes | Yes | Yes, all driver IDs | Yes |
+| `worker` | No | No | Only its assigned driver IDs | No |
+
+The `admin` role includes operator access. Admin polling is retained for the
+existing `EMBERDECK_API_KEY` bootstrap and in-process worker compatibility. Use
+dedicated worker credentials for distributed devices; they cannot call any
+operator route. Active worker credential driver-ID scopes cannot overlap.
+
+`GET /api/v1/auth` describes the caller's ID, name, role, and worker driver IDs.
+For example, a worker's response contains only its assigned IDs:
+
+```json
+{
+  "id": "0123456789abcdef0123456789abcdef",
+  "name": "bench worker",
+  "role": "worker",
+  "driver_ids": ["bench"]
+}
+```
+
+Admins manage credentials through these routes:
+
+### `GET /credentials`
+
+Returns credential metadata, including revoked entries for audit. It never
+returns a key or hash.
+
+### `POST /credentials`
+
+Create a `viewer`, `operator`, `admin`, or `worker` credential. Worker
+credentials must include one or more unique `driver_ids`; other roles must omit
+them. An active worker credential already claiming a driver ID prevents another
+worker credential from claiming it. The `201` response contains the generated
+`key` exactly once, along with the metadata to record securely.
+
+```sh
+curl --fail-with-body -X POST https://emberdeck.example.net/api/v1/credentials \
+  -H 'Authorization: Bearer ADMIN_KEY' -H 'Content-Type: application/json' \
+  -d '{"name":"bench worker","role":"worker","driver_ids":["bench"]}'
+```
+
+Store the returned `key` in that device's secret manager or protected service
+environment. Never put it in source control, a URL, shell history, support logs,
+or an untrusted plugin. A `409` means a requested worker ID is already claimed.
+
+### `DELETE /credentials/{id}`
+
+Revokes one credential and returns `204`. The final active admin cannot be
+revoked; create and verify a replacement admin first. Revoking a worker
+credential deletes only its online driver sessions and marks its active jobs
+`interrupted`, clears their leases, and does not replay them. The worker's next
+poll/report is rejected; its active stream fails closed. Other worker sessions
+continue.
+
+```sh
+curl --fail-with-body -X DELETE \
+  https://emberdeck.example.net/api/v1/credentials/CREDENTIAL_ID \
+  -H 'Authorization: Bearer ADMIN_KEY'
+```
+
+Credential routes return `401` for a missing, unknown, or revoked bearer key,
+`403` when the authenticated role is not allowed, `400` for invalid role/name/
+scope input, and `409` when worker IDs overlap or an administrator attempts to
+revoke the last active admin. An unknown credential ID returns `404`.
+
+### Bootstrap, migration, and rotation
+
+On the first start in a data directory without `credentials.json`, the current
+`EMBERDECK_API_KEY` is migrated to an admin credential named `bootstrap-admin`;
+only its SHA-256 hash is persisted. Existing jobs, profiles, and projects are
+left in place. This behavior makes an existing single-key installation continue
+to authenticate after upgrade. Once `credentials.json` exists, the server uses
+only credentials in that store: the environment variable is not an authentication
+fallback and changing it does not rotate or replace a key. The CLI still requires
+`EMBERDECK_API_KEY` at startup; for local-worker deployments it must name an
+active admin key because the local worker shares that configured key.
+
+For rotation, while authenticated as an admin, create a replacement credential
+of the intended role and deliver its one-time key to its user/device. Verify
+viewer/operator/admin credentials with `GET /api/v1/auth`; verify a worker by
+starting it and checking its driver with an operator/admin `GET /api/v1/drivers`.
+Then revoke the previous credential. Worker scopes cannot overlap, so rotate a
+worker by stopping it, ensuring no job is active
+(revocation interrupts any active lease), revoking the old credential, creating
+a new worker credential for the same driver IDs, updating the device's protected
+environment, and verifying its new session. If all admin credentials are lost,
+stop the server, back up the data
+directory, remove only `credentials.json`, and restart with a newly provisioned
+`EMBERDECK_API_KEY`; this reseeds a bootstrap admin but also discards all named
+credential records and their revocation state. Protect that recovery operation.
+
+Keep viewers read-only, issue one worker credential per physical worker/device,
+scope it to only its driver ID, and give operator/admin keys only to people who
+need those capabilities. Do not share the bootstrap admin key with remote workers;
+replace legacy workers with scoped worker keys before revoking the bootstrap key.
 
 Requests are JSON except raw `image/svg+xml` on `POST /svg-import`; responses are
 JSON except successful deletion (204). Errors return

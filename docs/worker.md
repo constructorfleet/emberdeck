@@ -5,6 +5,13 @@
 for the assigned lease and sends progress, controller state, and command
 responses through the same poll endpoint.
 
+Provision a credential with role `worker` and a `driver_ids` entry matching the
+worker's `-id`, then provide its one-time key as `EMBERDECK_API_KEY`. Worker
+credentials cannot read job libraries or call operator routes. The server
+rejects a credential used for an unassigned ID. Use one credential per device;
+do not copy the server's admin/bootstrap key to a remote worker. Admin access to
+poll remains only as compatibility for the legacy bootstrap key and local worker.
+
 The worker applies `pause` and `resume` commands to the active GRBL stream. A
 paused assignment is connected and preflighted without sending source lines;
 the stream remains gated until resume is confirmed by a fresh controller
@@ -35,16 +42,19 @@ keeps retrying, so the conflict resolves without operator action. If two live
 workers share a driver ID, one of them keeps retrying and logging conflicts.
 Give each worker a unique `-id`.
 
-HTTP 400, 401, and 403 responses mean bad configuration, such as a wrong API
-key, an invalid driver ID, or a server too old to accept this worker's metadata.
-The worker exits on these responses instead of retrying.
+HTTP 400, 401, and 403 responses mean bad configuration, such as a wrong or
+revoked key, a driver ID outside the credential's scope, or a server too old to
+accept this worker's metadata. The worker exits on these responses instead of
+retrying.
 
 A worker with an active lease still fails closed. A failed progress or terminal
-report cancels the stream and closes the controller connection. The worker
-then exits with an error and sends no further job commands. When the old
-session's heartbeat expires, the server marks the job `interrupted`. The new
-worker process never replays the job. Inspect the machine before starting new
-work after such a failure.
+report cancels the stream and closes the controller connection. Revoking its
+credential also removes its server session and immediately marks its active job
+`interrupted`, clears the lease, and prevents replay; its next progress request
+is rejected. Other devices and their leases are unaffected. On ordinary network
+failure, when the old session's heartbeat expires, the server marks the job
+`interrupted`. A new worker process never replays the job. Inspect the machine
+before starting new work after such a failure.
 
 `emberdeck driver` exits after a fail-closed failure. Run it under a service
 manager that restarts it (see [Deployment](deployment.md#driver-as-a-service)).

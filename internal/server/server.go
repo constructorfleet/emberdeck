@@ -2,7 +2,6 @@
 package server
 
 import (
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -24,15 +23,16 @@ import (
 
 // Server serializes durable mutations before acknowledging API requests.
 type Server struct {
-	storageErr error
-	lock       *flock.Flock
-	closed     bool
-	plugins    []plugin.Plugin
-	drivers    map[string]Driver
-	mu         sync.Mutex
-	dir        string
-	key        string
-	jobs       map[string]jobRecord
+	storageErr  error
+	lock        *flock.Flock
+	closed      bool
+	plugins     []plugin.Plugin
+	drivers     map[string]Driver
+	credentials map[string]credentialRecord
+	mu          sync.Mutex
+	dir         string
+	key         string
+	jobs        map[string]jobRecord
 	// progressDirty marks in-memory progress newer than jobs.json. Progress-only
 	// reports are not written; the next durable write or Close persists them.
 	progressDirty bool
@@ -91,6 +91,9 @@ func Open(dir, key string) (*Server, error) {
 			return nil, errors.New("invalid designer project library entry")
 		}
 	}
+	if err := s.loadCredentials(key); err != nil {
+		return nil, err
+	}
 	if err := s.populateMissingReviews(); err != nil {
 		return nil, err
 	}
@@ -98,30 +101,39 @@ func Open(dir, key string) (*Server, error) {
 		return nil, err
 	}
 	s.metrics.syncJobStates(s.jobs)
-	s.mux.HandleFunc("GET /api/v1/drivers", s.listDrivers)
-	s.mux.HandleFunc("POST /api/v1/drivers/{id}/poll", s.pollDriver)
-	s.mux.HandleFunc("POST /api/v1/jobs/{id}/start", s.startJob)
-	s.mux.HandleFunc("POST /api/v1/jobs/{id}/cancel", s.cancelJob)
-	s.mux.HandleFunc("POST /api/v1/jobs/{id}/pause", s.pauseJob)
-	s.mux.HandleFunc("POST /api/v1/jobs/{id}/resume", s.resumeJob)
-	s.mux.HandleFunc("POST /api/v1/jobs", s.upload)
-	s.mux.HandleFunc("GET /api/v1/jobs", s.list)
-	s.mux.HandleFunc("GET /api/v1/jobs/{id}/toolpath", s.getToolpath)
-	s.mux.HandleFunc("GET /api/v1/jobs/{id}/review", s.getJobReview)
-	s.mux.HandleFunc("GET /api/v1/jobs/{id}", s.get)
-	s.mux.HandleFunc("DELETE /api/v1/jobs/{id}", s.delete)
-	s.mux.HandleFunc("GET /api/v1/profiles", s.listProfiles)
-	s.mux.HandleFunc("POST /api/v1/profiles", s.createProfile)
-	s.mux.HandleFunc("GET /api/v1/profiles/{id}", s.getProfile)
-	s.mux.HandleFunc("PUT /api/v1/profiles/{id}", s.updateProfile)
-	s.mux.HandleFunc("DELETE /api/v1/profiles/{id}", s.deleteProfile)
-	s.mux.HandleFunc("GET /api/v1/projects", s.listProjects)
-	s.mux.HandleFunc("POST /api/v1/projects", s.createProject)
-	s.mux.HandleFunc("POST /api/v1/svg-import", s.importSVG)
-	s.mux.HandleFunc("GET /api/v1/projects/{id}", s.getProject)
-	s.mux.HandleFunc("PUT /api/v1/projects/{id}", s.updateProject)
-	s.mux.HandleFunc("DELETE /api/v1/projects/{id}", s.deleteProject)
-	s.mux.HandleFunc("POST /api/v1/projects/{id}/generate", s.generateProject)
+	readRoles := []string{"viewer", "operator", "admin"}
+	writeRoles := []string{"operator", "admin"}
+	adminRoles := []string{"admin"}
+	s.handleAPI("GET /api/v1/auth", readRoles, false, s.authInfo)
+	s.handleAPI("GET /api/v1/credentials", adminRoles, false, s.listCredentials)
+	s.handleAPI("POST /api/v1/credentials", adminRoles, false, s.createCredential)
+	s.handleAPI("DELETE /api/v1/credentials/{id}", adminRoles, false, s.revokeCredential)
+	s.handleAPI("GET /api/v1/drivers", readRoles, false, s.listDrivers)
+	// Admin includes a compatibility path for the bootstrap/local worker that
+	// historically shared EMBERDECK_API_KEY. Dedicated worker keys remain scoped.
+	s.handleAPI("POST /api/v1/drivers/{id}/poll", []string{"worker", "admin"}, true, s.pollDriver)
+	s.handleAPI("POST /api/v1/jobs/{id}/start", writeRoles, false, s.startJob)
+	s.handleAPI("POST /api/v1/jobs/{id}/cancel", writeRoles, false, s.cancelJob)
+	s.handleAPI("POST /api/v1/jobs/{id}/pause", writeRoles, false, s.pauseJob)
+	s.handleAPI("POST /api/v1/jobs/{id}/resume", writeRoles, false, s.resumeJob)
+	s.handleAPI("POST /api/v1/jobs", writeRoles, false, s.upload)
+	s.handleAPI("GET /api/v1/jobs", readRoles, false, s.list)
+	s.handleAPI("GET /api/v1/jobs/{id}/toolpath", readRoles, false, s.getToolpath)
+	s.handleAPI("GET /api/v1/jobs/{id}/review", readRoles, false, s.getJobReview)
+	s.handleAPI("GET /api/v1/jobs/{id}", readRoles, false, s.get)
+	s.handleAPI("DELETE /api/v1/jobs/{id}", writeRoles, false, s.delete)
+	s.handleAPI("GET /api/v1/profiles", readRoles, false, s.listProfiles)
+	s.handleAPI("POST /api/v1/profiles", writeRoles, false, s.createProfile)
+	s.handleAPI("GET /api/v1/profiles/{id}", readRoles, false, s.getProfile)
+	s.handleAPI("PUT /api/v1/profiles/{id}", writeRoles, false, s.updateProfile)
+	s.handleAPI("DELETE /api/v1/profiles/{id}", writeRoles, false, s.deleteProfile)
+	s.handleAPI("GET /api/v1/projects", readRoles, false, s.listProjects)
+	s.handleAPI("POST /api/v1/projects", writeRoles, false, s.createProject)
+	s.handleAPI("POST /api/v1/svg-import", writeRoles, false, s.importSVG)
+	s.handleAPI("GET /api/v1/projects/{id}", readRoles, false, s.getProject)
+	s.handleAPI("PUT /api/v1/projects/{id}", writeRoles, false, s.updateProject)
+	s.handleAPI("DELETE /api/v1/projects/{id}", writeRoles, false, s.deleteProject)
+	s.handleAPI("POST /api/v1/projects/{id}/generate", writeRoles, false, s.generateProject)
 	opened = true
 	return s, nil
 }
@@ -187,8 +199,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "not found")
 		return
 	}
-	if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.key)) != 1 {
-		fail(w, 401, "authentication required")
+	r, authenticated := s.authenticate(w, r)
+	if !authenticated {
 		return
 	}
 	s.mu.Lock()

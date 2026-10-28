@@ -27,7 +27,7 @@ func OpenWithPlugins(dir, key, pluginDir string) (*Server, error) {
 		return nil, err
 	}
 	s.plugins = plugins
-	s.mux.HandleFunc("GET /api/v1/plugins", func(w http.ResponseWriter, r *http.Request) {
+	s.handleAPI("GET /api/v1/plugins", []string{"viewer", "operator", "admin"}, false, func(w http.ResponseWriter, r *http.Request) {
 		manifests := make([]plugin.Manifest, 0, len(plugins))
 		for _, p := range plugins {
 			manifests = append(manifests, p.Manifest)
