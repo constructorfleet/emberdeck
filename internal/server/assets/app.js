@@ -645,24 +645,26 @@
     };
   }
 
-  function transformedSubpaths(object) {
+  function transformedPoint(object, point, bounds = boundsFor(object)) {
     const transform = normalizedTransform(object.transform);
-    const points = object.subpaths.flatMap((path) => path.points);
-    const centerX = (Math.min(...points.map((point) => point.x_mm)) + Math.max(...points.map((point) => point.x_mm))) / 2;
-    const centerY = (Math.min(...points.map((point) => point.y_mm)) + Math.max(...points.map((point) => point.y_mm))) / 2;
+    const centerX = bounds.x + bounds.width / 2;
+    const centerY = bounds.y + bounds.height / 2;
     const angle = transform.rotation_deg * Math.PI / 180;
     const cos = Math.cos(angle), sin = Math.sin(angle);
     const round = (value) => Math.round(value * 1000) / 1000;
+    const x = (point.x_mm - centerX) * transform.scale_x;
+    const y = (point.y_mm - centerY) * transform.scale_y;
+    return {
+      x_mm: round(centerX + x * cos - y * sin + transform.translate_x_mm),
+      y_mm: round(centerY + x * sin + y * cos + transform.translate_y_mm),
+    };
+  }
+
+  function transformedSubpaths(object) {
+    const sourceBounds = boundsFor(object);
     return object.subpaths.map((path) => ({
       ...path,
-      points: path.points.map((point) => {
-        const x = (point.x_mm - centerX) * transform.scale_x;
-        const y = (point.y_mm - centerY) * transform.scale_y;
-        return {
-          x_mm: round(centerX + x * cos - y * sin + transform.translate_x_mm),
-          y_mm: round(centerY + x * sin + y * cos + transform.translate_y_mm),
-        };
-      }),
+      points: path.points.map((point) => transformedPoint(object, point, sourceBounds)),
     }));
   }
 
@@ -882,7 +884,7 @@
         path.points.forEach((point, index) => commands.push(`${index ? "L" : "M"} ${left + point.x_mm * scale} ${bottom - point.y_mm * scale}`));
         if (path.closed) commands.push("Z");
       });
-      const path = svgElement("path", { class: `vector-path ${operation ? (operation.type === "vector-cut" ? "cut-path" : "engrave-path") : "unassigned-path"}`, d: commands.join(" "), "data-vector-object-id": object.id, tabindex: "0", role: "button", "aria-label": `Select ${objectKind(object)} shape` });
+      const path = svgElement("path", { class: `vector-path ${operation ? (operation.type === "vector-cut" ? "cut-path" : "engrave-path") : "unassigned-path"}`, d: commands.join(" "), "data-vector-object-id": object.id });
       if (selectedVectorObjects.has(object.id)) path.classList.add("selected-vector-path");
       if (!operation) {
         path.style.stroke = "var(--text-muted)";
@@ -890,10 +892,11 @@
       }
       content.append(path);
       if (selectedVectorObjects.has(object.id) && selectedVectorObjects.size === 1) {
-        const bounds = transformedBounds(object);
+        const sourceBounds = boundsFor(object);
+        const handle = transformedPoint(object, { x_mm: sourceBounds.x + sourceBounds.width, y_mm: sourceBounds.y + sourceBounds.height });
         content.append(svgElement("circle", {
-          class: "vector-resize-handle", cx: left + bounds.right * scale, cy: bottom - bounds.top * scale,
-          r: 7, "data-vector-object-id": object.id, "aria-label": "Scale selected shape", role: "button", tabindex: "0",
+          class: "vector-resize-handle", cx: left + handle.x_mm * scale, cy: bottom - handle.y_mm * scale,
+          r: 7, "data-vector-object-id": object.id, "aria-hidden": "true",
         }));
       }
     });
@@ -916,9 +919,12 @@
     selectedVectorObject = id;
     selectedVectorObjects = new Set([id]);
     const start = vectorPointerPoint(event);
+    const sourceBounds = boundsFor(object);
+    const startLocalX = sourceBounds.width / 2 * normalizedTransform(object.transform).scale_x;
+    const startLocalY = sourceBounds.height / 2 * normalizedTransform(object.transform).scale_y;
     vectorPointerDrag = {
       id, resize: target.classList.contains("vector-resize-handle"), start,
-      transform: normalizedTransform(object.transform), bounds: transformedBounds(object), moved: false,
+      transform: normalizedTransform(object.transform), sourceBounds, startLocalX, startLocalY, moved: false,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
     renderVectorEditor();
@@ -935,9 +941,15 @@
     const round = (value) => Math.round(value * 1000) / 1000;
     const transform = { ...drag.transform };
     if (drag.resize) {
-      const centerX = (drag.bounds.left + drag.bounds.right) / 2, centerY = (drag.bounds.bottom + drag.bounds.top) / 2;
-      transform.scale_x = round(Math.max(0.01, Math.min(100, drag.transform.scale_x * (current.x_mm - centerX) / Math.max(drag.start.x_mm - centerX, 0.001))));
-      transform.scale_y = round(Math.max(0.01, Math.min(100, drag.transform.scale_y * (current.y_mm - centerY) / Math.max(drag.start.y_mm - centerY, 0.001))));
+      const centerX = drag.sourceBounds.x + drag.sourceBounds.width / 2 + drag.transform.translate_x_mm;
+      const centerY = drag.sourceBounds.y + drag.sourceBounds.height / 2 + drag.transform.translate_y_mm;
+      const angle = drag.transform.rotation_deg * Math.PI / 180;
+      const cos = Math.cos(angle), sin = Math.sin(angle);
+      const worldX = current.x_mm - centerX, worldY = current.y_mm - centerY;
+      const localX = worldX * cos + worldY * sin;
+      const localY = -worldX * sin + worldY * cos;
+      if (Math.abs(drag.startLocalX) > 0.001) transform.scale_x = round(Math.max(0.01, Math.min(100, drag.transform.scale_x * localX / drag.startLocalX)));
+      if (Math.abs(drag.startLocalY) > 0.001) transform.scale_y = round(Math.max(0.01, Math.min(100, drag.transform.scale_y * localY / drag.startLocalY)));
     } else {
       transform.translate_x_mm = round(drag.transform.translate_x_mm + dx);
       transform.translate_y_mm = round(drag.transform.translate_y_mm + dy);
