@@ -21,6 +21,8 @@ func TestPauseAndResumeFollowConfirmedControllerState(t *testing.T) {
 		t.Fatalf("register capable worker: %d %s", w.Code, w.Body.String())
 	}
 	w = request(t, s, "POST", "/api/v1/jobs/"+job.ID+"/start", `{"driver_id":"bench","confirmed":true,"bounds_override":true}`, "test-key")
+	// Workers learn the lease from their assignment poll, never from the operator API.
+	w = request(t, s, "POST", "/api/v1/drivers/bench/poll", `{"session":"owner"}`, "test-key")
 	var assignment struct{ Lease string }
 	if err := json.Unmarshal(w.Body.Bytes(), &assignment); err != nil {
 		t.Fatal(err)
@@ -97,6 +99,8 @@ func assignControlJob(t *testing.T, s http.Handler, capable bool) (string, strin
 	if w.Code != 200 {
 		t.Fatalf("start: %d %s", w.Code, w.Body.String())
 	}
+	// Workers learn the lease from their assignment poll, never from the operator API.
+	w = request(t, s, "POST", "/api/v1/drivers/bench/poll", `{"session":"owner"}`, "test-key")
 	var assignment struct{ Lease string }
 	if err := json.Unmarshal(w.Body.Bytes(), &assignment); err != nil {
 		t.Fatal(err)

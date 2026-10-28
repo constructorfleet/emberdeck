@@ -116,8 +116,8 @@ def main():
         docker("restart", name)
         base = wait_for("restarted container port mapping", lambda: container_base(name))
         wait_for("restarted API", lambda: api(base, "GET", "/api/v1/jobs")[0] == 200)
-        status, jobs = api(base, "GET", "/api/v1/jobs")
-        if status != 200 or not {job["id"] for job in jobs}.issuperset({complete_id, cancel_id}):
+        status, page = api(base, "GET", "/api/v1/jobs")
+        if status != 200 or not {job["id"] for job in page["jobs"]}.issuperset({complete_id, cancel_id}):
             raise RuntimeError("uploaded jobs were not retained across container restart")
         print("Container smoke passed: non-root /data persistence, simulated execution, and cancellation.")
     except Exception:

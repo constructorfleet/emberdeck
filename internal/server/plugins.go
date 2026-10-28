@@ -8,6 +8,7 @@ import (
 
 	"github.com/ConstructorFleet/emberdeck/driver"
 	"github.com/ConstructorFleet/emberdeck/plugin"
+	"github.com/ConstructorFleet/emberdeck/toolpath"
 )
 
 // OpenWithPlugins loads explicitly configured trusted preflight plugins.
@@ -36,32 +37,28 @@ func OpenWithPlugins(dir, key, pluginDir string) (*Server, error) {
 	return s, nil
 }
 
-func (s *Server) preflight(ctx context.Context, id string) error {
-	s.mu.Lock()
-	job, ok := s.jobs[id]
-	s.mu.Unlock()
-	if !ok {
-		return nil
-	} // The lifecycle handler owns not-found responses.
-	if _, err := driver.Validate(job.Gcode); err != nil {
-		return err
+// preflight validates a program and runs trusted plugins outside the server
+// mutex. It returns the derived toolpath segment count used for telemetry.
+func (s *Server) preflight(ctx context.Context, gcode string) (int, error) {
+	if _, err := driver.Validate(gcode); err != nil {
+		return 0, err
 	}
 	for _, p := range s.plugins {
 		timeout, cancel := context.WithTimeout(ctx, 5*time.Second)
 		started := time.Now()
-		result, err := p.Run(timeout, plugin.Request{ProtocolVersion: plugin.ProtocolVersion, GCode: job.Gcode})
+		result, err := p.Run(timeout, plugin.Request{ProtocolVersion: plugin.ProtocolVersion, GCode: gcode})
 		cancel()
 		if err != nil {
 			s.observePlugin("error", time.Since(started))
-			return fmt.Errorf("preflight %s failed: %w", p.Manifest.Name, err)
+			return 0, fmt.Errorf("preflight %s failed: %w", p.Manifest.Name, err)
 		}
 		if !result.OK {
 			s.observePlugin("rejected", time.Since(started))
-			return fmt.Errorf("preflight %s rejected job: %s", p.Manifest.Name, result.Message)
+			return 0, fmt.Errorf("preflight %s rejected job: %s", p.Manifest.Name, result.Message)
 		}
 		s.observePlugin("ok", time.Since(started))
 	}
-	return nil
+	return len(toolpath.Parse(gcode).Segments), nil
 }
 
 func (s *Server) observePlugin(outcome string, elapsed time.Duration) {

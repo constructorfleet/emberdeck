@@ -84,7 +84,7 @@ func newServerMetrics(s *Server) *serverMetrics {
 	return m
 }
 
-func (m *serverMetrics) syncJobStates(jobs map[string]Job) {
+func (m *serverMetrics) syncJobStates(jobs map[string]jobRecord) {
 	counts := make(map[string]float64, len(metricJobStates))
 	for _, state := range metricJobStates {
 		counts[state] = 0

@@ -239,7 +239,7 @@ func TestInvalidUploadsDoNotEnterLibrary(t *testing.T) {
 		}
 	}
 	w := request(t, s, "GET", "/api/v1/jobs", "", "test-key")
-	if w.Code != 200 || w.Body.String() != "[]\n" {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"jobs":[]`) || !strings.Contains(w.Body.String(), `"total":0`) {
 		t.Fatalf("invalid jobs persisted: %s", w.Body.String())
 	}
 }
@@ -274,7 +274,7 @@ func TestFailedPersistenceDoesNotPublishJob(t *testing.T) {
 		t.Fatalf("persistence failure returned %d", w.Code)
 	}
 	w = request(t, s, "GET", "/api/v1/jobs", "", "test-key")
-	if w.Body.String() != "[]\n" {
+	if !strings.Contains(w.Body.String(), `"jobs":[]`) || !strings.Contains(w.Body.String(), `"total":0`) {
 		t.Fatalf("published unpersisted job: %s", w.Body.String())
 	}
 }

@@ -41,7 +41,7 @@ select **Reopen** to continue editing.
 | Machine profiles | **New profile**, **Edit profile**, **Delete profile** | Store the declared GRBL work area and limits used by the rectangle editor. |
 | Design projects | **New rectangle project** or **New vector project**, **Reopen**, **Save**, **Generate queued job**, **Delete** | Edit a v1 rectangle engraving source or a v2 multi-path design with ordered engraving/cutting layers, preview its declared envelope, or create a separate queued program. |
 | Add a program | File chooser, display name, profile selector, **Add to library** | Upload plain-text G-code (up to 4 MiB), validate line limits, and review its known path against the selected profile. |
-| Stored programs | Driver selector, readiness checkbox, bounds override, **View**, **Start**, **Pause**, **Resume**, **Cancel**, **Delete** | Inspect and manage jobs through explicit bounds override and readiness confirmation. Available controls depend on job state and driver capabilities. |
+| Stored programs | Driver selector, readiness checkbox, bounds override, **Name** and **State** filters, **View**, **Start**, **Pause**, **Resume**, **Cancel**, **Delete**, **← Newer** / **Older →** | Find, inspect, and manage jobs through explicit bounds override and readiness confirmation. Available controls depend on job state and driver capabilities. |
 
 The profile and project lists remain separate from generated jobs: deleting a
 source project does not delete a generated program, and editing a source does
@@ -64,6 +64,14 @@ Then verify the machine's interlocks and check the supervision box. Both
 confirmations are explicit and the bounds override is cleared after dispatch.
 
 ![Uploaded G-code with an out-of-bounds profile review, path bounds, and explicit override control](assets/screenshots/operator-console-uploaded-bounds-review.png)
+
+The library lists the newest programs first, 20 per page. The count beside the
+console title shows how many programs match the current filters. Type part of a
+name in **Name** or choose a **State** (Queued, Active, Completed, Failed or
+interrupted, Canceled) to narrow the list. When more programs match than fit
+on one page, use **Older →** and **← Newer** below the list; the range between
+them shows which programs are on screen. Program text is loaded only when you
+select **View**, so a large library stays quick to refresh.
 
 ## Declare a machine profile and design a rectangle
 

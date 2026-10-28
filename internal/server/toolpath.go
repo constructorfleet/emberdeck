@@ -10,15 +10,21 @@ import (
 
 func (s *Server) getToolpath(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	job, ok := s.jobs[r.PathValue("id")]
+	record, ok := s.jobs[r.PathValue("id")]
 	s.mu.Unlock()
 	if !ok {
 		fail(w, http.StatusNotFound, "job not found")
 		return
 	}
-	respond(w, http.StatusOK, toolpath.Parse(job.Gcode))
+	gcode, ok := s.program(w, record)
+	if !ok {
+		return
+	}
+	respond(w, http.StatusOK, toolpath.Parse(gcode))
 }
 
+// ProgramReview compares an uploaded program's known path bounds with the
+// machine profile selected at upload. It is stored with job metadata.
 type ProgramReview struct {
 	ProfileID       string           `json:"profile_id,omitempty"`
 	ProfileRevision int              `json:"profile_revision,omitempty"`
@@ -64,6 +70,8 @@ func reviewProgram(source string, profile *MachineProfile, stale bool) ProgramRe
 	return review
 }
 
+// currentReview returns the stored review, marked unknown if the selected
+// profile changed since upload. Callers hold the server mutex.
 func (s *Server) currentReview(job Job) *ProgramReview {
 	if job.Provenance != nil {
 		return nil
@@ -71,6 +79,7 @@ func (s *Server) currentReview(job Job) *ProgramReview {
 	copy := ProgramReview{BoundsStatus: "unknown", Warnings: []string{"program review is unavailable"}}
 	if job.Review != nil {
 		copy = *job.Review
+		copy.Warnings = append([]string(nil), job.Review.Warnings...)
 	}
 	if job.ProfileID == "" {
 		return &copy
@@ -85,20 +94,23 @@ func (s *Server) currentReview(job Job) *ProgramReview {
 
 func (s *Server) getJobReview(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	job, exists := s.jobs[r.PathValue("id")]
+	record, exists := s.jobs[r.PathValue("id")]
 	if !exists {
 		s.mu.Unlock()
 		fail(w, http.StatusNotFound, "job not found")
 		return
 	}
-	review := s.currentReview(job)
-	if review == nil && job.Provenance != nil {
-		profile := job.Provenance.Profile
-		generatedReview := reviewProgram(job.Gcode, &profile, false)
+	review := s.currentReview(record.Job)
+	s.mu.Unlock()
+	gcode, ok := s.program(w, record)
+	if !ok {
+		return
+	}
+	if review == nil && record.Provenance != nil {
+		profile := record.Provenance.Profile
+		generatedReview := reviewProgram(gcode, &profile, false)
 		review = &generatedReview
 	}
-	gcode := job.Gcode
-	s.mu.Unlock()
 	program := toolpath.Parse(gcode)
 	respond(w, http.StatusOK, struct {
 		*ProgramReview
@@ -106,9 +118,9 @@ func (s *Server) getJobReview(w http.ResponseWriter, r *http.Request) {
 	}{review, program})
 }
 
-func validExecution(execution toolpath.Execution, gcode string, previous *toolpath.Execution, jobState string) bool {
+func validExecution(execution toolpath.Execution, segments int, previous *toolpath.Execution, jobState string) bool {
 	progress := execution.Progress
-	total := len(toolpath.Parse(gcode).Segments)
+	total := segments
 	if previous != nil {
 		total = previous.Progress.Total
 	}

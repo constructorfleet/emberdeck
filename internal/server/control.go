@@ -77,5 +77,5 @@ func (s *Server) controlJob(w http.ResponseWriter, r *http.Request, resume bool)
 		fail(w, 500, "could not persist controller request")
 		return
 	}
-	respond(w, 200, job)
+	respond(w, 200, job.Job)
 }
