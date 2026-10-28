@@ -1,6 +1,11 @@
 #!/bin/sh
 set -eu
-test -z "$(gofmt -l .)"
+unformatted=$(gofmt -l .)
+if [ -n "$unformatted" ]; then
+  echo "Run gofmt on:" >&2
+  echo "$unformatted" >&2
+  exit 1
+fi
 go vet ./...
 go test -race -timeout 90s ./...
 go build -o bin/ ./cmd/...

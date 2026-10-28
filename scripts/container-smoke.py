@@ -18,6 +18,14 @@ def docker(*args, check=True):
     return subprocess.run(["docker", *args], check=check, text=True, capture_output=True)
 
 
+def container_base(name):
+    result = docker("port", name, "8080/tcp", check=False)
+    output = result.stdout.strip()
+    if not output:
+        return None
+    return "http://" + output.splitlines()[0]
+
+
 def api(base, method, path, payload=None):
     body = None if payload is None else json.dumps(payload).encode()
     request = urllib.request.Request(
@@ -85,8 +93,7 @@ def main():
             "serve", "-listen", "0.0.0.0:8080", "-data", "/data", "-simulate",
         )
         container = run.stdout.strip()
-        binding = docker("port", name, "8080/tcp").stdout.strip().splitlines()[0]
-        base = "http://" + binding
+        base = wait_for("container port mapping", lambda: container_base(name))
         wait_for("authenticated API startup", lambda: api(base, "GET", "/api/v1/jobs")[0] == 200)
 
         complete_id = upload_and_start(base, "smoke-complete.gcode", "G21\nG90\nG1 X10 F100\nM5")
@@ -107,6 +114,7 @@ def main():
         wait_state(base, cancel_id, "canceled")
 
         docker("restart", name)
+        base = wait_for("restarted container port mapping", lambda: container_base(name))
         wait_for("restarted API", lambda: api(base, "GET", "/api/v1/jobs")[0] == 200)
         status, jobs = api(base, "GET", "/api/v1/jobs")
         if status != 200 or not {job["id"] for job in jobs}.issuperset({complete_id, cancel_id}):
@@ -114,9 +122,13 @@ def main():
         print("Container smoke passed: non-root /data persistence, simulated execution, and cancellation.")
     except Exception:
         if container:
-            logs = docker("logs", name, check=False).stdout
-            if logs:
-                print(logs, file=sys.stderr)
+            state = docker("inspect", "--format", "{{json .State}}", name, check=False)
+            print(f"Container state:\n{state.stdout or state.stderr}", file=sys.stderr)
+            logs = docker("logs", "--tail", "100", name, check=False)
+            if logs.stdout:
+                print(f"Container stdout:\n{logs.stdout}", file=sys.stderr)
+            if logs.stderr:
+                print(f"Container stderr:\n{logs.stderr}", file=sys.stderr)
         raise
     finally:
         docker("rm", "--force", name, check=False)

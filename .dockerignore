@@ -12,3 +12,8 @@ docs
 coverage*
 Dockerfile*
 compose*.yaml
+
+bin
+dist
+.venv
+.verification

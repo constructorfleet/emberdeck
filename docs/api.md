@@ -2,7 +2,7 @@
 
 API prefix: `/api/v1`. Every API request requires `Authorization: Bearer KEY`
 using `EMBERDECK_API_KEY`. The HTML, CSS, and JavaScript console shell are public;
-job data is private. The browser keeps the key in session storage until disconnect.
+job data is private. The browser keeps the key in session storage for the browser tab session.
 Use a long random secret. Operators and trusted workers currently share the key;
 do not give it to untrusted users or plugins. There is no multi-user RBAC yet.
 Use HTTPS through a TLS reverse proxy for remote access. The native listener is
