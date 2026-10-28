@@ -33,7 +33,7 @@ Plugins can add adapters in later work.
 Review open GitHub feature requests before selecting new work, then read the
 current issue body and comments for acceptance criteria. Issues #3 and #4 are
 required parts of the active product goal alongside the core deployment and
-job-management requirements above. Issues #7 and #8 are tracked below with
+job-management requirements above. Additional requests are tracked below with
 their implementation status and evidence:
 
 - [x] [#3: ESP32 driver firmware and ESPHome feasibility](https://github.com/constructorfleet/emberdeck/issues/3).
@@ -76,6 +76,22 @@ their implementation status and evidence:
   rendered-browser tests implement this navigation; see the
   [review and before/after captures](browser-tests.md#documentation-navigation-review).
   Verify the published release before closing the GitHub issue.
+- [ ] [#15: Driver-adapter plugins for network cutters](https://github.com/constructorfleet/emberdeck/issues/15).
+  Define and implement a versioned adapter lifecycle, discovery/configuration,
+  capabilities, transfer/status/control feedback, and bounded failures while
+  preserving sessions, leases, confirmation, and no replay. Support adapters on
+  server or distributed hosts, provide a simulated example and a concrete
+  non-built-in network protocol target, and verify the operator workflow.
+  Built-in GRBL-over-TCP already supports compatible network endpoints; this
+  request does not imply universal Wi-Fi compatibility or qualified hardware.
+- [ ] [#16: Importer/converter plugins](https://github.com/constructorfleet/emberdeck/issues/16).
+  Add a distinct versioned import/conversion contract with format capabilities,
+  options, editable-design or validated-job outputs, original-source retention,
+  version/settings provenance, warnings, preview, and explicit operator review.
+  Share the designer model with #4. Provide a bounded SVG example and tests for
+  malformed, oversized, unsupported, lossy, and external/active-content cases.
+  Trusted plugin processes are not sandboxes; input conversion never starts a
+  machine or silently chooses units, origin, speed, power, or controller settings.
 
 The current issue bodies remain authoritative when their acceptance criteria
 change. A roadmap checkmark requires corresponding evidence, not a planned task.
