@@ -1,11 +1,13 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"mime"
 	"net/http"
 
+	"github.com/ConstructorFleet/emberdeck/importer"
 	"github.com/ConstructorFleet/emberdeck/svgimport"
 )
 
@@ -25,10 +27,28 @@ func (s *Server) importSVG(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "could not read SVG content")
 		return
 	}
-	imported, err := svgimport.Parse(body)
+	registry, err := importer.NewRegistry(svgimport.Importer{})
+	if err != nil {
+		fail(w, http.StatusInternalServerError, "SVG importer is unavailable")
+		return
+	}
+	result, err := registry.Import(r.Context(), "svg", importer.Request{
+		SourceFormat: "svg",
+		OutputType:   importer.OutputEditableDesign,
+		Source:       body,
+	})
 	if err != nil {
 		fail(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	respond(w, http.StatusOK, imported)
+	var document svgimport.Document
+	if err := json.Unmarshal(result.Payload, &document); err != nil {
+		fail(w, http.StatusInternalServerError, "SVG importer returned invalid editable geometry")
+		return
+	}
+	respond(w, http.StatusOK, struct {
+		svgimport.Document
+		Provenance importer.Provenance `json:"provenance"`
+		Warnings   []importer.Warning  `json:"warnings,omitempty"`
+	}{Document: document, Provenance: result.Provenance, Warnings: result.Warnings})
 }

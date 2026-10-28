@@ -183,6 +183,9 @@ unsupported milestone.
   malformed, oversized, unsupported, lossy, and external/active-content cases.
   Trusted plugin processes are not sandboxes; input conversion never starts a
   machine or silently chooses units, origin, speed, power, or controller settings.
+  The initial in-process contract and SVG adapter are documented in
+  [Importer interface](api.md#importer-interface-go-api); runtime third-party loading and persisted
+  provenance remain open.
 
 The current issue bodies remain authoritative when their acceptance criteria
 change. A roadmap checkmark requires corresponding evidence, not a planned task.

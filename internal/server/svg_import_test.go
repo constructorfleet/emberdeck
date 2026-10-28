@@ -26,9 +26,14 @@ func TestSVGImportReturnsEditableGeometryWithoutMachineSettings(t *testing.T) {
 		t.Fatalf("SVG import = %d %s", response.Code, response.Body.String())
 	}
 	var imported struct {
-		WidthMM  float64 `json:"width_mm"`
-		HeightMM float64 `json:"height_mm"`
-		Objects  []struct {
+		WidthMM    float64 `json:"width_mm"`
+		HeightMM   float64 `json:"height_mm"`
+		Provenance struct {
+			ImporterID      string `json:"importer_id"`
+			ImporterVersion string `json:"importer_version"`
+			SourceFormat    string `json:"source_format"`
+		} `json:"provenance"`
+		Objects []struct {
 			Subpaths []struct {
 				Points []struct {
 					X float64 `json:"x_mm"`
@@ -42,7 +47,7 @@ func TestSVGImportReturnsEditableGeometryWithoutMachineSettings(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &imported); err != nil {
 		t.Fatal(err)
 	}
-	if imported.WidthMM != 40 || imported.HeightMM != 20 || len(imported.Objects) != 1 || imported.Objects[0].OperationID != "" {
+	if imported.WidthMM != 40 || imported.HeightMM != 20 || imported.Provenance.ImporterID != "svg" || imported.Provenance.ImporterVersion != "1.0.0" || imported.Provenance.SourceFormat != "svg" || len(imported.Objects) != 1 || imported.Objects[0].OperationID != "" {
 		t.Fatalf("imported SVG summary = %+v", imported)
 	}
 	points := imported.Objects[0].Subpaths[0].Points
