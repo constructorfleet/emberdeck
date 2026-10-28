@@ -52,6 +52,7 @@ test('job list shows run times and the job view shows the event history', async 
   await expect(entries.nth(1)).toContainText('Dispatched');
   await expect(entries.nth(1)).toContainText('queued → running');
   await expect(entries.nth(1)).toContainText('driver simulator');
+  await expect(entries.nth(1)).toContainText('by operator bootstrap-admin');
   await expect(entries.nth(1)).toContainText(/lease [0-9a-f]{16}/);
   await expect(entries.nth(2)).toContainText('Worker report');
   await expect(entries.nth(2)).toContainText('running → completed');

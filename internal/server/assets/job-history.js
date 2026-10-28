@@ -14,6 +14,7 @@ window.EmberDeckJobHistory = (() => {
     report: "Worker report",
     restart: "Server restart",
     heartbeat_expired: "Driver heartbeat expired",
+    credential_revoked: "Worker credential revoked",
   };
 
   function element(name, className, text) {
@@ -77,7 +78,7 @@ window.EmberDeckJobHistory = (() => {
       head.append(element("strong", "", actions[event.action] || event.action), element("span", "job-history-states", event.from ? `${event.from} → ${event.to}` : event.to));
       const meta = element("div", "job-history-meta");
       meta.append(timeElement(event.time));
-      const facts = [`by ${event.source}`];
+      const facts = [event.credential_name ? `by ${event.source} ${event.credential_name}` : `by ${event.source}`];
       if (event.driver_id) facts.push(`driver ${event.driver_id}`);
       if (event.session_id) facts.push(`session ${event.session_id}`);
       if (event.lease_id) facts.push(`lease ${event.lease_id}`);

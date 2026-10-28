@@ -191,7 +191,10 @@ is persisted. `from` is omitted when a job is created and `to` is `deleted`
 when it is removed. `source` is `operator` (API requests), `worker` (driver
 reports), or `server` (recovery and expiry). `action` is one of `upload`,
 `generate`, `start`, `pause`, `resume`, `cancel`, `delete`, `report`,
-`restart`, or `heartbeat_expired`. `detail` carries the reported error for
+`restart`, `heartbeat_expired`, or `credential_revoked` (an admin revoked the
+worker credential of an active job). `credential_id` and `credential_name`
+identify the API credential whose request caused the change; server events
+have none. Any role that can read jobs can read their history. `detail` carries the reported error for
 `failed` and `interrupted` events. Progress-only reports and repeated requests
 that do not change the state record nothing.
 

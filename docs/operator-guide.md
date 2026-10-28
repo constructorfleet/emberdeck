@@ -310,9 +310,10 @@ change (for example `queued → running`), when the server recorded it, and who
 caused it:
 
 - **operator**: upload, generation, Start, Pause, Resume, Cancel, or Delete
-  requests made through the API or console.
+  requests made through the API or console, or revoking the credential of a
+  worker that had an active job. The entry names the credential used.
 - **worker**: a state reported by the assigned driver, such as a confirmed
-  hold, completion, or failure.
+  hold, completion, or failure, with the worker credential's name.
 - **server**: an interruption recorded by the server itself after a restart or
   when the driver's heartbeat expired.
 
