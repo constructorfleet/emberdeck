@@ -67,7 +67,7 @@ test('Start refuses a generated job whose profile differs from the controller se
   const row = jobRow(page, jobName);
   await expect(row).toContainText(/queued/i);
   await expect(row.locator('.laser-mode-warning')).toHaveText(/differ from this job's profile snapshot: \$30 \(maximum spindle\): controller 1000, profile 255\. Start will be refused\./);
-  // The console's periodic refresh clears notices, so record every notice text.
+  // Record every notice text to ensure refreshes do not overwrite action feedback.
   await page.evaluate(() => {
     window.noticeTexts = [];
     const notice = document.querySelector('#notice');

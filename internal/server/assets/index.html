@@ -15,7 +15,7 @@
 <body>
   <header class="topbar">
     <a class="brand" href="/" aria-label="EmberDeck home"><span class="brand-mark" aria-hidden="true">E</span><span>EMBER<span class="brand-light">DECK</span></span></a>
-    <div class="top-meta"><span class="status-dot"></span><span>LOCAL JOB LIBRARY</span><span class="version">OPERATOR CONSOLE</span></div>
+    <div class="top-meta"><span id="status-dot" class="status-dot" data-state="disconnected" role="img" aria-label="Disconnected"></span><span>LOCAL JOB LIBRARY</span><span class="version">OPERATOR CONSOLE</span></div>
   </header>
   <main>
     <section class="intro">
@@ -25,10 +25,13 @@
     <section class="auth panel" aria-labelledby="access-title">
       <div class="section-title"><div><p class="eyebrow">01 / ACCESS</p><h2 id="access-title">Connect to your library</h2></div><span class="lock-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"></rect><path d="M8 10V7a4 4 0 1 1 8 0v3M12 14v3"></path></svg></span></div>
       <form id="auth-form" class="auth-form"><label for="api-key">API key</label><div class="inline-field"><input id="api-key" type="password" autocomplete="current-password" placeholder="Enter your EmberDeck API key" required><button id="connect-button" class="button button-primary" type="submit"><span id="connect-label">Connect</span><svg id="connect-arrow" class="button-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15m-6-6 6 6-6 6"></path></svg></button></div><p class="hint">Your key stays in this browser session and is sent only to this EmberDeck server.</p></form>
-      <div id="connection-state" class="connection-state" role="status">Not connected</div>
+      <div id="connection-state" class="sr-only" role="status">Not connected</div>
       <div id="connection-controls" class="connection-controls" hidden><span id="connected-label" role="status">Connected</span><button id="change-key" class="button button-small" type="button">Change key</button><button id="disconnect" class="button button-small button-danger" type="button">Disconnect</button></div>
     </section>
-    <div id="notice" class="notice" role="alert" hidden></div>
+    <div id="notice" class="notice" role="status" hidden>
+      <span class="notice-message"></span>
+      <button class="button button-small notice-dismiss" type="button" aria-label="Dismiss notification">Dismiss</button>
+    </div>
     <section id="designer-panel" class="panel designer-panel" aria-labelledby="designer-title">
       <div class="section-title"><div><p class="eyebrow">DESIGN SOURCE</p><h2 id="designer-title">Profiles and rectangle projects</h2></div><span class="step-number">MM · GRBL</span></div>
       <p class="designer-intro">Declare the prepared work area and edit one vector-engraved rectangle. Coordinates use the lower-left work origin; controller settings are read for verification but never changed.</p>
@@ -60,7 +63,7 @@
           <form id="project-form" class="designer-form" hidden>
             <h4 id="project-form-title">New rectangle project</h4>
             <label for="project-name">Project name</label><input id="project-name" maxlength="120" required>
-            <p id="stale-profile-warning" class="designer-warning" role="alert" hidden>Profile revision changed. Review this project against the current declared envelope and save it before generating.</p>
+            <p id="stale-profile-warning" class="form-validation warning" role="status" hidden>Profile revision changed. Review this project against the current declared envelope and save it before generating.</p>
             <p id="profile-save-hint" class="hint" hidden>Save or cancel profile edits before generating this project.</p>
             <div class="project-editor-grid">
               <div class="numeric-grid">
@@ -73,7 +76,7 @@
               </div>
               <div class="preview-wrap"><svg id="project-preview" viewBox="0 0 620 360" role="img" aria-label="Declared workspace preview in millimetres"><title>Declared workspace preview</title><desc>Rectangle and laser-off approach endpoint in the declared work area.</desc><g id="preview-content"></g></svg><p id="preview-legend">Workspace · outline shows the vector-engrave path · marker shows the laser-off approach endpoint. Starting position is unknown.</p></div>
             </div>
-            <p id="project-validation" class="designer-warning" role="alert" hidden></p>
+            <p id="project-validation" class="form-validation" role="alert" hidden></p>
             <p id="project-save-hint" class="hint" hidden>Save changes before generating; the preview has unsaved edits.</p>
             <p id="stale-preview" class="hint" hidden>Preview uses this declared profile revision. Confirm the machine is prepared to match it.</p>
             <div class="designer-actions"><button class="button button-primary" type="submit">Save project</button><button id="generate-project" class="button button-start" type="button" disabled>Generate queued job</button><button id="delete-project" class="button button-small button-danger" type="button" hidden>Delete project</button><button id="cancel-project" class="button button-small" type="button">Close editor</button></div>
@@ -86,7 +89,7 @@
         <form id="vector-form" class="designer-form" hidden>
           <h4 id="vector-form-title">New vector project</h4>
           <label for="vector-name">Project name</label><input id="vector-name" maxlength="120" required>
-          <p id="vector-validation" class="designer-warning" role="alert" hidden></p>
+          <p id="vector-validation" class="form-validation" role="alert" hidden></p>
           <div class="vector-editor-grid">
             <div>
               <div class="vector-toolbar" aria-label="Add or import vector geometry">
@@ -145,7 +148,8 @@
         </form>
       </section>
       <section class="panel jobs-panel" aria-labelledby="jobs-title">
-        <div class="section-title jobs-heading"><div><p class="eyebrow">03 / LIBRARY</p><h2 id="jobs-title">Stored programs</h2></div><button id="refresh" class="icon-button" type="button" aria-label="Refresh jobs" title="Refresh" disabled><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7v5h-5M4 17v-5h5"></path><path d="M5.6 9a7 7 0 0 1 11.6-2L20 12M4 12l2.8 5a7 7 0 0 0 11.6-2"></path></svg></button></div>
+         <div class="section-title jobs-heading"><div><p class="eyebrow">03 / LIBRARY</p><h2 id="jobs-title">Stored programs</h2></div><button id="refresh" class="icon-button" type="button" aria-label="Refresh jobs" title="Refresh" disabled><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7v5h-5M4 17v-5h5"></path><path d="M5.6 9a7 7 0 0 1 11.6-2L20 12M4 12l2.8 5a7 7 0 0 0 11.6-2"></path></svg></button></div>
+        <p id="library-freshness" class="library-freshness" role="status">Connect to load the library.</p>
         <div class="driver-controls"><label for="driver-select">Connected driver</label><select id="driver-select" disabled><option value="">Connect to load drivers</option></select><span id="driver-status" class="driver-status">Drivers are not loaded.</span><span id="controller-settings" class="driver-status" role="status" hidden></span></div>
         <label class="safety-check"><input id="operator-confirmation" type="checkbox" disabled><span>I have checked the program and setup, verified the machine’s interlocks, and will supervise the cut.</span></label>
         <div class="job-filters" role="search" aria-label="Filter stored programs"><label for="job-filter-name">Name</label><input id="job-filter-name" type="search" disabled maxlength="200" placeholder="Filter by name" autocomplete="off"><label for="job-filter-state">State</label><select id="job-filter-state" disabled><option value="">All states</option><option value="queued">Queued</option><option value="running,pausing,paused,resuming,canceling">Active</option><option value="completed">Completed</option><option value="failed,interrupted">Failed or interrupted</option><option value="canceled">Canceled</option></select></div>

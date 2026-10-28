@@ -27,7 +27,7 @@ test('selected vector object transform is previewed, saved, reopened, and applie
   await page.locator('#profile-max-feed').fill('6000');
   await page.locator('#profile-max-power').fill('100');
   await page.getByRole('button', { name: 'Save profile' }).click();
-  await expect(page.locator('#designer-status')).toContainText('Profile saved');
+  await expect(page.locator('#notice .notice-message')).toContainText('Profile saved');
 
   await page.getByRole('button', { name: 'New vector project' }).click();
   await page.locator('#vector-name').fill(projectName);
@@ -43,7 +43,7 @@ test('selected vector object transform is previewed, saved, reopened, and applie
   await expect(page.locator('#vector-validation')).toBeHidden();
 
   await page.getByRole('button', { name: 'Save vector project' }).click();
-  await expect(page.locator('#designer-status')).toContainText('Vector project saved');
+  await expect(page.locator('#notice .notice-message')).toContainText('Vector project saved');
   expect(savedPayload.objects[0].transform).toMatchObject({
     translate_x_mm: 5, translate_y_mm: 20, scale_x: 2, scale_y: 1, rotation_deg: 90,
   });

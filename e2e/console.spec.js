@@ -5,10 +5,91 @@ const apiKey = 'emberdeck-e2e-test-key';
 test('API controls stay unavailable and the job count stays unknown before the first load', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#job-count')).toHaveText('—');
+  await expect(page.locator('.status-dot')).toHaveAttribute('data-state', 'disconnected');
   await expect(page.locator('#new-profile')).toBeDisabled();
   await expect(page.locator('#new-project')).toBeDisabled();
   await expect(page.locator('#new-vector-project')).toBeDisabled();
   await expect(page.locator('#refresh')).toBeDisabled();
+});
+
+test('success notices use success styling and remain visible through a poll cycle', async ({ page }) => {
+  await connect(page);
+  await page.evaluate(() => {
+    window.successNoticeTiming = { shownAt: null, clearedAt: null };
+    const notice = document.querySelector('#notice');
+    const observe = () => {
+      const timing = window.successNoticeTiming;
+      const text = notice.querySelector('.notice-message').textContent;
+      if (!notice.hidden && notice.classList.contains('notice-success') && text === 'Program added to the library.' && timing.shownAt === null) {
+        timing.shownAt = performance.now();
+      } else if (timing.shownAt !== null && notice.hidden && timing.clearedAt === null) {
+        timing.clearedAt = performance.now();
+      }
+    };
+    new MutationObserver(observe).observe(notice, { attributes: true, childList: true, subtree: true });
+  });
+  await uploadJob(page, `notice-success-${test.info().retry}.gcode`, 20);
+
+  const notice = page.locator('#notice');
+  await expect(notice.locator('.notice-message')).toHaveText('Program added to the library.');
+  await expect(notice).toHaveClass(/notice-success/);
+  await expect(notice).toHaveAttribute('role', 'status');
+  await expect(notice.getByRole('button', { name: 'Dismiss notification' })).toBeVisible();
+  await page.waitForTimeout(4800);
+  await expect(notice).toBeVisible();
+  await page.waitForFunction(() => window.successNoticeTiming.clearedAt !== null);
+  const visibleFor = await page.evaluate(() => window.successNoticeTiming.clearedAt - window.successNoticeTiming.shownAt);
+  expect(visibleFor).toBeGreaterThanOrEqual(5000);
+  await cleanupJob(page, `notice-success-${test.info().retry}.gcode`);
+});
+
+test('error notices persist across polls until dismissed and a successful refresh clears connection errors', async ({ page }) => {
+  await connect(page);
+  await page.route('**/api/v1/jobs?*', (route) => route.abort('failed'));
+  await page.locator('#refresh').click();
+  const notice = page.locator('#notice');
+  await expect(notice).toContainText('Failed to fetch');
+  await expect(notice).toHaveClass(/notice-error/);
+  await expect(notice).toHaveAttribute('role', 'alert');
+  await page.waitForTimeout(4300);
+  await expect(notice).toBeVisible();
+  await page.unroute('**/api/v1/jobs?*');
+  await page.locator('#refresh').click();
+  await expect(notice).toBeHidden();
+  await expect(page.locator('.status-dot')).toHaveAttribute('data-state', 'connected');
+
+  await page.route('**/api/v1/jobs?*', (route) => route.fulfill({
+    status: 503,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: 'library temporarily unavailable' }),
+  }));
+  await page.locator('#refresh').click();
+  await expect(notice).toBeVisible();
+  await notice.getByRole('button', { name: 'Dismiss notification' }).click();
+  await expect(notice).toBeHidden();
+  await page.waitForTimeout(2300);
+  await expect(notice).toBeHidden();
+});
+
+test('offline library data is marked stale and server-dependent row actions are disabled', async ({ page }) => {
+  await connect(page);
+  const name = `notice-offline-${test.info().retry}.gcode`;
+  const row = await uploadJob(page, name, 20);
+  await expect(page.locator('#library-freshness')).toContainText('Last updated');
+  await page.route('**/api/v1/jobs?*', (route) => route.abort('failed'));
+  await page.locator('#refresh').click();
+  await expect(page.locator('#library-freshness')).toContainText(/stale/i);
+  await expect(page.locator('#library-freshness')).toContainText('Last updated');
+  await expect(row.getByRole('button', { name: `Start ${name}` })).toBeDisabled();
+  await expect(row.getByRole('button', { name: `Delete ${name}` })).toBeDisabled();
+  await expect(row.getByRole('button', { name: `View ${name}` })).toBeDisabled();
+  await expect(page.locator('#upload-form button[type="submit"]')).toBeDisabled();
+  await expect(page.locator('#driver-select')).toBeDisabled();
+  await expect(page.locator('#new-profile')).toBeDisabled();
+  await expect(page.locator('.status-dot')).toHaveAttribute('data-state', 'error');
+
+  await page.unroute('**/api/v1/jobs?*');
+  await cleanupJob(page, name);
 });
 
 test('rejected key is not stored or polled, then a trimmed correct key connects', async ({ page }) => {
@@ -39,6 +120,8 @@ test('rejected key is not stored or polled, then a trimmed correct key connects'
   releaseValidation();
   await expect(page.locator('#connection-state')).toHaveText('Not connected', { timeout: 5000 });
   await expect(page.locator('#api-key')).toBeFocused();
+  await expect(page.locator('#notice')).toContainText('authentication required');
+  await expect(page.locator('.status-dot')).toHaveAttribute('data-state', 'error');
   expect(await page.evaluate(() => sessionStorage.getItem('emberdeck-api-key'))).toBeNull();
   const rejectedRequestCount = apiRequests;
   expect(rejectedRequestCount).toBe(1);
@@ -52,6 +135,8 @@ test('rejected key is not stored or polled, then a trimmed correct key connects'
   await expect(page.locator('#connection-controls')).toContainText('Connected');
   await expect(page.locator('#connection-controls')).toContainText('Change key');
   await expect(page.locator('#connection-controls')).toContainText('Disconnect');
+  await expect(page.locator('#notice')).toBeHidden();
+  await expect(page.locator('.status-dot')).toHaveAttribute('data-state', 'connected');
   expect(await page.evaluate(() => sessionStorage.getItem('emberdeck-api-key'))).toBe(apiKey);
   await page.locator('#change-key').click();
   await expect(page.locator('#api-key')).toHaveValue(apiKey);
@@ -67,6 +152,7 @@ test('disconnect forgets the key and stops polling', async ({ page }) => {
   await page.locator('#disconnect').click();
   await expect(page.locator('#auth-form')).toBeVisible();
   await expect(page.locator('#connection-state')).toHaveText('Not connected');
+  await expect(page.locator('.status-dot')).toHaveAttribute('data-state', 'disconnected');
   expect(await page.evaluate(() => sessionStorage.getItem('emberdeck-api-key'))).toBeNull();
   const pollCountAtDisconnect = driverPolls;
   await page.waitForTimeout(2300);
@@ -86,11 +172,20 @@ test('a 401 during refresh clears a stored key, focuses the key field, and stops
   await page.locator('#refresh').click();
   await expect(page.locator('#auth-form')).toBeVisible();
   await expect(page.locator('#connection-state')).toHaveText('Not connected');
+  await expect(page.locator('#notice')).toContainText('authentication required');
+  await expect(page.locator('.status-dot')).toHaveAttribute('data-state', 'error');
   await expect(page.locator('#api-key')).toBeFocused();
   expect(await page.evaluate(() => sessionStorage.getItem('emberdeck-api-key'))).toBeNull();
   expect(rejectedDriverRequests).toBe(1);
   await page.waitForTimeout(2300);
   expect(rejectedDriverRequests).toBe(1);
+
+  await page.unroute('**/api/v1/drivers');
+  await page.locator('#api-key').fill(apiKey);
+  await page.getByRole('button', { name: /Connect/ }).click();
+  await expect(page.locator('#connection-controls')).toContainText('Connected');
+  await expect(page.locator('#notice')).toBeHidden();
+  await expect(page.locator('.status-dot')).toHaveAttribute('data-state', 'connected');
 });
 
 async function connect(page) {
@@ -114,6 +209,19 @@ async function uploadJob(page, name, lineCount) {
   await expect(row).toContainText(/queued/i);
   await expect(page.locator('#empty-state')).toBeHidden();
   return row;
+}
+
+async function cleanupJob(page, name) {
+  await page.evaluate(async ({ name, key }) => {
+    const headers = { Authorization: `Bearer ${key}` };
+    const response = await fetch(`/api/v1/jobs?limit=20&offset=0&name=${encodeURIComponent(name)}`, { headers });
+    if (!response.ok) throw new Error(`cleanup list: ${response.status}`);
+    const { jobs } = await response.json();
+    const job = jobs.find((candidate) => candidate.name === name);
+    if (!job) return;
+    const deleted = await fetch(`/api/v1/jobs/${encodeURIComponent(job.id)}`, { method: 'DELETE', headers });
+    if (!deleted.ok) throw new Error(`cleanup delete: ${deleted.status}`);
+  }, { name, key: apiKey });
 }
 
 async function startJob(page, row) {
@@ -179,7 +287,7 @@ test('operator uploads, confirms, monitors, views, completes, and deletes a job'
   await expect(progress).toHaveJSProperty('value', lines);
   page.once('dialog', (dialog) => dialog.accept());
   await row.getByRole('button', { name: /Delete/ }).click();
-  await expect(page.locator('#notice')).toHaveText('Program deleted.');
+  await expect(page.locator('#notice .notice-message')).toHaveText('Program deleted.');
   await expect(page.locator('#job-list li')).toHaveCount(0);
   await expect(page.locator('#empty-state')).toBeVisible();
 });

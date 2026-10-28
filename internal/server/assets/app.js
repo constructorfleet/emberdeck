@@ -13,6 +13,8 @@
   const uploadProfileSelect = $("#upload-profile-select");
   const list = $("#job-list");
   const notice = $("#notice");
+  const noticeMessage = notice.querySelector(".notice-message");
+  const statusDot = $("#status-dot");
   const empty = $("#empty-state");
   const programPanel = $("#program-panel");
   const driverSelect = $("#driver-select");
@@ -21,6 +23,12 @@
   let pendingAction = null;
   let token = "";
   let connected = false;
+  let serverAvailable = false;
+  let lastUpdatedAt = null;
+  let noticeVersion = 0;
+  let noticeTimer = null;
+  let currentNotice = null;
+  let dismissedConnectionError = "";
   let jobs = [];
   let hasLoadedJobs = false;
   // GET /jobs returns one page of metadata; program bytes come from GET /jobs/{id}.
@@ -50,9 +58,89 @@
   const toolpathViewports = new Map();
   const boundsOverrides = new Set();
 
-  function message(text) {
-    notice.textContent = text;
-    notice.hidden = !text;
+  function clearNotice({ connectionOnly = false } = {}) {
+    if (connectionOnly && !currentNotice?.connection) return;
+    noticeVersion++;
+    if (noticeTimer !== null) window.clearTimeout(noticeTimer);
+    noticeTimer = null;
+    currentNotice = null;
+    noticeMessage.textContent = "";
+    notice.hidden = true;
+    notice.className = "notice";
+    notice.setAttribute("role", "status");
+  }
+
+  function setConnectionState(state) {
+    statusDot.dataset.state = state;
+    statusDot.setAttribute("aria-label", state[0].toUpperCase() + state.slice(1));
+  }
+
+  function notify(kind, text, { sticky = kind !== "success", connection = false } = {}) {
+    if (!text) return clearNotice();
+    const transportError = kind === "error" && /^(Failed to fetch|NetworkError when attempting to fetch resource\.)$/i.test(text);
+    if (transportError && connected) setServerAvailable(false);
+    if ((connection || transportError) && text === dismissedConnectionError) return;
+    noticeVersion++;
+    const version = noticeVersion;
+    if (noticeTimer !== null) window.clearTimeout(noticeTimer);
+    noticeTimer = null;
+    const isConnectionError = connection || transportError || (kind === "error" && currentNotice?.connection && currentNotice.text === text);
+    currentNotice = { kind, connection: isConnectionError, text };
+    notice.className = `notice notice-${kind}`;
+    noticeMessage.textContent = text;
+    notice.setAttribute("role", kind === "error" ? "alert" : "status");
+    notice.hidden = false;
+    if (isConnectionError && kind === "error") setConnectionState("error");
+    if (kind === "success" && !sticky) {
+      noticeTimer = window.setTimeout(() => {
+        if (version === noticeVersion) clearNotice();
+      }, 5000);
+    }
+  }
+
+  function renderLibraryFreshness() {
+    const freshness = $("#library-freshness");
+    if (!lastUpdatedAt) {
+      freshness.textContent = connected ? "Waiting for the first successful refresh." : "Connect to load the library.";
+      freshness.classList.toggle("stale", connected && !serverAvailable);
+      return;
+    }
+    const updated = new Date(lastUpdatedAt).toLocaleString();
+    freshness.textContent = serverAvailable ? `Last updated ${updated}.` : `Stale library data · Last updated ${updated}.`;
+    freshness.classList.toggle("stale", !serverAvailable);
+  }
+
+  function setServerAvailable(available) {
+    serverAvailable = connected && available;
+    if (!connected) setConnectionState(currentNotice?.connection ? "error" : "disconnected");
+    else setConnectionState(serverAvailable ? "connected" : "error");
+    connectionState.textContent = !connected ? "Not connected" : serverAvailable ? "Connected · library synced" : "Connected · library unavailable";
+    renderLibraryFreshness();
+    const enabled = connected && serverAvailable;
+    $("#upload-form").querySelectorAll("input, button").forEach((control) => { control.disabled = !enabled; });
+    $("#driver-select").disabled = !enabled || !drivers.length;
+    confirmation.disabled = !enabled;
+    jobFilterName.disabled = !enabled;
+    jobFilterState.disabled = !enabled;
+    $("#new-profile").disabled = !enabled;
+    $("#profile-select").disabled = !enabled || !profiles.length;
+    uploadProfileSelect.disabled = !enabled;
+    $("#edit-profile").disabled = !enabled || !selectedProfile();
+    $("#new-project").disabled = !enabled || !selectedProfile();
+    $("#new-vector-project").disabled = !enabled || !selectedProfile();
+    $("#profile-form").querySelector('button[type="submit"]').disabled = !enabled;
+    const deleteProfile = $("#delete-profile");
+    deleteProfile.disabled = !enabled || !selectedProfile();
+    $("#project-form").querySelector('button[type="submit"]').disabled = !enabled;
+    $("#generate-project").disabled = !enabled || $("#generate-project").disabled;
+    $("#delete-project").disabled = !enabled;
+    $("#vector-form").querySelector('button[type="submit"]').disabled = !enabled;
+    $("#generate-vector-project").disabled = !enabled || $("#generate-vector-project").disabled;
+    $("#delete-vector-project").disabled = !enabled;
+    $("#vector-svg-file").disabled = !enabled;
+    renderProjects();
+    renderVectorProjects();
+    renderLibraryFreshness();
   }
 
   function setConnecting(isConnecting) {
@@ -63,20 +151,22 @@
 
   function setSessionConnected(isConnected) {
     connected = isConnected;
+    serverAvailable = isConnected;
     authForm.hidden = isConnected;
     connectionState.hidden = isConnected;
     connectionControls.hidden = !isConnected;
     connectionState.textContent = isConnected ? "Connected · library synced" : "Not connected";
-    $("#upload-form").querySelectorAll("input, button").forEach((control) => { control.disabled = !isConnected; });
+    $("#upload-form").querySelectorAll("input, button").forEach((control) => { control.disabled = !isConnected || !serverAvailable; });
     $("#refresh").disabled = !isConnected;
-    $("#driver-select").disabled = !isConnected || !drivers.length;
-    confirmation.disabled = !isConnected;
+    $("#driver-select").disabled = !isConnected || !serverAvailable || !drivers.length;
+    confirmation.disabled = !isConnected || !serverAvailable;
     jobFilterName.disabled = !isConnected;
     jobFilterState.disabled = !isConnected;
-    $("#new-profile").disabled = !isConnected;
-    $("#new-project").disabled = !isConnected || !selectedProfile();
-    $("#new-vector-project").disabled = !isConnected || !selectedProfile();
-    $("#vector-svg-file").disabled = !isConnected;
+    $("#new-profile").disabled = !isConnected || !serverAvailable;
+    $("#new-project").disabled = !isConnected || !serverAvailable || !selectedProfile();
+    $("#new-vector-project").disabled = !isConnected || !serverAvailable || !selectedProfile();
+    $("#vector-svg-file").disabled = !isConnected || !serverAvailable;
+    setServerAvailable(isConnected);
   }
 
   function stopPolling() {
@@ -95,6 +185,7 @@
     hasLoadedJobs = false;
     jobTotal = 0;
     jobOffset = 0;
+    lastUpdatedAt = null;
     refreshQueued = false;
     drivers = [];
     selectedDriver = "";
@@ -117,6 +208,7 @@
     renderJobs();
     renderProfiles();
     setDesignerStatus("Connect to load saved profiles and projects.");
+    renderLibraryFreshness();
     if (focus) keyInput.focus();
   }
 
@@ -127,9 +219,12 @@
     if (options.body) headers.set("Content-Type", "application/json");
     const response = await fetch(path, { ...options, headers });
     if (!response.ok) {
-      if (response.status === 401 && token === requestToken) forgetSession({ focus: true, clearInput: false });
       let detail = `Request failed (${response.status})`;
       try { detail = (await response.json()).error || detail; } catch (_) { /* keep status */ }
+      if (response.status === 401 && token === requestToken) {
+        forgetSession({ focus: true, clearInput: false });
+        notify("error", detail, { sticky: true, connection: true });
+      }
       throw new Error(detail);
     }
     return response.status === 204 ? null : response.json();
@@ -190,12 +285,10 @@
 
   function setDesignerStatus(text) {
     $("#designer-status").textContent = text;
-    $("#designer-status").classList.remove("error");
   }
 
   function setDesignerError(text) {
-    $("#designer-status").textContent = text;
-    $("#designer-status").classList.add("error");
+    notify("error", text);
   }
 
   function renderProfiles() {
@@ -215,16 +308,16 @@
         select.append(option);
       }
     }
-    select.disabled = !connected || !profiles.length;
+    select.disabled = !serverAvailable || !profiles.length;
     if (profiles.some((profile) => profile.id === prior)) select.value = prior;
     else if (profiles.length) select.value = profiles[0].id;
     const hasProfile = Boolean(selectedProfile());
-    $("#new-profile").disabled = !connected;
+    $("#new-profile").disabled = !serverAvailable;
     renderUploadProfiles();
-    $("#edit-profile").disabled = !connected || !hasProfile;
-    $("#delete-profile").disabled = !connected || !hasProfile;
-    $("#new-project").disabled = !connected || !hasProfile;
-    $("#new-vector-project").disabled = !connected || !hasProfile;
+    $("#edit-profile").disabled = !serverAvailable || !hasProfile;
+    $("#delete-profile").disabled = !serverAvailable || !hasProfile;
+    $("#new-project").disabled = !serverAvailable || !hasProfile;
+    $("#new-vector-project").disabled = !serverAvailable || !hasProfile;
     renderProjects();
     renderVectorProjects();
     updateProjectValidation();
@@ -258,8 +351,11 @@
       label.textContent = `${project.name} · r${project.revision}`;
       const actions = document.createElement("div");
       actions.className = "designer-actions";
-      actions.append(button(`Reopen ${project.name}`, "button button-small", () => openSavedProject(project.id)));
-      actions.append(button("Delete", "button button-small button-danger", () => deleteProject(project.id, project.name), `Delete project ${project.name}`));
+      const reopen = button(`Reopen ${project.name}`, "button button-small", () => openSavedProject(project.id));
+      reopen.disabled = !serverAvailable;
+      const remove = button("Delete", "button button-small button-danger", () => deleteProject(project.id, project.name), `Delete project ${project.name}`);
+      remove.disabled = !serverAvailable;
+      actions.append(reopen, remove);
       row.append(label, actions);
       list.append(row);
     }
@@ -277,7 +373,7 @@
       setDesignerStatus(`${profiles.length} profile${profiles.length === 1 ? "" : "s"} · ${projects.length} saved project${projects.length === 1 ? "" : "s"}`);
     } catch (error) {
       if (!connected || version !== sessionVersion) return;
-      setDesignerError(`Designer storage unavailable: ${error.message}`);
+      notify("error", `Designer storage unavailable: ${error.message}`, { sticky: true, connection: true });
     }
   }
 
@@ -405,6 +501,7 @@
     $("#stale-preview").hidden = !stale;
     const error = projectValidation();
     warning.textContent = error;
+    warning.setAttribute("role", "alert");
     warning.hidden = !error;
     const valuesReady = !error && Boolean($(projectFields.name).value.trim());
     $("#project-form").querySelector('button[type="submit"]').disabled = !valuesReady;
@@ -446,7 +543,7 @@
       await api(`/api/v1/projects/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({ revision: project.revision }) });
       if (openProject && openProject.id === id) { openProject = null; $("#project-form").hidden = true; }
       await refreshDesigner();
-      setDesignerStatus("Project deleted. Generated jobs are unchanged.");
+      notify("success", "Project deleted. Generated jobs are unchanged.");
     } catch (error) { setDesignerError(error.message); }
   }
 
@@ -467,7 +564,7 @@
       await refreshDesigner();
       openProject = projects.find((project) => project.id === saved.id) || saved;
       updateProjectValidation();
-      setDesignerStatus("Project saved.");
+      notify("success", "Project saved.");
     } catch (error) { setDesignerError(error.message); }
   }
 
@@ -479,7 +576,7 @@
       renderJobs();
       await refresh();
       await showProgram(job.id);
-      setDesignerStatus("Generated job added to the library as queued. Review it and dispatch explicitly when ready.");
+      notify("success", "Generated job added to the library as queued. Review it and dispatch explicitly when ready.");
     } catch (error) { setDesignerError(error.message); }
   }
 
@@ -812,6 +909,8 @@
     const stale = Boolean(openVectorProject && profile && (openVectorProject.profile_id !== profile.id || openVectorProject.profile_revision !== profile.revision));
     const warning = $("#vector-validation");
     warning.textContent = stale ? "Profile revision changed. Review this project against the current declared workspace and save it before generating." : error;
+    warning.setAttribute("role", stale ? "status" : "alert");
+    warning.classList.toggle("warning", stale);
     warning.hidden = !stale && !error;
     const saveButton = $("#vector-form").querySelector('button[type="submit"]');
     saveButton.disabled = Boolean(error) || !$("#profile-form").hidden;
@@ -887,13 +986,16 @@
       const label = document.createElement("strong");
       label.textContent = `${project.name} · r${project.revision} · ${project.objects.length} shapes`;
       const actions = document.createElement("div"); actions.className = "designer-actions";
-      actions.append(button(`Reopen vector ${project.name}`, "button button-small", () => {
+      const reopen = button(`Reopen vector ${project.name}`, "button button-small", () => {
         const profile = profiles.find((candidate) => candidate.id === project.profile_id);
         if (profile) $("#profile-select").value = profile.id;
         fillVectorProject(project);
         $("#vector-form").scrollIntoView({ behavior: "smooth", block: "nearest" });
-      }));
-      actions.append(button("Delete", "button button-small button-danger", () => deleteVectorProject(project.id, project.name), `Delete vector project ${project.name}`));
+      });
+      reopen.disabled = !serverAvailable;
+      const remove = button("Delete", "button button-small button-danger", () => deleteVectorProject(project.id, project.name), `Delete vector project ${project.name}`);
+      remove.disabled = !serverAvailable;
+      actions.append(reopen, remove);
       row.append(label, actions); list.append(row);
     });
   }
@@ -915,7 +1017,7 @@
       $("#vector-form-title").textContent = `Edit ${saved.name}`;
       $("#delete-vector-project").hidden = false;
       renderVectorEditor();
-      setDesignerStatus("Vector project saved.");
+      notify("success", "Vector project saved.");
     } catch (error) { setDesignerError(error.message); }
   }
 
@@ -926,7 +1028,7 @@
       await api(`/api/v1/projects/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({ revision: project.revision }) });
       if (openVectorProject?.id === id) { openVectorProject = null; $("#vector-form").hidden = true; }
       await refreshDesigner();
-      setDesignerStatus("Vector project deleted. Generated jobs are unchanged.");
+      notify("success", "Vector project deleted. Generated jobs are unchanged.");
     } catch (error) { setDesignerError(error.message); }
   }
 
@@ -937,7 +1039,7 @@
       confirmation.checked = false;
       await refresh();
       await showProgram(job.id);
-      setDesignerStatus("Generated job added to the library as queued. Review it and dispatch explicitly when ready.");
+      notify("success", "Generated job added to the library as queued. Review it and dispatch explicitly when ready.");
     } catch (error) { setDesignerError(error.message); }
   }
 
@@ -957,7 +1059,7 @@
       $("#profile-form").hidden = true;
       if (!$("#project-form").hidden) updateProjectValidation();
       if (!$("#vector-form").hidden) updateVectorValidation();
-      setDesignerStatus("Profile saved. Confirm it matches the prepared machine before use.");
+      notify("success", "Profile saved. Confirm it matches the prepared machine before use.");
     } catch (error) { setDesignerError(error.message); }
   });
   $("#delete-profile").addEventListener("click", async () => {
@@ -967,7 +1069,7 @@
       await api(`/api/v1/profiles/${encodeURIComponent(profile.id)}`, { method: "DELETE", body: JSON.stringify({ revision: profile.revision }) });
       if (openProject && openProject.profile_id === profile.id) { openProject = null; $("#project-form").hidden = true; }
       await refreshDesigner();
-      setDesignerStatus("Profile deleted.");
+      notify("success", "Profile deleted.");
     } catch (error) { setDesignerError(error.message); }
   });
   $("#new-project").addEventListener("click", () => fillProject(null));
@@ -983,7 +1085,7 @@
     const file = event.target.files && event.target.files[0];
     event.target.value = "";
     if (!file) return;
-    if (!connected || $("#vector-form").hidden) { setDesignerError("Open a vector project before importing SVG geometry."); return; }
+    if (!connected || $("#vector-form").hidden) { notify("warning", "Open a vector project before importing SVG geometry."); return; }
     try {
       const response = await fetch("/api/v1/svg-import", {
         method: "POST",
@@ -991,7 +1093,10 @@
         body: file,
       });
       const imported = await response.json();
-      if (response.status === 401 && token) forgetSession({ focus: true, clearInput: false });
+      if (response.status === 401 && token) {
+        forgetSession({ focus: true, clearInput: false });
+        notify("error", imported.error || "authentication required", { sticky: true, connection: true });
+      }
       if (!response.ok) throw new Error(imported.error || `SVG import failed (${response.status})`);
       const objects = imported.objects.map((object) => ({
         id: vectorID("svg"), kind: "path", subpaths: object.subpaths.map((path) => ({
@@ -1003,7 +1108,7 @@
       selectedVectorObject = objects[0]?.id || selectedVectorObject;
       selectedVectorObjects = new Set(objects.length ? [objects[0].id] : []);
       renderVectorEditor();
-      setDesignerStatus(`Imported ${objects.length} editable SVG path${objects.length === 1 ? "" : "s"}. Assign each path to an operation layer; no machine settings were imported.`);
+      notify("success", `Imported ${objects.length} editable SVG path${objects.length === 1 ? "" : "s"}. Assign each path to an operation layer; no machine settings were imported.`);
     } catch (error) { setDesignerError(error.message); }
   });
   $("#add-operation").addEventListener("click", () => {
@@ -1061,7 +1166,7 @@
       selectedDriver = prior;
     }
     driverSelect.value = selectedDriver;
-    driverSelect.disabled = !connected;
+    driverSelect.disabled = !connected || !serverAvailable;
     const selected = drivers.find((driver) => driver.id === selectedDriver);
     $("#driver-status").textContent = selected ? (selected.busy ? "Driver has an active job." : `Last seen ${new Date(selected.last_seen).toLocaleTimeString()}`) : "Selected driver is disconnected.";
     window.EmberDeckControllerSettings?.renderDriver($("#controller-settings"), selected); // controller-settings.js
@@ -1078,6 +1183,7 @@
     const element = button(label, className, handler, `${label} ${job.name}`);
     element.dataset.jobId = job.id;
     element.dataset.jobAction = action;
+    element.disabled = !connected || !serverAvailable;
     return element;
   }
 
@@ -1093,6 +1199,7 @@
   }
 
   function startBlocker(job, needsBoundsOverride) {
+    if (!connected || !serverAvailable) return "The library server is unavailable; refresh before using this program.";
     const driver = drivers.find((candidate) => candidate.id === selectedDriver);
     if (!selectedDriver || !drivers.length) return "Needs a connected driver.";
     if (!driver) return `Needs a connected driver; ${selectedDriver} is disconnected.`;
@@ -1174,8 +1281,8 @@
   }
 
   async function startJob(id, boundsOverride, driverID) {
-    if (!confirmation.checked) { message("Confirm the safety check before starting a program."); confirmation.focus(); return; }
-    if (!driverID) { message("Select a connected driver first."); driverSelect.focus(); return; }
+    if (!confirmation.checked) { notify("warning", "Confirm the safety check before starting a program."); confirmation.focus(); return; }
+    if (!driverID) { notify("warning", "Select a connected driver first."); driverSelect.focus(); return; }
     try {
       await api(`/api/v1/jobs/${encodeURIComponent(id)}/start`, {
         method: "POST",
@@ -1183,35 +1290,35 @@
       });
       boundsOverrides.delete(id);
       confirmation.checked = false;
-      message("Program dispatched. Keep the machine supervised.");
+      notify("success", "Program dispatched. Keep the machine supervised.");
       await refresh();
-    } catch (error) { message(error.message); }
+    } catch (error) { notify("error", error.message); }
   }
 
   async function cancelJob(id) {
     try {
       await api(`/api/v1/jobs/${encodeURIComponent(id)}/cancel`, { method: "POST", body: "{}" });
-      message("Cancellation requested.");
+      notify("success", "Cancellation requested.");
       await refresh();
-    } catch (error) { message(error.message); }
+    } catch (error) { notify("error", error.message); }
   }
 
   async function pauseJob(id) {
     try {
       await api(`/api/v1/jobs/${encodeURIComponent(id)}/pause`, { method: "POST", body: "{}" });
-      message("Pause requested. Wait for the controller to confirm it is held; Resume continues the job after the safety check.");
+      notify("success", "Pause requested. Wait for the controller to confirm it is held; Resume continues the job after the safety check.");
       await refresh();
-    } catch (error) { message(error.message); }
+    } catch (error) { notify("error", error.message); }
   }
 
   async function resumeJob(id) {
-    if (!confirmation.checked) { message("Confirm the safety check before resuming the program."); confirmation.focus(); return; }
+    if (!confirmation.checked) { notify("warning", "Confirm the safety check before resuming the program."); confirmation.focus(); return; }
     try {
       await api(`/api/v1/jobs/${encodeURIComponent(id)}/resume`, { method: "POST", body: JSON.stringify({ confirmed: true }) });
       confirmation.checked = false;
-      message("Resume requested. Keep the machine supervised.");
+      notify("success", "Resume requested. Keep the machine supervised.");
       await refresh();
-    } catch (error) { message(error.message); }
+    } catch (error) { notify("error", error.message); }
   }
 
   function renderJobs() {
@@ -1229,8 +1336,8 @@
     const pager = $("#job-pager");
     pager.hidden = jobTotal <= jobPageSize && jobOffset === 0;
     $("#jobs-range").textContent = jobs.length ? `${jobOffset + 1}–${jobOffset + jobs.length} of ${jobTotal}` : `0 of ${jobTotal}`;
-    $("#jobs-newer").disabled = jobOffset === 0;
-    $("#jobs-older").disabled = jobOffset + jobs.length >= jobTotal;
+    $("#jobs-newer").disabled = !serverAvailable || jobOffset === 0;
+    $("#jobs-older").disabled = !serverAvailable || jobOffset + jobs.length >= jobTotal;
     for (const job of jobs) {
       const item = document.createElement("li");
       item.className = "job-item";
@@ -1523,7 +1630,10 @@
       jobTotal = page.total;
       drivers = results[1];
       hasLoadedJobs = true;
-      message("");
+      lastUpdatedAt = Date.now();
+      dismissedConnectionError = "";
+      setServerAvailable(true);
+      clearNotice({ connectionOnly: true });
       renderDrivers();
       renderJobs();
       await refreshToolpathViews();
@@ -1531,7 +1641,12 @@
       await refreshDesigner();
     } catch (error) {
       if (!connected || version !== sessionVersion) return;
-      message(error.message);
+      setServerAvailable(false);
+      if (currentNotice?.text !== error.message || !currentNotice.connection) {
+        notify("error", error.message, { sticky: true, connection: true });
+      }
+      renderDrivers();
+      renderJobs();
     } finally {
       if (version === sessionVersion) {
         polling = false;
@@ -1543,6 +1658,11 @@
   function startPolling() {
     if (connected && pollTimer === null) pollTimer = window.setInterval(refresh, 2000);
   }
+
+  notice.querySelector(".notice-dismiss").addEventListener("click", () => {
+    if (currentNotice?.connection) dismissedConnectionError = currentNotice.text;
+    clearNotice();
+  });
 
   async function showProgram(id) {
     try {
@@ -1589,8 +1709,7 @@
       window.EmberDeckJobHistory?.load($("#program-history"), id, api);
       programPanel.hidden = false;
       programPanel.scrollIntoView({ behavior: "smooth", block: "start" });
-      message("");
-    } catch (error) { message(error.message); }
+    } catch (error) { notify("error", error.message); }
   }
 
   async function deleteJob(id, name) {
@@ -1602,8 +1721,8 @@
         programPanel.hidden = true;
       }
       await refresh();
-      message("Program deleted.");
-    } catch (error) { message(error.message); }
+      notify("success", "Program deleted.");
+    } catch (error) { notify("error", error.message); }
   }
 
   async function connectWithKey(rawKey) {
@@ -1619,12 +1738,11 @@
       sessionStorage.setItem("emberdeck-api-key", candidate);
       sessionVersion++;
       setSessionConnected(true);
-      message("");
       await refresh();
       if (connected) startPolling();
     } catch (error) {
       if (token === candidate) forgetSession({ clearInput: false });
-      message(error.message);
+      notify("error", error.message, { sticky: true, connection: true });
       keyInput.focus();
     } finally {
       setConnecting(false);
@@ -1638,11 +1756,15 @@
 
   $("#change-key").addEventListener("click", () => {
     const currentKey = token;
+    clearNotice({ connectionOnly: true });
     forgetSession({ clearInput: false });
     keyInput.value = currentKey;
     keyInput.focus();
   });
-  $("#disconnect").addEventListener("click", () => forgetSession());
+  $("#disconnect").addEventListener("click", () => {
+    clearNotice({ connectionOnly: true });
+    forgetSession();
+  });
 
   fileInput.addEventListener("change", () => {
     const file = fileInput.files && fileInput.files[0];
@@ -1653,7 +1775,7 @@
 
   uploadForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (!connected) { message("Connect with your API key before adding a program."); keyInput.focus(); return; }
+    if (!connected) { notify("warning", "Connect with your API key before adding a program."); keyInput.focus(); return; }
     const file = fileInput.files && fileInput.files[0];
     if (!file) return;
     try {
@@ -1663,8 +1785,8 @@
       $("#file-label").textContent = "Choose a G-code file";
       jobOffset = 0; // New programs are listed first.
       await refresh();
-      message("Program added to the library.");
-    } catch (error) { message(error.message); }
+      notify("success", "Program added to the library.");
+    } catch (error) { notify("error", error.message); }
   });
 
   driverSelect.addEventListener("change", () => {
