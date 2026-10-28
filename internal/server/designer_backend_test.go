@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ConstructorFleet/emberdeck/driver"
 	"github.com/ConstructorFleet/emberdeck/internal/server"
@@ -114,6 +115,73 @@ func TestRectangleBoundaryUsesMillimetrePrecisionWithoutFloatDrift(t *testing.T)
 	w = request(t, s, "POST", "/api/v1/projects", project, "test-key")
 	if w.Code != http.StatusCreated {
 		t.Fatalf("rejected exact work-area edge: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestProjectRevisionsExposeSaveTimeAndStaleWritesReturnCurrentRevision(t *testing.T) {
+	dir := t.TempDir()
+	s, err := server.Open(dir, "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	profileID := createTestProfile(t, s)
+	body := `{"schema_version":1,"name":"Shared panel","profile_id":"` + profileID + `","profile_revision":1,"rectangle":{"x_mm":10,"y_mm":20,"width_mm":30,"height_mm":20},"operation":{"type":"vector-engrave","feed_mm_min":600,"power_percent":25}}`
+	w := request(t, s, "POST", "/api/v1/projects", body, "test-key")
+	var created struct {
+		ID        string    `json:"id"`
+		Revision  int       `json:"revision"`
+		UpdatedAt time.Time `json:"updated_at"`
+		UpdatedBy string    `json:"updated_by"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil || w.Code != http.StatusCreated {
+		t.Fatalf("create project: %d %s %v", w.Code, w.Body.String(), err)
+	}
+	if created.Revision != 1 || created.UpdatedAt.IsZero() || created.UpdatedBy == "" {
+		t.Fatalf("created project lacks revision metadata: %+v", created)
+	}
+	updatedBody := strings.TrimSuffix(body, "}") + `,"revision":1}`
+	w = request(t, s, "PUT", "/api/v1/projects/"+created.ID, updatedBody, "test-key")
+	var updated struct {
+		Revision  int       `json:"revision"`
+		UpdatedAt time.Time `json:"updated_at"`
+		UpdatedBy string    `json:"updated_by"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("update project: %d %s %v", w.Code, w.Body.String(), err)
+	}
+	if updated.Revision != 2 || updated.UpdatedAt.IsZero() || updated.UpdatedAt.Before(created.UpdatedAt) || updated.UpdatedBy == "" {
+		t.Fatalf("updated metadata did not advance: created=%+v updated=%+v", created, updated)
+	}
+	w = request(t, s, "PUT", "/api/v1/projects/"+created.ID, updatedBody, "test-key")
+	var conflict struct {
+		Error   string `json:"error"`
+		Current struct {
+			Revision  int       `json:"revision"`
+			UpdatedAt time.Time `json:"updated_at"`
+			UpdatedBy string    `json:"updated_by"`
+		} `json:"current"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &conflict); err != nil || w.Code != http.StatusConflict {
+		t.Fatalf("stale update: %d %s %v", w.Code, w.Body.String(), err)
+	}
+	if conflict.Error != "project revision conflict" || conflict.Current.Revision != 2 || conflict.Current.UpdatedAt.IsZero() || conflict.Current.UpdatedBy == "" {
+		t.Fatalf("stale write omitted current revision: %+v", conflict)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = server.Open(dir, "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w = request(t, s, "GET", "/api/v1/projects/"+created.ID, "", "test-key")
+	var reopened server.DesignerProject
+	if err := json.Unmarshal(w.Body.Bytes(), &reopened); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("reopen project: %d %s %v", w.Code, w.Body.String(), err)
+	}
+	if reopened.Revision != updated.Revision || reopened.UpdatedAt == nil || !reopened.UpdatedAt.Equal(updated.UpdatedAt) || reopened.UpdatedBy != updated.UpdatedBy {
+		t.Fatalf("save metadata did not persist: %+v", reopened)
 	}
 }
 
@@ -538,9 +606,7 @@ func TestGenerateCreatesValidatedQueuedJobWithImmutableSourceSnapshots(t *testin
 	profileID := createTestProfile(t, s)
 	projectBody := `{"schema_version":1,"name":"Panel outline","profile_id":"` + profileID + `","profile_revision":1,"rectangle":{"x_mm":10,"y_mm":20,"width_mm":30,"height_mm":20},"operation":{"type":"vector-engrave","feed_mm_min":600,"power_percent":25}}`
 	w := request(t, s, "POST", "/api/v1/projects", projectBody, "test-key")
-	var project struct {
-		ID string `json:"id"`
-	}
+	var project server.DesignerProject
 	if err := json.Unmarshal(w.Body.Bytes(), &project); err != nil || w.Code != http.StatusCreated {
 		t.Fatalf("create project: %d %s %v", w.Code, w.Body.String(), err)
 	}
@@ -579,6 +645,7 @@ func TestGenerateCreatesValidatedQueuedJobWithImmutableSourceSnapshots(t *testin
 		t.Fatalf("generated program review response is incomplete: %d %s", review.Code, review.Body.String())
 	}
 	expectedProject := server.DesignerProject{SchemaVersion: 1, ID: project.ID, Revision: 1, Name: "Panel outline", ProfileID: profileID, ProfileRevision: 1,
+		UpdatedAt: project.UpdatedAt, UpdatedBy: project.UpdatedBy,
 		Rectangle: server.Rectangle{XMM: 10, YMM: 20, WidthMM: 30, HeightMM: 20}, Operation: server.DesignerOperation{Type: "vector-engrave", FeedMMMin: 600, PowerPercent: 25}}
 	expectedProfile := server.MachineProfile{SchemaVersion: 1, ID: profileID, Revision: 1, Name: "Declared GRBL", Controller: "grbl-1.1", Units: "mm", Origin: "lower-left", WidthMM: 300, HeightMM: 200, MinS: 0, MaxS: 1000, MinFeed: 1, MaxFeed: 6000, MaxPowerPct: 100, LaserMode: true}
 	if !reflect.DeepEqual(job.Provenance.Project, expectedProject) || job.Provenance.Profile != expectedProfile {

@@ -136,6 +136,18 @@ and project sync to once every five minutes. Returning to the tab triggers a
 fresh sync. Refreshes keep keyboard focus on the same row action when that row
 still exists.
 
+When another browser tab or operator saves the project you have open, EmberDeck
+compares its saved revision during the regular sync and when you return to a
+background tab. The editor shows who saved the newer revision and when. A clean
+editor can reload it directly. If the form has unsaved edits, the editor keeps
+them in place, disables saving over the newer revision, and offers **Reload
+latest** (with a discard prompt) or **Continue as separate project**. The latter
+keeps your local geometry and settings and changes the save target to a new
+project; save it when ready. A save that races with another operator's update is
+rejected with the same recovery choices. No changes are merged automatically.
+
+![Rectangle editor notice showing a newer saved project revision and safe reload or copy choices](assets/screenshots/designer-project-newer-revision.png)
+
 ![Saved project list with keyboard focus on Reopen after background refreshes](assets/screenshots/designer-project-keyboard-focus.png)
 
 ## Add and inspect a program

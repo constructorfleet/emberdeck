@@ -217,6 +217,23 @@ async function main() {
     await page.getByRole('button', { name: 'Save project' }).click();
     await expect(page.locator('#notice .notice-message')).toContainText('Project saved');
     await captureElement(page, '#project-form', 'designer-project.png');
+    await page.evaluate(async () => {
+      const headers = { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' };
+      const projects = await (await fetch('/api/v1/projects', { headers })).json();
+      const project = projects.find((candidate) => candidate.name === 'Panel outline');
+      const update = { schema_version: 1, name: project.name, profile_id: project.profile_id, profile_revision: project.profile_revision,
+        rectangle: { ...project.rectangle, x_mm: 12 }, operation: project.operation, revision: project.revision };
+      const response = await fetch(`/api/v1/projects/${project.id}`, { method: 'PUT', headers, body: JSON.stringify(update) });
+      if (!response.ok) throw new Error(`Could not simulate external project save: ${response.status}`);
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await expect(page.locator('#project-remote-change')).toBeVisible();
+    await page.locator('#rect-x').fill('11');
+    await expect(page.locator('#project-remote-message')).toContainText('Your unsaved edits remain in this form.');
+    await captureElement(page, '#project-form', 'designer-project-newer-revision.png');
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.getByRole('button', { name: 'Reload latest' }).click();
+    await expect(page.locator('#rect-x')).toHaveValue('12');
     await page.locator('#rect-x').fill('11');
     await expect(page.locator('#project-save-hint')).toContainText('unsaved edits');
     await captureElement(page, '#project-form', 'designer-unsaved-changes.png');

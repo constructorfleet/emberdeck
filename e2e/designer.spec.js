@@ -61,6 +61,103 @@ test('saved project actions keep keyboard focus through two job poll cycles', as
   await expect(reopen).toBeFocused();
 });
 
+test('concurrent editors retain local work, reject a racing stale save, and recover on tab return', async ({ browser }) => {
+  test.setTimeout(90000);
+  const attempt = `${test.info().repeatEachIndex}-${Date.now()}`;
+  const profileName = `E2E shared profile ${attempt}`;
+  const projectName = `E2E shared project ${attempt}`;
+  const contextA = await browser.newContext();
+  const contextB = await browser.newContext();
+  const pageA = await contextA.newPage();
+  const pageB = await contextB.newPage();
+  try {
+    await pageA.goto('/designer');
+    await pageA.locator('#api-key').fill(apiKey);
+    await pageA.getByRole('button', { name: /Connect/ }).click();
+    await expect(pageA.locator('#connection-state')).toHaveText('Connected · library synced');
+    await pageA.getByRole('button', { name: 'New profile' }).click();
+    await pageA.getByLabel('Profile name').fill(profileName);
+    await pageA.getByLabel('Work area width (mm)').fill('300');
+    await pageA.getByLabel('Work area height (mm)').fill('200');
+    await pageA.getByLabel('Maximum spindle value ($30)').fill('1000');
+    await pageA.getByLabel('Minimum feed (mm/min)').fill('1');
+    await pageA.getByLabel('Maximum feed (mm/min)').fill('6000');
+    await pageA.getByLabel('Maximum commanded power (%)').fill('100');
+    await pageA.getByRole('button', { name: 'Save profile' }).click();
+    await expect(pageA.locator('#notice .notice-message')).toContainText('Profile saved');
+    await pageA.getByRole('button', { name: 'New rectangle project' }).click();
+    await pageA.locator('#project-name').fill(projectName);
+    await pageA.locator('#rect-x').fill('10');
+    await pageA.getByRole('button', { name: 'Save project' }).click();
+    await expect(pageA.locator('#notice .notice-message')).toContainText('Project saved');
+    const rowA = pageA.locator('#project-list li').filter({ hasText: projectName });
+    const projectID = await rowA.getByRole('button', { name: `Reopen project ${projectName}` }).getAttribute('data-project-id');
+    await pageA.locator('#rect-x').fill('11');
+
+    await pageB.goto('/designer');
+    await pageB.locator('#api-key').fill(apiKey);
+    await pageB.getByRole('button', { name: /Connect/ }).click();
+    await expect(pageB.locator('#connection-state')).toHaveText('Connected · library synced');
+    await pageB.getByRole('button', { name: `Reopen project ${projectName}` }).click();
+    await pageB.locator('#rect-x').fill('12');
+    await pageB.getByRole('button', { name: 'Save project' }).click();
+    await expect(pageB.locator('#notice .notice-message')).toContainText('Project saved');
+
+    await expect(pageA.locator('#project-remote-change')).toBeVisible({ timeout: 15000 });
+    await expect(pageA.locator('#project-remote-message')).toContainText(/newer saved revision \(2\).*saved/i);
+    await expect(pageA.locator('#project-remote-message')).toContainText('Your unsaved edits remain in this form.');
+    await expect(pageA.locator('#rect-x')).toHaveValue('11');
+    await expect(pageA.getByRole('button', { name: 'Save project' })).toBeDisabled();
+    const discardPrompt = new Promise((resolve) => pageA.once('dialog', async (dialog) => { await dialog.dismiss(); resolve(dialog.message()); }));
+    await pageA.getByRole('button', { name: 'Reload latest' }).click();
+    expect(await discardPrompt).toBe('Discard unsaved changes?');
+    await expect(pageA.locator('#rect-x')).toHaveValue('11');
+
+    await pageA.getByRole('button', { name: 'Continue as separate project' }).click();
+    await expect(pageA.locator('#project-form-title')).toContainText('New copy of');
+    await expect(pageA.locator('#rect-x')).toHaveValue('11');
+    await expect(pageA.locator('#project-save-hint')).toContainText('unsaved edits');
+    const copyDiscardPrompt = new Promise((resolve) => pageA.once('dialog', async (dialog) => { await dialog.dismiss(); resolve(dialog.message()); }));
+    await pageA.getByRole('button', { name: 'Close editor' }).click();
+    expect(await copyDiscardPrompt).toBe('Discard unsaved changes?');
+    await expect(pageA.locator('#rect-x')).toHaveValue('11');
+    await pageA.locator('#project-name').fill(`${projectName} copy`);
+    await pageA.getByRole('button', { name: 'Save project' }).click();
+    await expect(pageA.locator('#notice .notice-message')).toContainText('Project saved');
+    await expect(pageA.locator('#project-list li').filter({ hasText: `${projectName} copy` })).toBeVisible();
+
+    await pageA.getByRole('button', { name: 'Close editor' }).click();
+    await pageA.getByRole('button', { name: `Reopen project ${projectName}`, exact: true }).click();
+    await pageA.locator('#rect-x').fill('13');
+    await pageA.route(`**/api/v1/projects/${projectID}`, async (route) => {
+      if (route.request().method() === 'PUT') {
+        await pageB.locator('#rect-x').fill('14');
+        await pageB.getByRole('button', { name: 'Save project' }).click();
+        await expect(pageB.locator('#notice .notice-message')).toContainText('Project saved');
+      }
+      await route.continue();
+    });
+    await pageA.getByRole('button', { name: 'Save project' }).click();
+    await expect(pageA.locator('#notice .notice-message')).toContainText('A newer project revision was saved.');
+    await expect(pageA.locator('#project-remote-change')).toBeVisible();
+    await expect(pageA.locator('#rect-x')).toHaveValue('13');
+
+    await pageB.locator('#rect-x').fill('15');
+    await pageB.getByRole('button', { name: 'Save project' }).click();
+    await expect(pageB.locator('#notice .notice-message')).toContainText('Project saved');
+    await pageA.unroute(`**/api/v1/projects/${projectID}`);
+    await pageB.bringToFront();
+    await pageA.bringToFront();
+    await pageA.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await expect(pageA.locator('#project-remote-change')).toBeVisible({ timeout: 5000 });
+    await expect(pageA.locator('#project-remote-message')).toContainText(/newer saved revision \(4\)/i);
+    expect(projectID).toBeTruthy();
+  } finally {
+    await contextA.close();
+    await contextB.close();
+  }
+});
+
 test('operator saves a declared profile, edits a bounded rectangle, and reviews a queued generated job', async ({ page }) => {
   test.setTimeout(90000);
   const attempt = `${test.info().repeatEachIndex}-${test.info().retry}-${Date.now()}`;

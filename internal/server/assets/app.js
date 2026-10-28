@@ -68,9 +68,11 @@
   let openProject = null;
   let projectDraftBaseline = null;
   let projectReturnFocus = null;
+  let pendingProjectUpdate = null;
   let openVectorProject = null;
   let vectorDraftBaseline = null;
   let vectorReturnFocus = null;
+  let pendingVectorProjectUpdate = null;
   let vectorObjects = [];
   let vectorOperations = [];
   let selectedVectorObject = "";
@@ -249,8 +251,10 @@
     profileDraftBaseline = null;
     openProject = null;
     projectDraftBaseline = null;
+    pendingProjectUpdate = null;
     openVectorProject = null;
     vectorDraftBaseline = null;
+    pendingVectorProjectUpdate = null;
     shownJobID = "";
     pendingAction = null;
     if (actionDialog.open) actionDialog.close();
@@ -275,12 +279,16 @@
     const response = await fetch(path, { ...options, headers });
     if (!response.ok) {
       let detail = `Request failed (${response.status})`;
-      try { detail = (await response.json()).error || detail; } catch (_) { /* keep status */ }
+      let payload = {};
+      try { payload = await response.json(); detail = payload.error || detail; } catch (_) { /* keep status */ }
       if (response.status === 401 && token === requestToken) {
         forgetSession({ focus: true, clearInput: false });
         notify("error", detail, { sticky: true, connection: true });
       }
-      throw new Error(detail);
+      const error = new Error(detail);
+      error.status = response.status;
+      error.current = payload.current;
+      throw error;
     }
     return response.status === 204 ? null : response.json();
   }
@@ -468,6 +476,7 @@
     try {
       const [nextProfiles, nextProjects] = await Promise.all([api("/api/v1/profiles"), api("/api/v1/projects")]);
       if (!connected || version !== sessionVersion) return;
+      trackExternalProjectVersions(Array.isArray(nextProjects) ? nextProjects : []);
       const nextProfileRevisionKey = JSON.stringify((Array.isArray(nextProfiles) ? nextProfiles : [])
         .map((profile) => [profile.id, profile.revision, profile.width_mm, profile.height_mm]).sort(([left], [right]) => left.localeCompare(right)));
       if (profileRevisionKey !== null && profileRevisionKey !== nextProfileRevisionKey) generatedReviewCache.clear();
@@ -480,6 +489,68 @@
       if (!connected || version !== sessionVersion) return;
       notify("error", `Designer storage unavailable: ${error.message}`, { sticky: true, connection: true });
     }
+  }
+
+  function trackExternalProjectVersions(latestProjects) {
+    const latestFor = (opened) => opened && latestProjects.find((project) => project.id === opened.id && project.revision > opened.revision);
+    pendingProjectUpdate = latestFor(openProject) || null;
+    pendingVectorProjectUpdate = latestFor(openVectorProject) || null;
+  }
+
+  function projectSaveDescription(project) {
+    const details = [];
+    if (project?.updated_by) details.push(`by ${project.updated_by}`);
+    if (project?.updated_at) {
+      const savedAt = new Date(project.updated_at);
+      details.push(`saved ${Number.isNaN(savedAt.getTime()) ? project.updated_at : savedAt.toLocaleString()}`);
+    }
+    const suffix = details.length ? ` · ${details.join(" · ")}` : "";
+    return `A newer saved revision (${project?.revision ?? "?"}) exists${suffix}.`;
+  }
+
+  async function reloadProjectRevision(schemaVersion) {
+    const opened = schemaVersion === 1 ? openProject : openVectorProject;
+    const dirty = schemaVersion === 1 ? projectDraftIsDirty() : vectorDraftIsDirty();
+    if (!opened) return;
+    if (dirty && !confirmDiscardChanges()) return;
+    try {
+      const latest = await api(`/api/v1/projects/${encodeURIComponent(opened.id)}`);
+      const profile = profiles.find((candidate) => candidate.id === latest.profile_id);
+      if (profile) $("#profile-select").value = profile.id;
+      if (schemaVersion === 1) {
+        pendingProjectUpdate = null;
+        fillProject(latest, true);
+      } else {
+        pendingVectorProjectUpdate = null;
+        fillVectorProject(latest, true);
+      }
+      setDesignerStatus(`Reloaded ${latest.name} revision ${latest.revision}.`);
+    } catch (error) { setDesignerError(error.message); }
+  }
+
+  function continueProjectAsCopy(schemaVersion) {
+    if (schemaVersion === 1) {
+      if (!openProject || !pendingProjectUpdate) return;
+      const name = openProject.name;
+      openProject = null;
+      pendingProjectUpdate = null;
+      $("#project-name").value = `${name} copy`;
+      projectDraftBaseline = `separate-copy:${projectFormState()}`;
+      $("#project-form-title").textContent = `New copy of ${name}`;
+      $("#delete-project").hidden = true;
+      updateProjectValidation();
+    } else {
+      if (!openVectorProject || !pendingVectorProjectUpdate) return;
+      const name = openVectorProject.name;
+      openVectorProject = null;
+      pendingVectorProjectUpdate = null;
+      $("#vector-name").value = `${name} copy`;
+      vectorDraftBaseline = `separate-copy:${vectorFormState(selectedProfile())}`;
+      $("#vector-form-title").textContent = `New copy of ${name}`;
+      $("#delete-vector-project").hidden = true;
+      updateVectorValidation();
+    }
+    setDesignerStatus("Your local edits are preserved. Save to create a separate project.");
   }
 
   function profilePayload() {
@@ -646,6 +717,12 @@
     const stale = Boolean(openProject && profile && (openProject.profile_id !== profile.id || openProject.profile_revision !== profile.revision));
     const matchesSaved = matchesSavedProject(profile);
     const dirty = projectDraftIsDirty();
+    const hasRemoteUpdate = Boolean(openProject && pendingProjectUpdate && pendingProjectUpdate.revision > openProject.revision);
+    const remoteNotice = $("#project-remote-change");
+    remoteNotice.hidden = !hasRemoteUpdate;
+    $("#project-remote-message").textContent = hasRemoteUpdate
+      ? `${projectSaveDescription(pendingProjectUpdate)} ${dirty ? "Your unsaved edits remain in this form." : "Your form has no unsaved edits."}`
+      : "";
     const profileDraftOpen = !$("#profile-form").hidden;
     $("#stale-profile-warning").hidden = !stale;
     $("#profile-save-hint").hidden = !profileDraftOpen || !openProject;
@@ -655,13 +732,13 @@
     warning.setAttribute("role", "alert");
     warning.hidden = !error;
     const valuesReady = !error && Boolean($(projectFields.name).value.trim());
-    $("#project-form").querySelector('button[type="submit"]').disabled = !valuesReady;
+    $("#project-form").querySelector('button[type="submit"]').disabled = !valuesReady || hasRemoteUpdate;
     const projectSaveHint = $("#project-save-hint");
     projectSaveHint.hidden = !dirty && Boolean(openProject);
     projectSaveHint.textContent = !openProject && !dirty
       ? "Save the project to enable generation"
       : "Save changes before generating; the preview has unsaved edits.";
-    $("#generate-project").disabled = !valuesReady || !openProject || stale || !matchesSaved || profileDraftOpen;
+    $("#generate-project").disabled = !valuesReady || !openProject || stale || !matchesSaved || profileDraftOpen || hasRemoteUpdate;
     renderPreview(profile);
   }
 
@@ -669,6 +746,7 @@
     if (!$("#project-form").hidden && projectDraftIsDirty() && !discardConfirmed && !confirmDiscardChanges()) return false;
     if ($("#project-form").hidden) projectReturnFocus = document.activeElement;
     openProject = project;
+    pendingProjectUpdate = null;
     $("#project-form").hidden = false;
     $("#project-form-title").textContent = project ? `Edit ${project.name}` : "New rectangle project";
     $(projectFields.name).value = project ? project.name : "Untitled rectangle";
@@ -690,6 +768,7 @@
   function closeProjectEditor() {
     if (projectDraftIsDirty() && !confirmDiscardChanges()) return;
     openProject = null;
+    pendingProjectUpdate = null;
     projectDraftBaseline = null;
     $("#project-form").hidden = true;
     restoreFocus(projectReturnFocus, "#new-project");
@@ -733,6 +812,7 @@
         method: openProject ? "PUT" : "POST", body: JSON.stringify(payload),
       });
       openProject = saved;
+      pendingProjectUpdate = null;
       $("#project-form-title").textContent = `Edit ${saved.name}`;
       $("#delete-project").hidden = false;
       await refreshDesigner();
@@ -740,7 +820,13 @@
       projectDraftBaseline = projectFormState();
       updateProjectValidation();
       notify("success", "Project saved.");
-    } catch (error) { setDesignerError(error.message); }
+    } catch (error) {
+      if (error.current && openProject?.id === error.current.id) {
+        pendingProjectUpdate = error.current;
+        updateProjectValidation();
+        setDesignerError("A newer project revision was saved. Your edits remain in the form; reload it or continue as a separate project.");
+      } else setDesignerError(error.message);
+    }
   }
 
   async function generateProject() {
@@ -1216,15 +1302,21 @@
     warning.classList.toggle("warning", stale);
     warning.hidden = !stale && !error;
     const saveButton = $("#vector-form").querySelector('button[type="submit"]');
-    saveButton.disabled = Boolean(error) || !$("#profile-form").hidden;
     const complete = vectorObjects.every((object) => object.operation_id && vectorOperations.some((operation) => operation.id === object.operation_id));
     const dirty = vectorDraftIsDirty(profile);
+    const hasRemoteUpdate = Boolean(openVectorProject && pendingVectorProjectUpdate && pendingVectorProjectUpdate.revision > openVectorProject.revision);
+    const remoteNotice = $("#vector-remote-change");
+    remoteNotice.hidden = !hasRemoteUpdate;
+    $("#vector-remote-message").textContent = hasRemoteUpdate
+      ? `${projectSaveDescription(pendingVectorProjectUpdate)} ${dirty ? "Your unsaved edits remain in this form." : "Your form has no unsaved edits."}`
+      : "";
+    saveButton.disabled = Boolean(error) || !$("#profile-form").hidden || hasRemoteUpdate;
     const vectorSaveHint = $("#vector-save-hint");
     vectorSaveHint.hidden = !dirty && Boolean(openVectorProject);
     vectorSaveHint.textContent = !openVectorProject && !dirty
       ? "Save the project to enable generation"
       : "Save changes before generating. Generation only queues a job; use the existing explicit Start control after reviewing it.";
-    $("#generate-vector-project").disabled = Boolean(error) || !openVectorProject || stale || dirty || !complete || !$("#profile-form").hidden;
+    $("#generate-vector-project").disabled = Boolean(error) || !openVectorProject || stale || dirty || !complete || !$("#profile-form").hidden || hasRemoteUpdate;
     renderVectorPreview(profile);
   }
 
@@ -1238,6 +1330,7 @@
     if (!$("#vector-form").hidden && vectorDraftIsDirty() && !discardConfirmed && !confirmDiscardChanges()) return false;
     if ($("#vector-form").hidden) vectorReturnFocus = document.activeElement;
     openVectorProject = project;
+    pendingVectorProjectUpdate = null;
     vectorObjects = project ? project.objects.map((object) => ({ ...object, text: object.text ? { ...object.text } : undefined, kind: objectKind(object), transform: object.transform ? { ...object.transform } : undefined, subpaths: object.subpaths.map((path) => ({ ...path, points: path.points.map((point) => ({ ...point })) })) })) : [];
     vectorObjects.forEach((object) => {
       if (objectKind(object) === "text") object.textGeometry = newTextGeometryState();
@@ -1259,6 +1352,7 @@
   function closeVectorEditor() {
     if (vectorDraftIsDirty() && !confirmDiscardChanges()) return;
     openVectorProject = null;
+    pendingVectorProjectUpdate = null;
     vectorDraftBaseline = null;
     $("#vector-form").hidden = true;
     restoreFocus(vectorReturnFocus, "#new-vector-project");
@@ -1457,6 +1551,7 @@
       });
       await refreshDesigner();
       openVectorProject = projects.find((project) => project.id === saved.id) || saved;
+      pendingVectorProjectUpdate = null;
       vectorObjects = openVectorProject.objects.map((object) => ({ ...object, kind: objectKind(object), transform: object.transform ? { ...object.transform } : undefined }));
       vectorOperations = openVectorProject.operations.map((operation) => ({ ...operation }));
       vectorDraftBaseline = vectorFormState(selectedProfile());
@@ -1464,7 +1559,13 @@
       $("#delete-vector-project").hidden = false;
       renderVectorEditor();
       notify("success", "Vector project saved.");
-    } catch (error) { setDesignerError(error.message); }
+    } catch (error) {
+      if (error.current && openVectorProject?.id === error.current.id) {
+        pendingVectorProjectUpdate = error.current;
+        updateVectorValidation();
+        setDesignerError("A newer project revision was saved. Your edits remain in the form; reload it or continue as a separate project.");
+      } else setDesignerError(error.message);
+    }
   }
 
   async function deleteVectorProject(id, name) {
@@ -1526,6 +1627,8 @@
   $("#project-form").addEventListener("input", updateProjectValidation);
   $("#project-form").addEventListener("change", updateProjectValidation);
   $("#cancel-project").addEventListener("click", closeProjectEditor);
+  $("#project-reload-latest").addEventListener("click", () => reloadProjectRevision(1));
+  $("#project-copy-local").addEventListener("click", () => continueProjectAsCopy(1));
   $("#delete-project").addEventListener("click", () => { if (openProject) deleteProject(openProject.id, openProject.name); });
   $("#generate-project").addEventListener("click", generateProject);
   $("#new-vector-project").addEventListener("click", () => fillVectorProject());
@@ -1583,6 +1686,8 @@
     } else updateVectorValidation();
   });
   $("#close-vector-project").addEventListener("click", closeVectorEditor);
+  $("#vector-reload-latest").addEventListener("click", () => reloadProjectRevision(2));
+  $("#vector-copy-local").addEventListener("click", () => continueProjectAsCopy(2));
   $("#delete-vector-project").addEventListener("click", () => { if (openVectorProject) deleteVectorProject(openVectorProject.id, openVectorProject.name); });
   $("#generate-vector-project").addEventListener("click", generateVectorProject);
 
