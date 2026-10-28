@@ -296,6 +296,23 @@ func RunWithOptions(ctx context.Context, serverURL, key, id string, connect Conn
 	if err := validArguments(ctx, serverURL, key, id, connect); err != nil {
 		return err
 	}
+	return run(ctx, serverURL, key, id, connect, nil, options)
+}
+
+// RunWithAdapterRegistry polls the same lease-owning HTTP API as RunWithOptions,
+// routing jobs for id through an explicitly registered in-process adapter.
+func RunWithAdapterRegistry(ctx context.Context, serverURL, key, id string, registry *AdapterRegistry, options Options) error {
+	if ctx == nil || strings.TrimSpace(serverURL) == "" || key == "" || id == "" || registry == nil {
+		return errors.New("worker: context, server URL, key, driver ID, and adapter registry are required")
+	}
+	registration, ok := registry.lookup(id)
+	if !ok {
+		return fmt.Errorf("worker: no adapter registered for driver %q", id)
+	}
+	return run(ctx, serverURL, key, id, nil, &registration, options)
+}
+
+func run(ctx context.Context, serverURL, key, id string, connect Connector, registration *adapterRegistration, options Options) error {
 	options = options.normalized()
 	session, err := newSession()
 	if err != nil {
@@ -308,6 +325,9 @@ func RunWithOptions(ctx context.Context, serverURL, key, id string, connect Conn
 	failures := 0
 	connected := false
 	report := &controllerReport{}
+	if registration != nil {
+		report.setCapabilities(registration.capabilities)
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -344,7 +364,11 @@ func RunWithOptions(ctx context.Context, serverURL, key, id string, connect Conn
 		switch assignment.Command {
 		case "idle":
 			if assignment.ReadSettings {
-				report.probe(ctx, connect)
+				if registration != nil {
+					report.failed(errors.New("controller settings probe is unsupported by the registered adapter"))
+				} else {
+					report.probe(ctx, connect)
+				}
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
@@ -395,7 +419,11 @@ func RunWithOptions(ctx context.Context, serverURL, key, id string, connect Conn
 					}
 				}
 				if terminal.State == "" {
-					terminal, err = runJob(ctx, client, endpoint, key, session, assignment, connect, report)
+					if registration != nil {
+						terminal, err = runAdapterJob(ctx, client, endpoint, key, session, assignment, *registration, report)
+					} else {
+						terminal, err = runJob(ctx, client, endpoint, key, session, assignment, connect, report)
+					}
 					if err != nil && terminal.State == "" {
 						return err
 					}

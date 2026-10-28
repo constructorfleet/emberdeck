@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ConstructorFleet/emberdeck/driver"
+	"github.com/ConstructorFleet/emberdeck/driveradapter"
 	"github.com/ConstructorFleet/emberdeck/jobtransfer"
 )
 
@@ -26,18 +27,34 @@ type controllerReport struct {
 	err      string
 	// reset holds a probe's reset-banner error until it refuses the next job:
 	// the probe consumed the banner a later connection would have shown.
-	reset string
+	reset               string
+	capabilities        []string
+	adapterCapabilities bool
 }
 
 func (r *controllerReport) poll(session string, p *progress) pollRequest {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	request := pollRequest{Session: session, Capabilities: []string{"pause_resume", jobtransfer.Capability}, progress: p, SettingsError: r.err}
+	capabilities := []string{"pause_resume", jobtransfer.Capability}
+	if r.adapterCapabilities {
+		capabilities = append([]string{jobtransfer.Capability}, r.capabilities...)
+	}
+	request := pollRequest{Session: session, Capabilities: capabilities, progress: p, SettingsError: r.err}
 	if r.settings != nil {
 		settings, readAt := *r.settings, r.readAt
 		request.ControllerSettings, request.SettingsReadAt = &settings, &readAt
 	}
 	return request
+}
+
+func (r *controllerReport) setCapabilities(capabilities driveradapter.Capabilities) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.adapterCapabilities = true
+	r.capabilities = nil
+	if capabilities.PauseResume {
+		r.capabilities = append(r.capabilities, "pause_resume")
+	}
 }
 
 func (r *controllerReport) record(settings driver.Settings) {

@@ -100,11 +100,12 @@ avoids Go shared-library ABI restrictions across operating systems. They are
 trusted code with the server's OS privileges; this is not a sandbox. OctoPrint
 Python plugins are not directly compatible.
 
-The versioned in-process `driveradapter` API prototype defines discovery,
-configuration, per-device capabilities, one-start-per-session assignment
-handling, status, and capability-gated controls. It is separate from preflight
-and is not yet loaded by the server or worker. See
-[driver adapter API](plugins.md#driver-adapter-api-prototype) for the contract, simulator, concrete
+The versioned in-process `driveradapter` API defines discovery, configuration,
+per-device capabilities, one-start-per-session assignment handling, status, and
+capability-gated controls. The worker can route HTTP assignments through an
+explicitly injected adapter registry; this is separate from preflight and is
+not configured by the command line. See
+[driver adapter API](plugins.md#driver-adapters) for the contract, simulator, concrete
 Ruida Ethernet target, and remaining integration work.
 
 Authentication is a durable credential registry, not a process-wide shared-key

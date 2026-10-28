@@ -110,16 +110,16 @@ func (s *session) Status(ctx context.Context) (driveradapter.Status, error) {
 	if !s.started {
 		return driveradapter.Status{State: driveradapter.StateIdle}, nil
 	}
+	// The simulator completes on its first status read so integration and
+	// example runs have a deterministic terminal receipt without timing races.
+	s.state = driveradapter.StateCompleted
 	lines := 0
 	for _, line := range strings.Split(string(s.assignment.GCode), "\n") {
 		if strings.TrimSpace(line) != "" {
 			lines++
 		}
 	}
-	executed := 0
-	if lines > 0 {
-		executed = lines - 1
-	}
+	executed := lines
 	var position *driveradapter.Position
 	feedback := driveradapter.FeedbackUnavailable
 	if s.adapter.deviceCaps.PositionFeedback {
@@ -131,7 +131,7 @@ func (s *session) Status(ctx context.Context) (driveradapter.Status, error) {
 		AcceptedLines:    lines,
 		TotalLines:       lines,
 		ExecutedLines:    &executed,
-		ControllerState:  string(s.state),
+		ControllerState:  "Idle",
 		Position:         position,
 		PositionFeedback: feedback,
 	}, nil

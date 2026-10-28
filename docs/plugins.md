@@ -40,8 +40,9 @@ or change anything that account can access. Install only code you trust. The
 example G-code preflight checks basic text shape only; it does not certify
 safety, machine compatibility, or successful execution. This protocol does not
 claim OctoPrint compatibility. Controller transport extensions use a separate
-contract; see [driver adapter API](#driver-adapter-api-prototype). The current adapter API is
-a trusted in-process prototype and is not loaded by the server or worker.
+contract; see [driver adapters](#driver-adapters). The current adapter API is
+trusted in-process Go code with worker registration, while command-line
+registration and dynamic loading remain unavailable.
 
 ## Build and install the example
 
@@ -89,14 +90,18 @@ outcomes and duration histograms to the optional server metrics endpoint. No
 plugin names, messages, G-code, or raw errors are exported. See
 [metrics and monitoring](metrics.md) for the contract and deployment guidance.
 
-## Driver adapter API prototype
+## Driver adapters
 
 Preflight plugins only allow or veto a dispatch. Controller-specific network
 protocols need a separate lifecycle and capability contract; they must not be
 added to the preflight request. The `driveradapter` Go package defines the
-current version 1 in-process API prototype. It is not loaded by `serve` or
-`emberdeck driver`, so it does not provide runtime adapter discovery, operator
-configuration, or machine support yet.
+current version 1 in-process API. An embedding Go application can register a
+trusted adapter with `worker.AdapterRegistry` and run a worker with
+`worker.RunWithAdapterRegistry`. The existing HTTP driver poll still owns
+assignment and lease state; the registry only maps that server driver ID to a
+discovered adapter device. The command line server and `emberdeck driver` do
+not configure adapter registrations, and there is no dynamic loader or
+operator configuration screen.
 
 An adapter implements `driveradapter.Adapter` and declares protocol version,
 name, version, transport, and its maximum capabilities. `Discover` returns
@@ -119,6 +124,13 @@ before the transport failed. The wrapper permits at most one start per session.
 The server and worker must still enforce lease ownership and must not create a
 replacement session to replay work after disconnect or reboot.
 
+The current worker adapter path handles job assignments, pause/resume, and
+cancel, with position feedback where declared. It does not execute manual
+preparation actions. The separate #52 capability names `manual_home`,
+`manual_unlock`, `manual_jog`, `manual_set_zero`, and `manual_frame` require a
+distinct manual lease/session and `laser_off=true`; that execution path is not
+implemented here.
+
 `Status` separates accepted lines from optional executed lines and may provide
 controller state and position with `confirmed`, `estimated`, `unknown`, or
 `unavailable` confidence. Acceptance is not execution evidence. Accepted and
@@ -128,7 +140,10 @@ cancellation, return bounded errors, and identify uncertainty after connection
 loss. This API does not establish physical safety or replace machine interlocks.
 
 The API is trusted in-process Go code, not an isolated plugin process. The
-software-only simulator example and public contract tests live in
+software-only simulator is registered explicitly by the embedding application;
+it completes on its first status read with deterministic accepted and executed
+counts. It is example/test behavior, not physical-machine evidence. The
+simulator example and public contract tests live in
 [`driveradapter/simulator`](../driveradapter/simulator/simulator.go) and
 [`driveradapter/contract_test.go`](../driveradapter/contract_test.go):
 
@@ -143,7 +158,7 @@ authentication, transfer and cancellation semantics, firmware variants, and
 licensing need verification first. Built-in GRBL-over-TCP remains limited to
 compatible GRBL endpoints; Wi-Fi does not imply protocol compatibility.
 
-The prototype does not yet integrate adapters with server/worker assignment,
-monitoring, sessions or leases; provide a dynamic plugin loader, distributed
-host installation, or operator workflow; or verify adapter reconnect/failure
-behavior end to end. Issue #15 remains open for those items and any UI evidence.
+The worker adapter path has end-to-end coverage for HTTP assignment, lease-bound
+completion, Start/Status failures, and no replay after failure. Broader reconnect
+and device lifecycle behavior, command-line registration, operator discovery
+and configuration UI, and hardware qualification remain open work for issue #15.
