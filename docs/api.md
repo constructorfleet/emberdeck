@@ -521,9 +521,10 @@ Example profile creation body (updates also include the expected `revision`):
 ## Static SVG import
 
 `POST /svg-import` accepts raw `image/svg+xml` bytes up to 1 MiB and returns
-normalized editable geometry; it does not save a project or assign machine
-operations. Import the returned paths into a version 2 project with the regular
-project endpoints. The root SVG must declare physical `width`, `height`, and
+normalized editable geometry plus `provenance` identifying the built-in importer
+and its version. It does not save the source or project, persist provenance, or
+assign machine operations. Import the returned paths into a version 2 project
+with the regular project endpoints. The root SVG must declare physical `width`, `height`, and
 `viewBox`; supported units are mm, cm, inches, points, picas, and CSS pixels.
 The viewport is mapped to lower-left-origin millimetres. A mismatched aspect ratio
 requires explicit `preserveAspectRatio="none"`.
@@ -555,6 +556,46 @@ Fill, stroke, colors, and SVG metadata never become laser operations. Imported
 geometry, including text strokes, starts unassigned; assign each object to an
 explicit operation layer before generating a job. Raster engraving is not
 implemented.
+
+## Importer interface (Go API)
+
+`importer` defines the version 1 Go extension point for converting source files
+into editable design data or candidate G-code jobs. It is distinct from process
+plugins, which run preflight checks, and driver adapters, which communicate
+with controllers.
+
+Implement `importer.Importer` with `Manifest()` and
+`Import(context.Context, Request)`. The manifest declares a stable importer ID
+and version, protocol version, source formats (IDs, extensions, and media
+types), output types, and an optional JSON options schema. Construct an
+`importer.Registry` from trusted implementations; `List` returns defensive
+copies of the capabilities, and `Import` selects an importer by ID and output
+type. Version 1 defines `editable_design` and `gcode_job` outputs.
+
+The registry limits source bytes to 1 MiB, options to 1 MiB, and JSON result
+payloads to 4 MiB. It validates formats and output types, and attaches importer
+ID/version, selected source format, and options to result provenance. Importers
+validate options against their schema, return actionable errors, and honor
+context cancellation. Warnings can mark a transformation as lossy.
+
+The registry is an in-process Go extension point. Implementations are trusted
+code running with the server's permissions; they are not sandboxed. The registry
+does not fetch external resources or extract archives. Importers must bound
+resource use and reject active or external content unless a future contract
+supports it. A `gcode_job` result is only a candidate: the host must apply the
+normal program validation, profile review, preview, and operator confirmation
+before saving or dispatching it. Importing never starts a machine.
+
+The first adapter is `svgimport.Importer`, advertising `.svg`/
+`image/svg+xml` input and `editable_design` output. It has no conversion options.
+The existing `POST /svg-import` endpoint invokes it and returns normalized
+unassigned geometry with importer ID/version provenance. The designer already
+previews and saves this geometry to a project; desktop and mobile screenshots
+are in the [operator guide](operator-guide.md#create-a-multi-path-vector-project). The server
+currently registers only this built-in importer. Runtime loading or selection
+of third-party importers, source retention, and persistence of provenance with
+projects remain open work tracked by
+[#16](https://github.com/constructorfleet/emberdeck/issues/16).
 
 ## Editable design projects
 
