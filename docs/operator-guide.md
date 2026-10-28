@@ -249,6 +249,13 @@ unassigned; no operation or machine settings are inferred.
 
 ![Editable rectangle project with declared workspace and laser-off approach endpoint](assets/screenshots/designer-project.png)
 
+An untouched new project says **Save the project to enable generation**. Once
+you change its values, the editor shows an unsaved-edits hint. The hint clears
+if you restore the saved values; a profile revision warning remains separate
+until the project is reviewed and saved against that revision.
+
+![Rectangle editor showing unsaved edits before the operator closes or replaces the project](assets/screenshots/designer-unsaved-changes.png)
+
 If a shape extends past the declared workspace, the editor explains the bounds
 error and disables both saving and generation until the dimensions are corrected.
 The preview keeps the full rectangle visible at its actual position and marks
@@ -262,6 +269,11 @@ Saved profiles and projects can be reopened, edited, and deleted. Editing a
 profile makes its projects require review against the new revision; save the
 project against the selected revision before generating. Deleting a referenced
 profile is blocked by the server.
+Closing a changed profile or project, opening another saved project, or starting
+a replacement project asks **Discard unsaved changes?** Choose **Cancel** to
+keep editing or confirm to discard the draft. The same guard applies to
+multi-path vector projects. Restoring the saved values removes the discard
+prompt. An untouched new project still needs to be saved before it can generate.
 While a profile editor is open, generation is disabled. Save or cancel those
 profile edits first; after saving a changed profile, review and save the project
 against its new revision before generating.

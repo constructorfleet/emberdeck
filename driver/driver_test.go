@@ -1588,6 +1588,24 @@ func (p *slowMovePeer) wireBytes() string {
 	return p.wire.String()
 }
 
+func (p *slowMovePeer) waitForStopSequence(timeout time.Duration) string {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		wire := p.wireBytes()
+		if strings.HasSuffix(wire, "!\x18") {
+			return wire
+		}
+		select {
+		case <-ticker.C:
+		case <-deadline.C:
+			return p.wireBytes()
+		}
+	}
+}
+
 func (p *slowMovePeer) serve() {
 	bytes := make(chan byte, 64)
 	go func() {
@@ -1805,7 +1823,7 @@ func TestStreamFailsClosedWhenRunProgressStopsWithoutAck(t *testing.T) {
 	if late := failedAt.Sub(frozenAt); late > timeouts.Liveness+600*time.Millisecond {
 		t.Fatalf("stalled Run failed %v after progress stopped; liveness bound is %v", late, timeouts.Liveness)
 	}
-	if wire := peer.wireBytes(); !strings.HasSuffix(wire, "!\x18") {
+	if wire := peer.waitForStopSequence(time.Second); !strings.HasSuffix(wire, "!\x18") {
 		t.Fatalf("stalled-Run wire = %q; want feed hold and soft reset", wire)
 	}
 }

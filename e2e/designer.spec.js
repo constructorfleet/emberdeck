@@ -76,7 +76,15 @@ test('operator saves a declared profile, edits a bounded rectangle, and reviews 
   await expect(page.locator('#stale-profile-warning')).toBeVisible();
   await expect(projectRowBeforeReview).toContainText('Needs review');
   await page.locator('#profile-select').evaluate((select) => { select.value = ''; });
+  const reopenDialog = new Promise((resolve) => {
+    page.once('dialog', async (dialog) => {
+      const message = dialog.message();
+      await dialog.accept();
+      resolve(message);
+    });
+  });
   await projectRowBeforeReview.getByRole('button', { name: `Reopen project ${projectName}` }).click();
+  expect(await reopenDialog).toBe('Discard unsaved changes?');
   await expect(page.locator('#designer-status')).toContainText(/switched.*profile/i);
   await expect(page.locator('#profile-select')).toHaveValue(await projectRowBeforeReview.getAttribute('data-profile-id'));
   await expect(page.getByRole('button', { name: 'Generate queued job' })).toBeDisabled();

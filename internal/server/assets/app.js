@@ -54,8 +54,11 @@
   let profiles = [];
   let projects = [];
   let editingProfile = null;
+  let profileDraftBaseline = null;
   let openProject = null;
+  let projectDraftBaseline = null;
   let openVectorProject = null;
+  let vectorDraftBaseline = null;
   let vectorObjects = [];
   let vectorOperations = [];
   let selectedVectorObject = "";
@@ -212,8 +215,11 @@
     profiles = [];
     projects = [];
     editingProfile = null;
+    profileDraftBaseline = null;
     openProject = null;
+    projectDraftBaseline = null;
     openVectorProject = null;
+    vectorDraftBaseline = null;
     shownJobID = "";
     pendingAction = null;
     if (actionDialog.open) actionDialog.close();
@@ -441,6 +447,7 @@
   }
 
   function beginProfileEdit(profile = null) {
+    if (!$("#profile-form").hidden && profileDraftIsDirty() && !confirmDiscardChanges()) return;
     editingProfile = profile;
     $("#profile-form").hidden = false;
     $("#profile-form-title").textContent = profile ? `Edit ${profile.name}` : "New declared profile";
@@ -448,6 +455,22 @@
     $("#profile-min-s").value = "0";
     $("#profile-form").scrollIntoView({ behavior: "smooth", block: "nearest" });
     $(profileFields.name).focus();
+    profileDraftBaseline = JSON.stringify(profilePayload());
+    updateProjectValidation();
+  }
+
+  function profileDraftIsDirty() {
+    return profileDraftBaseline !== null && JSON.stringify(profilePayload()) !== profileDraftBaseline;
+  }
+
+  function confirmDiscardChanges() {
+    return window.confirm("Discard unsaved changes?");
+  }
+
+  function closeProfileEdit() {
+    if (profileDraftIsDirty() && !confirmDiscardChanges()) return;
+    $("#profile-form").hidden = true;
+    profileDraftBaseline = null;
     updateProjectValidation();
   }
 
@@ -475,6 +498,18 @@
       current.rectangle.width_mm === savedRectangle.width_mm && current.rectangle.height_mm === savedRectangle.height_mm &&
       current.operation.type === savedOperation.type && current.operation.feed_mm_min === savedOperation.feed_mm_min &&
       current.operation.power_percent === savedOperation.power_percent;
+  }
+
+  function projectFormState() {
+    const fields = ["name", "x_mm", "y_mm", "width_mm", "height_mm", "feed_mm_min", "power_percent"];
+    return JSON.stringify({
+      profile_id: selectedProfile()?.id || "",
+      values: fields.map((key) => $(projectFields[key]).value),
+    });
+  }
+
+  function projectDraftIsDirty() {
+    return projectDraftBaseline !== null && projectFormState() !== projectDraftBaseline;
   }
 
   function decimalPlacesAtMostThree(raw) {
@@ -555,6 +590,7 @@
     const warning = $("#project-validation");
     const stale = Boolean(openProject && profile && (openProject.profile_id !== profile.id || openProject.profile_revision !== profile.revision));
     const matchesSaved = matchesSavedProject(profile);
+    const dirty = projectDraftIsDirty();
     const profileDraftOpen = !$("#profile-form").hidden;
     $("#stale-profile-warning").hidden = !stale;
     $("#profile-save-hint").hidden = !profileDraftOpen || !openProject;
@@ -565,12 +601,17 @@
     warning.hidden = !error;
     const valuesReady = !error && Boolean($(projectFields.name).value.trim());
     $("#project-form").querySelector('button[type="submit"]').disabled = !valuesReady;
-    $("#project-save-hint").hidden = matchesSaved || !$(projectFields.name).value.trim();
+    const projectSaveHint = $("#project-save-hint");
+    projectSaveHint.hidden = !dirty && Boolean(openProject);
+    projectSaveHint.textContent = !openProject && !dirty
+      ? "Save the project to enable generation"
+      : "Save changes before generating; the preview has unsaved edits.";
     $("#generate-project").disabled = !valuesReady || !openProject || stale || !matchesSaved || profileDraftOpen;
     renderPreview(profile);
   }
 
-  function fillProject(project) {
+  function fillProject(project, discardConfirmed = false) {
+    if (!$("#project-form").hidden && projectDraftIsDirty() && !discardConfirmed && !confirmDiscardChanges()) return false;
     openProject = project;
     $("#project-form").hidden = false;
     $("#project-form-title").textContent = project ? `Edit ${project.name}` : "New rectangle project";
@@ -582,21 +623,24 @@
     $(projectFields.height_mm).value = String(rect.height_mm);
     $(projectFields.feed_mm_min).value = String(project ? project.operation.feed_mm_min : 600);
     $(projectFields.power_percent).value = String(project ? project.operation.power_percent : 25);
+    projectDraftBaseline = projectFormState();
     $("#delete-project").hidden = !project;
     $("#stale-profile-warning").hidden = true;
     updateProjectValidation();
+    return true;
   }
 
   function openSavedProject(id) {
     const project = projects.find((candidate) => candidate.id === id);
     if (!project) return;
+    if (!$("#project-form").hidden && projectDraftIsDirty() && !confirmDiscardChanges()) return;
     const profile = profiles.find((candidate) => candidate.id === project.profile_id);
     const priorProfile = $("#profile-select").value;
     if (profile) {
       $("#profile-select").value = profile.id;
       if (priorProfile !== profile.id) setDesignerStatus(`Switched to profile ${profile.name} to reopen ${project.name}.`);
     }
-    fillProject(project);
+    fillProject(project, true);
     $("#project-form").scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
@@ -627,6 +671,7 @@
       $("#delete-project").hidden = false;
       await refreshDesigner();
       openProject = projects.find((project) => project.id === saved.id) || saved;
+      projectDraftBaseline = projectFormState();
       updateProjectValidation();
       notify("success", "Project saved.");
     } catch (error) { setDesignerError(error.message); }
@@ -1077,6 +1122,15 @@
     });
   }
 
+  function vectorDraftIsDirty(profile = selectedProfile()) {
+    return vectorDraftBaseline !== null && Boolean(profile) && vectorFormState(profile) !== vectorDraftBaseline;
+  }
+
+  function vectorFormState(profile) {
+    const { profile_revision: _profileRevision, ...editableState } = currentVectorPayload(profile);
+    return JSON.stringify(editableState);
+  }
+
   function updateVectorValidation() {
     if ($("#vector-form").hidden) return;
     const selectedObject = vectorObjects.find((candidate) => candidate.id === selectedVectorObject);
@@ -1098,9 +1152,13 @@
     const saveButton = $("#vector-form").querySelector('button[type="submit"]');
     saveButton.disabled = Boolean(error) || !$("#profile-form").hidden;
     const complete = vectorObjects.every((object) => object.operation_id && vectorOperations.some((operation) => operation.id === object.operation_id));
-    const matches = vectorMatchesSaved(profile);
-    $("#vector-save-hint").hidden = matches;
-    $("#generate-vector-project").disabled = Boolean(error) || !openVectorProject || stale || !matches || !complete || !$("#profile-form").hidden;
+    const dirty = vectorDraftIsDirty(profile);
+    const vectorSaveHint = $("#vector-save-hint");
+    vectorSaveHint.hidden = !dirty && Boolean(openVectorProject);
+    vectorSaveHint.textContent = !openVectorProject && !dirty
+      ? "Save the project to enable generation"
+      : "Save changes before generating. Generation only queues a job; use the existing explicit Start control after reviewing it.";
+    $("#generate-vector-project").disabled = Boolean(error) || !openVectorProject || stale || dirty || !complete || !$("#profile-form").hidden;
     renderVectorPreview(profile);
   }
 
@@ -1110,7 +1168,8 @@
     updateVectorValidation();
   }
 
-  function fillVectorProject(project = null) {
+  function fillVectorProject(project = null, discardConfirmed = false) {
+    if (!$("#vector-form").hidden && vectorDraftIsDirty() && !discardConfirmed && !confirmDiscardChanges()) return false;
     openVectorProject = project;
     vectorObjects = project ? project.objects.map((object) => ({ ...object, text: object.text ? { ...object.text } : undefined, kind: objectKind(object), transform: object.transform ? { ...object.transform } : undefined, subpaths: object.subpaths.map((path) => ({ ...path, points: path.points.map((point) => ({ ...point })) })) })) : [];
     vectorObjects.forEach((object) => {
@@ -1124,7 +1183,9 @@
     $("#vector-name").value = project ? project.name : "Untitled vector design";
     $("#vector-form-title").textContent = project ? `Edit ${project.name}` : "New multi-path vector project";
     $("#delete-vector-project").hidden = !project;
+    vectorDraftBaseline = vectorFormState(selectedProfile());
     renderVectorEditor();
+    return true;
   }
 
   async function addVectorShape(type) {
@@ -1245,13 +1306,14 @@
       }
       const actions = document.createElement("div"); actions.className = "designer-actions";
       const reopen = button("Reopen", "button button-small", () => {
+        if (!$("#vector-form").hidden && vectorDraftIsDirty() && !confirmDiscardChanges()) return;
         const profile = profiles.find((candidate) => candidate.id === project.profile_id);
         const priorProfile = $("#profile-select").value;
         if (profile) {
           $("#profile-select").value = profile.id;
           if (priorProfile !== profile.id) setDesignerStatus(`Switched to profile ${profile.name} to reopen ${project.name}.`);
         }
-        fillVectorProject(project);
+        fillVectorProject(project, true);
         $("#vector-form").scrollIntoView({ behavior: "smooth", block: "nearest" });
       }, `Reopen vector project ${project.name}`);
       reopen.disabled = !serverAvailable;
@@ -1276,6 +1338,7 @@
       openVectorProject = projects.find((project) => project.id === saved.id) || saved;
       vectorObjects = openVectorProject.objects.map((object) => ({ ...object, kind: objectKind(object), transform: object.transform ? { ...object.transform } : undefined }));
       vectorOperations = openVectorProject.operations.map((operation) => ({ ...operation }));
+      vectorDraftBaseline = vectorFormState(selectedProfile());
       $("#vector-form-title").textContent = `Edit ${saved.name}`;
       $("#delete-vector-project").hidden = false;
       renderVectorEditor();
@@ -1307,7 +1370,7 @@
 
   $("#new-profile").addEventListener("click", () => beginProfileEdit());
   $("#edit-profile").addEventListener("click", () => beginProfileEdit(selectedProfile()));
-  $("#cancel-profile").addEventListener("click", () => { $("#profile-form").hidden = true; updateProjectValidation(); });
+  $("#cancel-profile").addEventListener("click", closeProfileEdit);
   $("#profile-select").addEventListener("change", () => { if (!$("#project-form").hidden) updateProjectValidation(); });
   $("#profile-select").addEventListener("change", updateVectorValidation);
   $("#profile-form").addEventListener("submit", async (event) => {
@@ -1319,6 +1382,7 @@
       await refreshDesigner();
       $("#profile-select").value = saved.id;
       $("#profile-form").hidden = true;
+      profileDraftBaseline = null;
       if (!$("#project-form").hidden) updateProjectValidation();
       if (!$("#vector-form").hidden) updateVectorValidation();
       notify("success", "Profile saved. Confirm it matches the prepared machine before use.");
@@ -1338,7 +1402,12 @@
   $("#project-form").addEventListener("submit", saveProject);
   $("#project-form").addEventListener("input", updateProjectValidation);
   $("#project-form").addEventListener("change", updateProjectValidation);
-  $("#cancel-project").addEventListener("click", () => { openProject = null; $("#project-form").hidden = true; });
+  $("#cancel-project").addEventListener("click", () => {
+    if (projectDraftIsDirty() && !confirmDiscardChanges()) return;
+    openProject = null;
+    projectDraftBaseline = null;
+    $("#project-form").hidden = true;
+  });
   $("#delete-project").addEventListener("click", () => { if (openProject) deleteProject(openProject.id, openProject.name); });
   $("#generate-project").addEventListener("click", generateProject);
   $("#new-vector-project").addEventListener("click", () => fillVectorProject());
@@ -1395,7 +1464,12 @@
       renderVectorEditor();
     } else updateVectorValidation();
   });
-  $("#close-vector-project").addEventListener("click", () => { openVectorProject = null; $("#vector-form").hidden = true; });
+  $("#close-vector-project").addEventListener("click", () => {
+    if (vectorDraftIsDirty() && !confirmDiscardChanges()) return;
+    openVectorProject = null;
+    vectorDraftBaseline = null;
+    $("#vector-form").hidden = true;
+  });
   $("#delete-vector-project").addEventListener("click", () => { if (openVectorProject) deleteVectorProject(openVectorProject.id, openVectorProject.name); });
   $("#generate-vector-project").addEventListener("click", generateVectorProject);
 

@@ -210,6 +210,12 @@ async function main() {
     await page.getByRole('button', { name: 'Save project' }).click();
     await expect(page.locator('#notice .notice-message')).toContainText('Project saved');
     await captureElement(page, '#project-form', 'designer-project.png');
+    await page.locator('#rect-x').fill('11');
+    await expect(page.locator('#project-save-hint')).toContainText('unsaved edits');
+    await captureElement(page, '#project-form', 'designer-unsaved-changes.png');
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.getByRole('button', { name: 'Close editor' }).click();
+    await page.getByRole('button', { name: 'Reopen project Panel outline' }).click();
     await page.locator('#rect-x').fill('290');
     await expect(page.locator('#project-validation')).toContainText(/outside the declared workspace/i);
     await expect(page.locator('#project-preview .engrave-path.out-of-bounds')).toHaveCount(1);
@@ -348,6 +354,8 @@ async function main() {
     await page.setViewportSize({ width: 375, height: 812 });
     await captureElement(page, '#vector-text-fields', 'designer-monoline-text-mobile.png');
     await page.setViewportSize({ width: 1440, height: 1000 });
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.locator('#close-vector-project').click();
     await page.getByRole('button', { name: 'New vector project' }).click();
     await page.locator('#vector-name').fill('Three shapes, two operations');
     await page.getByRole('button', { name: 'Add rectangle' }).click();
@@ -363,6 +371,8 @@ async function main() {
     await page.setViewportSize({ width: 375, height: 812 });
     await captureElement(page, '#vector-align-controls', 'designer-vector-alignment-mobile.png');
     await page.setViewportSize({ width: 1440, height: 1000 });
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.locator('#close-vector-project').click();
     await page.getByRole('button', { name: 'New vector project' }).click();
     await page.locator('#vector-name').fill('Imported SVG paths');
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="90mm" height="55mm" viewBox="0 0 90 55"><g id="outer" transform="translate(5 2)"><g id="inner" transform="translate(5 0)"><path d="M10 45 L35 45 L35 25 L10 25 Z" transform="translate(2 0)"/><path d="M50 45 C58 25 72 25 80 45"/></g></g><text x="8" y="18" font-family="emberdeck-stick-v1" font-size="12">DECK 42</text></svg>`;
@@ -375,6 +385,7 @@ async function main() {
     await captureElement(page, '#vector-object-list', 'designer-svg-import-mobile.png');
     await captureElement(page, '#vector-preview', 'designer-svg-import-preview-mobile.png');
     await page.setViewportSize({ width: 1440, height: 1000 });
+    page.once('dialog', (dialog) => dialog.accept());
     await page.locator('#close-vector-project').click();
     const vectorProject = page.locator('#vector-project-list li').filter({ hasText: 'Three shapes, two operations' });
     page.once('dialog', (dialog) => dialog.accept());
