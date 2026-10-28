@@ -135,6 +135,7 @@ func StreamControlled(ctx context.Context, conn io.ReadWriteCloser, program stri
 	}
 	applyPause := func() error {
 		gate, pauseSent, pauseConfirmed = true, true, false
+		resumeRequested, resuming = false, false
 		controlDeadline = time.Now().Add(responseTimeout)
 		controllerTouched = true
 		if queryOutstanding {

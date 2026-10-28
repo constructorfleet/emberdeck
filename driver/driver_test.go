@@ -734,7 +734,7 @@ resumed:
 }
 
 func TestStreamControlledNewPauseCancelsUnconfirmedResume(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 	client, machine := net.Pipe()
 	defer client.Close()
@@ -742,8 +742,9 @@ func TestStreamControlledNewPauseCancelsUnconfirmedResume(t *testing.T) {
 	commands := make(chan Command, 1)
 	done := make(chan error, 1)
 	states := make(chan string, 16)
+	applied := make(chan Command, 8)
 	go func() {
-		done <- StreamControlled(ctx, client, "G1 X1\nG1 X2", commands, nil, func(state string) { states <- state })
+		done <- StreamControlled(ctx, client, "G1 X1\nG1 X2", commands, nil, func(state string) { states <- state }, func(cmd Command) { applied <- cmd })
 	}()
 	reader := bufio.NewReader(machine)
 	readByte := func() byte {
@@ -779,6 +780,40 @@ func TestStreamControlledNewPauseCancelsUnconfirmedResume(t *testing.T) {
 			}
 		}
 	}
+	waitApplied := func(want Command) {
+		t.Helper()
+		select {
+		case got := <-applied:
+			if got != want {
+				t.Fatalf("applied control = %q, want %q", got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("control %q was not applied", want)
+		}
+	}
+	respondUntilState := func(report, want string) {
+		t.Helper()
+		deadline := time.Now().Add(time.Second)
+		for {
+			select {
+			case state := <-states:
+				if state == want {
+					return
+				}
+			default:
+			}
+			machine.SetReadDeadline(deadline)
+			got, err := reader.ReadByte()
+			machine.SetReadDeadline(time.Time{})
+			if err != nil {
+				t.Fatalf("waiting for fresh %s report: %v", want, err)
+			}
+			if got != '?' {
+				t.Fatalf("wire byte %q while waiting for fresh %s report", got, want)
+			}
+			io.WriteString(machine, "<"+report+"|MPos:0,0,0>\r\n")
+		}
+	}
 	waitCommand := func(want byte, report string) {
 		t.Helper()
 		deadline := time.Now().Add(time.Second)
@@ -804,47 +839,103 @@ func TestStreamControlledNewPauseCancelsUnconfirmedResume(t *testing.T) {
 	readLine("G1 X1\n")
 	commands <- Pause
 	waitCommand('!', "Run")
+	waitApplied(Pause)
 	waitCommand('?', "Hold:0")
 	io.WriteString(machine, "ok\r\n<Hold:0|MPos:0,0,0>\r\n")
 	waitState("Hold:0")
 
 	commands <- Resume
 	waitCommand('~', "Hold:0")
+	waitApplied(Resume)
 	waitCommand('?', "Hold:0")
 	io.WriteString(machine, "<Hold:0|MPos:0,0,0>\r\n")
 	waitState("Hold:0") // still decelerated/held; Resume has not been confirmed
 
+	for len(states) > 0 {
+		<-states
+	}
 	commands <- Pause
 	waitCommand('!', "Hold:0")
-	waitCommand('?', "Hold:0")
-	io.WriteString(machine, "<Hold:0|MPos:0,0,0>\r\n")
-	waitState("Hold:0")
+	waitApplied(Pause)
+	respondUntilState("Hold:0", "Hold:0")
 	waitCommand('?', "Idle")
 	io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
-	select {
-	case err := <-done:
-		t.Fatalf("stream finished on Idle without a new Resume: %v", err)
-	case <-time.After(100 * time.Millisecond):
-	}
-	if got := readByte(); got == '?' {
-		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+	deadline := time.Now().Add(900 * time.Millisecond)
+	for {
 		select {
 		case err := <-done:
 			t.Fatalf("stream finished on repeated Idle without a new Resume: %v", err)
-		case <-time.After(100 * time.Millisecond):
+		default:
 		}
-	} else {
-		t.Fatalf("wire byte %q; source line escaped the new pause gate", got)
+		machine.SetReadDeadline(deadline)
+		got, err := reader.ReadByte()
+		machine.SetReadDeadline(time.Time{})
+		if err != nil {
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				break
+			}
+			t.Fatalf("read while checking new pause gate: %v", err)
+		}
+		if got != '?' {
+			t.Fatalf("wire byte %q; source line escaped the new pause gate", got)
+		}
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
 	}
 
-	cancel()
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Fatal("stream returned nil after cancellation")
+	for len(states) > 0 {
+		<-states
+	}
+	commands <- Resume
+	waitCommand('~', "Hold:0")
+	waitApplied(Resume)
+	for {
+		got := readByte()
+		if got == '?' {
+			io.WriteString(machine, "<Run|MPos:0,0,0>\r\n")
+			continue
 		}
-	case <-time.After(time.Second):
-		t.Fatal("stream did not stop after cancellation")
+		if got != 'G' {
+			t.Fatalf("wire byte %q after explicit Resume; want source line", got)
+		}
+		rest, err := reader.ReadString('\n')
+		if err != nil || "G"+rest != "G1 X2\n" {
+			t.Fatalf("resumed source = %q, %v", "G"+rest, err)
+		}
+		break
+	}
+
+	io.WriteString(machine, "ok\r\n")
+	readLine("M5\n")
+	io.WriteString(machine, "ok\r\n")
+	for {
+		machine.SetReadDeadline(time.Now().Add(time.Second))
+		got, err := reader.ReadByte()
+		machine.SetReadDeadline(time.Time{})
+		if err != nil {
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatalf("stream after final Idle: %v", err)
+				}
+				return
+			case <-ctx.Done():
+				t.Fatalf("stream did not finish after final Idle: %v", ctx.Err())
+			}
+		}
+		if got != '?' {
+			t.Fatalf("unexpected wire byte after cleanup: %q", got)
+		}
+		io.WriteString(machine, "<Idle|MPos:0,0,0>\r\n")
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("stream after explicit resume: %v", err)
+			}
+			return
+		case <-ctx.Done():
+			t.Fatalf("stream did not finish after explicit resume: %v", ctx.Err())
+		default:
+		}
 	}
 }
 
