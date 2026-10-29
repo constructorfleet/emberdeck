@@ -11,8 +11,8 @@ on:
       - 'docs/deployment.md'
       - 'scripts/container-smoke.py'
       - 'scripts/tests/test_container_smoke.py'
-      - 'scripts/docker_pty_permission_smoke.py'
-      - 'scripts/tests/test_docker_pty_permission_smoke.py'
+      - 'scripts/docker_device_permission_smoke.py'
+      - 'scripts/tests/test_docker_device_permission_smoke.py'
       - 'scripts/lxc_install_smoke.py'
       - 'scripts/tests/test_lxc_install_smoke.py'
       - 'scripts/release_install_smoke.py'
@@ -177,8 +177,8 @@ jobs:
             --previous-version "$PREVIOUS" \
             --current-image "ghcr.io/constructorfleet/emberdeck:$CURRENT" \
             --current-version "$CURRENT"
-      - name: Verify Linux Docker PTY permissions
-        run: python3 scripts/docker_pty_permission_smoke.py
+      - name: Verify Linux Docker device permissions
+        run: python3 scripts/docker_device_permission_smoke.py
 
   lxc-feasibility:
     if: github.event_name != 'pull_request'
