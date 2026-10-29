@@ -290,12 +290,17 @@ CLI can select serial ports, but LXC USB/serial passthrough must be configured
 by the host administrator before a worker can open a device.
 
 The scheduled/manual [published install workflow](../.github/workflows/published-install-validation.yml)
-boots an Ubuntu system guest with classic LXC on GitHub's Ubuntu runner and
-checks systemd and journald. [Run 40958394426](https://github.com/constructorfleet/emberdeck/actions/runs/40958394426)
-passed on 2026-10-29 with LXC 5.0.3 and cgroup v2; Ubuntu Noble reached systemd
-state `running`, and `systemd-journald` was active. This is a feasibility check
-for that runner; it does not qualify every LXC host, the EmberDeck
-install/upgrade flow inside a guest, host autostart, or serial passthrough.
+installs the two newest published Linux binaries and the server/driver systemd
+units inside an Ubuntu system guest with classic LXC. It verifies checksums,
+first-start authentication, a worker-scoped simulated dispatch, upgrade and job
+persistence, server and driver crash restarts, service startup after guest
+stop/start, and uninstall while retaining saved data. [Run
+40960601096](https://github.com/constructorfleet/emberdeck/actions/runs/40960601096)
+passed on 2026-10-29 for `v0.17.0` to `v0.18.0` using LXC 5.0.3 and cgroup v2;
+Ubuntu Noble reached systemd state `running`, and `systemd-journald` was active.
+The driver uses `-simulate`, so this does not verify serial permissions or
+controller behavior. It also does not qualify every LXC host, Raspberry Pi OS,
+host LXC autostart, or physical hardware.
 
 ### Uninstall a Linux or LXC systemd install
 
