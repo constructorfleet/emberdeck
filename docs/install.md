@@ -95,10 +95,13 @@ uninstall with data retained. [Run
 40960601096](https://github.com/constructorfleet/emberdeck/actions/runs/40960601096)
 passed for `v0.17.0` to `v0.18.0` on LXC 5.0.3 with cgroup v2. The driver uses
 `-simulate`, so this is not serial or physical controller evidence, and guest
-stop/start does not verify host LXC autostart. Raspberry Pi OS, serial device
-permissions, Windows COM ports, and macOS serial devices still need recorded
-platform runs; simulator and fake-controller results are not physical hardware
-evidence.
+stop/start does not verify host LXC autostart. The workflow also verifies that
+the fixture is selected by `lxc-autostart --list` and that a host
+`lxc-autostart` dispatch starts it with systemd running. This exercises the
+host command path but does not reboot the runner or verify LXC service boot
+integration. Raspberry Pi OS, serial device permissions, Windows COM ports, and
+macOS serial devices still need recorded platform runs; simulator and
+fake-controller results are not physical hardware evidence.
 
 ## Build from source
 

@@ -115,6 +115,39 @@ class PublishedLxcInstallSmokeTests(unittest.TestCase):
             drivers[1],
         )
 
+    def test_host_autostart_selection_requires_the_configured_container(self):
+        listed = subprocess.CompletedProcess([], 0, stdout="other\nsmoke-guest\n", stderr="")
+        with patch.object(lxc_install_smoke.subprocess, "run", return_value=listed) as run:
+            lxc_install_smoke.assert_host_autostart_selected("smoke-guest")
+        run.assert_called_once_with(
+            ["sudo", "lxc-autostart", "--list"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+
+    def test_host_autostart_selection_fails_when_container_is_not_listed(self):
+        listed = subprocess.CompletedProcess([], 0, stdout="other\n", stderr="")
+        with (
+            patch.object(lxc_install_smoke.subprocess, "run", return_value=listed),
+            self.assertRaisesRegex(RuntimeError, "smoke-guest is not selected by host LXC autostart"),
+        ):
+            lxc_install_smoke.assert_host_autostart_selected("smoke-guest")
+
+    def test_host_autostart_dispatch_starts_selected_guest_and_systemd(self):
+        with (
+            patch.object(lxc_install_smoke.subprocess, "run") as run,
+            patch.object(lxc_install_smoke, "lxc_state", return_value="RUNNING"),
+            patch.object(lxc_install_smoke, "guest_text", return_value="running"),
+            patch.object(lxc_install_smoke, "wait_for", side_effect=lambda _, predicate, timeout: predicate()),
+        ):
+            lxc_install_smoke.start_host_autostart("smoke-guest")
+
+        run.assert_called_once_with(
+            ["sudo", "lxc-autostart"], capture_output=True, text=True, timeout=120, check=True
+        )
+
     def test_cli_wires_published_binary_paths_checksums_and_versions(self):
         argv = [
             "--container", "guest",

@@ -273,6 +273,33 @@ def lxc_state(container: str) -> str:
     return output.split()[-1] if output else ""
 
 
+def assert_host_autostart_selected(container: str) -> None:
+    result = subprocess.run(
+        ["sudo", "lxc-autostart", "--list"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+    selected = {line.split()[0] for line in result.stdout.splitlines() if line.split()}
+    if container not in selected:
+        raise RuntimeError(f"{container} is not selected by host LXC autostart: {result.stdout!r}")
+
+
+def start_host_autostart(container: str) -> None:
+    subprocess.run(
+        ["sudo", "lxc-autostart"], capture_output=True, text=True, timeout=120, check=True
+    )
+    wait_for(f"host LXC autostart to start {container}", lambda: lxc_state(container) == "RUNNING", timeout=60)
+
+    def systemd_running():
+        state = guest_text(container, "systemctl", "is-system-running", check=False)
+        return state if state in ("running", "degraded") else False
+
+    state = wait_for(f"systemd after host LXC autostart for {container}", systemd_running, timeout=45)
+    print(f"PASS host LXC autostart dispatch: {container} running with systemd {state}")
+
+
 def stop_start_guest(container: str) -> None:
     subprocess.run(["sudo", "lxc-stop", "--name", container, "--kill"], check=True, timeout=30)
     subprocess.run(["sudo", "lxc-start", "--name", container, "--daemon"], check=True, timeout=30)
@@ -404,9 +431,14 @@ def run_lxc_install_smoke(container: str, previous_binary: pathlib.Path, previou
     guest(container, "systemctl", "daemon-reload")
     guest(container, "test", "-s", "/var/lib/emberdeck/jobs.json")
     guest(container, "test", "-s", "/var/lib/emberdeck/credentials.json")
+    subprocess.run(["sudo", "lxc-stop", "--name", container, "--kill"], check=True, timeout=30)
+    if lxc_state(container) != "STOPPED":
+        raise RuntimeError(f"{container} did not stop before host LXC autostart test")
+    assert_host_autostart_selected(container)
+    start_host_autostart(container)
     print(
         f"PASS LXC published install smoke: {previous_version} -> {current_version}; "
-        "auth, simulated dispatch, crash restart, guest reboot persistence, and uninstall"
+        "auth, simulated dispatch, crash restart, guest reboot persistence, uninstall, and host autostart dispatch"
     )
 
 

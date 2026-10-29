@@ -310,6 +310,11 @@ passed on 2026-10-29. This does not boot Raspberry Pi OS or qualify Pi-specific
 services, serial permissions, GPIO, USB devices, or physical hardware. See the
 [install validation scope](install.md#published-install-checks).
 
+The LXC smoke also checks that the fixture is selected by the host's
+`lxc-autostart --list` and that a host `lxc-autostart` dispatch starts it with
+systemd running. This does not reboot the host or verify its LXC service boot
+integration.
+
 ### Uninstall a Linux or LXC systemd install
 
 Run these commands on the Linux host, or inside the guest for an LXC install.
