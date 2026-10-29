@@ -56,6 +56,36 @@ services:
       - -tcp
       - ${EMBERDECK_CONTROLLER_TCP:-}
 
+  # Linux serial worker. Map the host device and its numeric group explicitly;
+  # see docs/deployment.md#docker-compose for setup and platform limits.
+  serial-driver:
+    profiles: ["serial"]
+    build: .
+    image: ${EMBERDECK_SERIAL_IMAGE:-emberdeck:local}
+    restart: always
+    environment:
+      EMBERDECK_API_KEY: ${EMBERDECK_DRIVER_API_KEY:-not-configured}
+      EMBERDECK_LOG_LEVEL: ${EMBERDECK_LOG_LEVEL:-info}
+      EMBERDECK_LOG_FORMAT: ${EMBERDECK_LOG_FORMAT:-text}
+    group_add:
+      - ${EMBERDECK_SERIAL_GID:-65534}
+    devices:
+      - ${EMBERDECK_SERIAL_DEVICE:-/dev/emberdeck-serial-device}:${EMBERDECK_SERIAL_DEVICE:-/dev/emberdeck-serial-device}:rw
+    command:
+      - driver
+      - -server
+      - ${EMBERDECK_SERVER_URL:-http://emberdeck:8080}
+      - -id
+      - ${EMBERDECK_DRIVER_ID:-bench}
+      - -serial
+      - ${EMBERDECK_SERIAL_DEVICE:-/dev/emberdeck-serial-device}
+      - -baud
+      - ${EMBERDECK_SERIAL_BAUD:-115200}
+      - -serial-dtr
+      - ${EMBERDECK_SERIAL_DTR:-off}
+      - -serial-rts
+      - ${EMBERDECK_SERIAL_RTS:-off}
+
 volumes:
   emberdeck-data:
   emberdeck-demo-data:
