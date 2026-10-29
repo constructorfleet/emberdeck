@@ -267,6 +267,8 @@ jobs:
             *) exit 1 ;;
           esac
           sudo lxc-attach --name "$name" -- systemctl is-active systemd-journald
+          sudo lxc-attach --name "$name" -- apt-get update
+          sudo lxc-attach --name "$name" -- apt-get install --yes python3
           sudo python3 scripts/lxc_install_smoke.py \
             --container "$name" \
             --previous-binary "$RUNNER_TEMP/lxc-release-previous/emberdeck-linux-amd64" \

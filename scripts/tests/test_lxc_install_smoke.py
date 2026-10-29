@@ -148,6 +148,38 @@ class PublishedLxcInstallSmokeTests(unittest.TestCase):
             ["sudo", "lxc-autostart"], capture_output=True, text=True, timeout=120, check=True
         )
 
+    def test_proc_status_group_parser_returns_effective_supplementary_gids(self):
+        status = "Name:\temberdeck\nUid:\t998\t998\t998\t998\nGroups:\t998 20 985\n"
+        self.assertEqual(lxc_install_smoke.proc_group_ids(status), {"20", "998", "985"})
+
+    def test_service_must_have_dialout_as_effective_supplementary_group(self):
+        with (
+            patch.object(lxc_install_smoke, "main_pid", return_value=431),
+            patch.object(lxc_install_smoke, "guest_text", side_effect=["dialout:x:985:\n", "Groups:\t998 985\n"]) as guest_text,
+        ):
+            lxc_install_smoke.assert_service_supplementary_group("guest", "emberdeck-driver.service", "dialout")
+
+        self.assertEqual(guest_text.call_args_list[0], call("guest", "getent", "group", "dialout"))
+        self.assertEqual(guest_text.call_args_list[1], call("guest", "cat", "/proc/431/status"))
+
+    def test_service_group_check_fails_if_dialout_is_not_effective(self):
+        with (
+            patch.object(lxc_install_smoke, "main_pid", return_value=431),
+            patch.object(lxc_install_smoke, "guest_text", side_effect=["dialout:x:985:\n", "Groups:\t998\n"]),
+            self.assertRaisesRegex(RuntimeError, "emberdeck-driver.service process is missing dialout supplementary group"),
+        ):
+            lxc_install_smoke.assert_service_supplementary_group("guest", "emberdeck-driver.service", "dialout")
+
+    def test_dialout_pty_permission_probe_runs_inside_guest(self):
+        with patch.object(lxc_install_smoke, "guest") as guest:
+            lxc_install_smoke.verify_dialout_pty_permissions("guest")
+
+        args = guest.call_args.args
+        self.assertEqual(args[:3], ("guest", "python3", "-c"))
+        self.assertIn("pty.openpty()", args[3])
+        self.assertIn("systemd-run", args[3])
+        self.assertIn("SupplementaryGroups=dialout", args[3])
+
     def test_cli_wires_published_binary_paths_checksums_and_versions(self):
         argv = [
             "--container", "guest",
