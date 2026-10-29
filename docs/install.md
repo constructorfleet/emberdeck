@@ -78,10 +78,12 @@ validates published Docker images on an Ubuntu x86-64 runner. The separate
 [Container workflow](../.github/workflows/container.yml) builds from the current
 checkout and exercises local image behavior.
 
-These software checks do not qualify Raspberry Pi OS, serial device
-permissions, Windows COM ports, macOS serial devices, systemd reboot/crash
-behavior, or LXC. Those targets still need recorded platform runs; simulator
-and fake-controller results are not physical hardware evidence.
+The scheduled/manual published-install workflow also checks whether an Ubuntu
+system guest boots systemd under classic LXC on GitHub's Ubuntu runner. It does
+not run the EmberDeck installer inside that guest or verify LXC host autostart.
+Raspberry Pi OS, serial device permissions, Windows COM ports, macOS serial
+devices, and systemd reboot/crash behavior still need recorded platform runs;
+simulator and fake-controller results are not physical hardware evidence.
 
 ## Build from source
 
