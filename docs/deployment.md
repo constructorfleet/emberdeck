@@ -484,6 +484,13 @@ controller's state. Opening some serial devices can reset a controller. These
 steps expose the transport; they do not qualify a physical machine for use. See
 [Troubleshooting](troubleshooting.md#serial-permission-denied) if access is denied.
 
+The macOS CI check uses a native `/dev/ttys*` PTY and EmberDeck's production
+serial opener. It verifies DAC denial for `_www` and that the owning user gets
+past file access to the PTY's `ENOTTY` modem-control boundary. macOS denies
+creating test aliases inside `/dev`; this does not test real `/dev/cu.*` IOKit
+enumeration, USB adapter permissions, serial streaming, or physical controller
+behavior. Windows COM and Raspberry Pi OS evidence remain outstanding.
+
 ## Driver as a service
 
 A standalone `emberdeck driver` retries when idle, so a server upgrade or

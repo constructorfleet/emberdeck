@@ -99,9 +99,9 @@ stop/start does not verify host LXC autostart. The workflow also verifies that
 the fixture is selected by `lxc-autostart --list` and that a host
 `lxc-autostart` dispatch starts it with systemd running. This exercises the
 host command path but does not reboot the runner or verify LXC service boot
-integration. Raspberry Pi OS, serial device permissions, Windows COM ports, and
-macOS serial devices still need recorded platform runs; simulator and
-fake-controller results are not physical hardware evidence.
+integration. Raspberry Pi OS, Windows COM ports, and real macOS USB serial
+devices still need recorded platform runs; simulator and fake-controller
+results are not physical hardware evidence.
 
 [Run 40963463879](https://github.com/constructorfleet/emberdeck/actions/runs/40963463879)
 passed on 2026-10-29. Its LXC job installed `v0.17.0` then upgraded to
@@ -135,6 +135,13 @@ remaining platform limits. This does not establish serial streaming or
 controller support. [Container workflow run
 40972583163](https://github.com/constructorfleet/emberdeck/actions/runs/40972583163)
 passed the check on 2026-10-29.
+
+The macOS CI serial check runs EmberDeck's production opener against a native
+`/dev/ttys*` PTY. It checks that `_www` cannot open the mode-0600 device and
+that its owner reaches the post-open `ENOTTY` boundary. macOS denies creating
+test aliases inside `/dev`, so this verifies macOS filesystem permissions and
+the opener but not a real `/dev/cu.*` IOKit/USB device, serial streaming, modem
+behavior, or a physical controller.
 
 ## Build from source
 
