@@ -573,9 +573,19 @@ defaults DTR and RTS to off and supports `EMBERDECK_SERIAL_DTR` and
 `EMBERDECK_SERIAL_RTS` overrides. This profile targets Linux Docker/Compose
 device passthrough. Docker Desktop on macOS and Windows requires a platform
 specific serial-device bridge and is not qualified by this configuration. A
-successful Compose start only confirms the configured container command; it
-does not qualify USB enumeration, udev rules, modem-line behavior, or a
-physical controller. Retry logs appear in `docker compose logs -f serial-driver`.
+successful Compose start does not qualify USB enumeration, udev rules,
+modem-line behavior, or a physical controller. Retry logs appear in
+`docker compose logs -f serial-driver`.
+
+The CI [Container workflow](../.github/workflows/container.yml) checks that the
+profile resolves the configured device mapping, numeric group, worker key, and
+serial flags, then runs the built image through the profile with a harmless
+command override. [Run
+40970297714](https://github.com/constructorfleet/emberdeck/actions/runs/40970297714)
+passed. Its PTY diagnostic confirms that Linux PTYs return `ENOTTY` for the
+modem-line ioctl EmberDeck uses; the smoke does not claim a serial stream or
+GRBL protocol success. Physical serial, USB/udev, and modem-line qualification
+remain outstanding.
 
 To rotate a worker key, stop the worker and ensure it has no active job, revoke
 the old credential with `DELETE /api/v1/credentials/{id}`, create a new worker
