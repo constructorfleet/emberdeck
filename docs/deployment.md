@@ -300,7 +300,7 @@ passed on 2026-10-29 for `v0.17.0` to `v0.18.0` using LXC 5.0.3 and cgroup v2;
 Ubuntu Noble reached systemd state `running`, and `systemd-journald` was active.
 The driver uses `-simulate`, so this does not verify serial permissions or
 controller behavior. It also does not qualify every LXC host, Raspberry Pi OS,
-host LXC autostart, or physical hardware.
+host LXC service boot integration, or physical hardware.
 
 The same workflow also runs the published Linux ARM64 binary install smoke on
 an Ubuntu x86-64 runner with QEMU user-mode emulation. This verifies the ARM64
@@ -312,8 +312,10 @@ services, serial permissions, GPIO, USB devices, or physical hardware. See the
 
 The LXC smoke also checks that the fixture is selected by the host's
 `lxc-autostart --list` and that a host `lxc-autostart` dispatch starts it with
-systemd running. This does not reboot the host or verify its LXC service boot
-integration.
+systemd running. [Run
+40963463879](https://github.com/constructorfleet/emberdeck/actions/runs/40963463879)
+passed on 2026-10-29. This does not reboot the host or verify its LXC service
+boot integration.
 
 ### Uninstall a Linux or LXC systemd install
 

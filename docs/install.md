@@ -103,6 +103,10 @@ integration. Raspberry Pi OS, serial device permissions, Windows COM ports, and
 macOS serial devices still need recorded platform runs; simulator and
 fake-controller results are not physical hardware evidence.
 
+[Run 40963463879](https://github.com/constructorfleet/emberdeck/actions/runs/40963463879)
+passed on 2026-10-29. Its LXC job installed `v0.17.0` then upgraded to
+`v0.18.0` and reported host autostart selection/dispatch with systemd running.
+
 ## Build from source
 
 To build rather than download, install Go 1.27 and clone the repository:
