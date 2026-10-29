@@ -276,7 +276,8 @@ def assert_service_supplementary_group(container: str, unit: str, group_name: st
 
 
 def verify_dialout_pty_permissions(container: str) -> None:
-    guest(container, "python3", "-c", DIALOUT_PTY_PERMISSION_PROBE)
+    result = guest(container, "python3", "-c", DIALOUT_PTY_PERMISSION_PROBE)
+    print(result.stdout.strip())
 
 
 def wait_service_active(container: str, unit: str, timeout: float = 45) -> int:

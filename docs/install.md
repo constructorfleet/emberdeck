@@ -107,6 +107,16 @@ fake-controller results are not physical hardware evidence.
 passed on 2026-10-29. Its LXC job installed `v0.17.0` then upgraded to
 `v0.18.0` and reported host autostart selection/dispatch with systemd running.
 
+The Linux LXC smoke also verifies the running driver's effective `dialout`
+group and performs a positive/negative DAC check on a temporary pseudo-terminal
+owned by `root:dialout` with mode 0660. In [run
+40965092700](https://github.com/constructorfleet/emberdeck/actions/runs/40965092700),
+the PTY open was denied to the `emberdeck` identity without `dialout` and
+allowed through a transient systemd unit with `SupplementaryGroups=dialout`.
+This checks Linux group-based device-file access only. EmberDeck's serial
+transport does not open the PTY, which does not validate USB enumeration, udev
+rules, modem-bit ioctls, a controller, or physical serial access.
+
 ## Build from source
 
 To build rather than download, install Go 1.27 and clone the repository:

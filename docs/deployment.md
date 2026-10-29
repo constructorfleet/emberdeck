@@ -317,6 +317,15 @@ systemd running. [Run
 passed on 2026-10-29. This does not reboot the host or verify its LXC service
 boot integration.
 
+The same LXC run verifies the live driver process has the `dialout`
+supplementary GID and checks DAC access to a temporary `root:dialout` mode-0660
+PTY. The `emberdeck` identity is denied without that group and allowed through
+a transient systemd unit with `SupplementaryGroups=dialout`. [Run
+40965092700](https://github.com/constructorfleet/emberdeck/actions/runs/40965092700)
+passed this check. The test does not open the PTY through EmberDeck's serial
+transport, so USB enumeration, udev ownership, modem-bit ioctls, controller
+behavior, and physical serial access remain unverified.
+
 ### Uninstall a Linux or LXC systemd install
 
 Run these commands on the Linux host, or inside the guest for an LXC install.
