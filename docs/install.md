@@ -81,7 +81,8 @@ checkout and exercises local image behavior.
 
 The ARM64 run executes the published `emberdeck-linux-arm64` release asset and
 checks its checksum, version, authentication, simulated dispatch, upgrade, and
-data persistence. QEMU user-mode emulation does not boot an ARM64 kernel or
+data persistence. [Run 40961963400](https://github.com/constructorfleet/emberdeck/actions/runs/40961963400)
+passed on 2026-10-29. QEMU user-mode emulation does not boot an ARM64 kernel or
 Raspberry Pi OS and does not validate Pi-specific services, serial permissions,
 GPIO, USB devices, or physical hardware. Raspberry Pi OS still needs a recorded
 native install run.
