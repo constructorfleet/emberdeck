@@ -476,9 +476,10 @@ system. Windows names are typically `COM3`; macOS names often begin `/dev/cu.`.
 On Linux, the account running EmberDeck needs permission to open the device,
 commonly through the `dialout` group or a distribution-configured udev device
 group; restart its login session or service after changing group membership.
-Docker needs explicit `--device` or Compose `devices`
-plus appropriate group permissions; no device passthrough is configured by
-default. Select the reported port and verify the required baud rate and the
+Docker needs explicit `--device` or Compose `devices` plus appropriate group
+permissions; no device passthrough is configured by default. The Compose
+`serial` profile below maps a Linux serial device and its numeric supplementary
+group. Select the reported port and verify the required baud rate and the
 controller's state. Opening some serial devices can reset a controller. These
 steps expose the transport; they do not qualify a physical machine for use. See
 [Troubleshooting](troubleshooting.md#serial-permission-denied) if access is denied.
@@ -541,10 +542,40 @@ docker run --restart unless-stopped \
 ```
 
 `EMBERDECK_CONTROLLER_TCP` is required. Without it the worker exits with a
-usage error, and Compose keeps restarting it. For a serial controller, add the
-device and group to a Compose override, and replace the command's `-tcp` pair
-with `-serial` and the device path. Retry logs appear in
-`docker compose logs -f driver`.
+usage error, and Compose keeps restarting it. For a Linux serial controller,
+the `serial` profile configures the actual `driver -serial` command, Docker
+device mapping, and numeric supplementary group. Create a worker-scoped
+credential for the selected driver ID first, then set the host device and group
+ID. For example:
+
+```sh
+export EMBERDECK_DRIVER_API_KEY='the-one-time-worker-key-for-bench'
+export EMBERDECK_API_KEY='the-server-admin-key'
+export EMBERDECK_SERVER_URL=https://emberdeck.example.net
+export EMBERDECK_DRIVER_ID=bench
+export EMBERDECK_SERIAL_DEVICE=/dev/ttyUSB0
+export EMBERDECK_SERIAL_GID="$(stat -c '%g' "$EMBERDECK_SERIAL_DEVICE")"
+export EMBERDECK_SERIAL_BAUD=115200
+docker compose --profile serial up --build -d serial-driver
+docker compose logs -f serial-driver
+```
+
+Compose parses the whole file even when only `serial-driver` is selected, so
+`EMBERDECK_API_KEY` must also be set for interpolation; it is not passed to
+this worker. The serial profile has deliberately nonfunctional placeholder
+device, group, and key values when those variables are unset so ordinary
+non-serial Compose use remains valid. Set the serial variables above before
+starting this profile.
+
+The group ID must match the device's owning group on the Docker host; the host
+user or service manager must also have permission to access it. The profile
+defaults DTR and RTS to off and supports `EMBERDECK_SERIAL_DTR` and
+`EMBERDECK_SERIAL_RTS` overrides. This profile targets Linux Docker/Compose
+device passthrough. Docker Desktop on macOS and Windows requires a platform
+specific serial-device bridge and is not qualified by this configuration. A
+successful Compose start only confirms the configured container command; it
+does not qualify USB enumeration, udev rules, modem-line behavior, or a
+physical controller. Retry logs appear in `docker compose logs -f serial-driver`.
 
 To rotate a worker key, stop the worker and ensure it has no active job, revoke
 the old credential with `DELETE /api/v1/credentials/{id}`, create a new worker
