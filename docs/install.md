@@ -126,6 +126,14 @@ DAC group permissions for a generic character device. It does not exercise the
 published EmberDeck image, Compose serial configuration, PTY/devpts, USB/udev,
 serial transport, or physical hardware.
 
+The current-checkout Compose smoke separately runs EmberDeck's production
+serial opener against a disposable device. The serial worker reports
+`permission denied` without its numeric supplementary GID and reaches the
+post-open `ENOTTY` limit when the GID is supplied. See
+[Docker Compose serial setup](deployment.md#docker-compose) for the scope and
+remaining platform limits. This does not establish serial streaming or
+controller support.
+
 ## Build from source
 
 To build rather than download, install Go 1.27 and clone the repository:

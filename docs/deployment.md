@@ -577,15 +577,17 @@ successful Compose start does not qualify USB enumeration, udev rules,
 modem-line behavior, or a physical controller. Retry logs appear in
 `docker compose logs -f serial-driver`.
 
-The CI [Container workflow](../.github/workflows/container.yml) checks that the
-profile resolves the configured device mapping, numeric group, worker key, and
-serial flags, then runs the built image through the profile with a harmless
-command override. [Run
-40970297714](https://github.com/constructorfleet/emberdeck/actions/runs/40970297714)
-passed. Its PTY diagnostic confirms that Linux PTYs return `ENOTTY` for the
-modem-line ioctl EmberDeck uses; the smoke does not claim a serial stream or
-GRBL protocol success. Physical serial, USB/udev, and modem-line qualification
-remain outstanding.
+The CI [Container workflow](../.github/workflows/container.yml) checks the
+profile's resolved device mapping, numeric group, worker key, and serial flags,
+then starts the server and a worker with a temporary mode-0660 character
+device. The first run omits the device GID and expects `permission denied`; the
+second adds the configured GID and verifies EmberDeck's serial opener gets past
+device access and reaches the expected `ENOTTY` termios boundary on the
+`/dev/null`-backed device. This exercises Linux Compose device mapping and the
+production serial opener through DAC. It does not test a serial stream, GRBL
+protocol, USB/udev, modem-line behavior on a controller, or physical hardware.
+Windows COM, macOS serial devices, and Raspberry Pi OS still need recorded
+platform runs.
 
 To rotate a worker key, stop the worker and ensure it has no active job, revoke
 the old credential with `DELETE /api/v1/credentials/{id}`, create a new worker
