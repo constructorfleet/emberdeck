@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import grp
 import os
 import subprocess
 import sys
@@ -67,6 +66,8 @@ def assert_docker_access(device_path: str, group_id: int) -> None:
 def run_docker_device_permission_smoke() -> None:
     if not sys.platform.startswith("linux"):
         raise RuntimeError("Docker device permission smoke requires Linux")
+    import grp
+
     group_id = grp.getgrnam("dialout").gr_gid
     with tempfile.TemporaryDirectory(prefix="emberdeck-device-") as directory:
         device_path = os.path.join(directory, "probe")
