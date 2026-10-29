@@ -8,6 +8,8 @@ on:
     paths:
       - '.github/workflows/published-install-validation.yml'
       - 'docs/install.md'
+      - 'scripts/container-smoke.py'
+      - 'scripts/tests/test_container_smoke.py'
       - 'scripts/release_install_smoke.py'
       - 'scripts/tests/test_release_install_smoke.py'
 permissions:
@@ -21,8 +23,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - name: Test release asset verification
-        run: python -m unittest discover -s scripts/tests -p 'test_release_install_smoke.py'
+      - name: Test published install smoke helpers
+        run: python -m unittest discover -s scripts/tests -p 'test_*smoke.py'
 
   published-binaries:
     if: github.event_name != 'pull_request'
@@ -101,3 +103,63 @@ jobs:
             --current-binary "$RUNNER_TEMP/release-current/$ASSET" \
             --current-version "$CURRENT" \
             --current-checksums "$RUNNER_TEMP/release-current/SHA256SUMS"
+
+  published-container:
+    if: github.event_name != 'pull_request'
+    name: Published container install
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Select the two newest published releases
+        id: releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          tags=$(gh api "repos/$GH_REPO/releases?per_page=30" --jq '[.[] | select(.draft == false) | .tag_name] | .[0:2] | @tsv')
+          read -r current previous <<< "$tags"
+          if [ -z "$current" ] || [ -z "$previous" ]; then
+            echo "Two published releases with container images are required" >&2
+            exit 1
+          fi
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          echo "Validating published container upgrade $previous -> $current on linux/amd64"
+      - name: Authenticate to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull the two published release images
+        env:
+          PREVIOUS: ${{ steps.releases.outputs.previous }}
+          CURRENT: ${{ steps.releases.outputs.current }}
+        run: |
+          for attempt in {1..12}; do
+            if docker pull --platform linux/amd64 "ghcr.io/constructorfleet/emberdeck:$PREVIOUS" && \
+               docker pull --platform linux/amd64 "ghcr.io/constructorfleet/emberdeck:$CURRENT"; then
+              exit 0
+            fi
+            echo "Release images are not ready yet (attempt $attempt/12); retrying in 30 seconds"
+            sleep 30
+          done
+          echo "Could not pull both published release images" >&2
+          exit 1
+      - name: Verify first start, login, dispatch, restart, upgrade, and cleanup
+        env:
+          PREVIOUS: ${{ steps.releases.outputs.previous }}
+          CURRENT: ${{ steps.releases.outputs.current }}
+        run: |
+          python3 scripts/container-smoke.py \
+            --previous-image "ghcr.io/constructorfleet/emberdeck:$PREVIOUS" \
+            --previous-version "$PREVIOUS" \
+            --current-image "ghcr.io/constructorfleet/emberdeck:$CURRENT" \
+            --current-version "$CURRENT"

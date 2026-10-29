@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build and exercise EmberDeck's published container interface."""
 
+import argparse
 import json
 import subprocess
 import sys
@@ -26,14 +27,12 @@ def container_base(name):
     return "http://" + output.splitlines()[0]
 
 
-def api(base, method, path, payload=None):
+def api(base, method, path, payload=None, authenticated=True):
     body = None if payload is None else json.dumps(payload).encode()
-    request = urllib.request.Request(
-        base + path,
-        data=body,
-        method=method,
-        headers={"Authorization": f"Bearer {KEY}", "Content-Type": "application/json"},
-    )
+    headers = {"Content-Type": "application/json"}
+    if authenticated:
+        headers["Authorization"] = f"Bearer {KEY}"
+    request = urllib.request.Request(base + path, data=body, method=method, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=5) as response:
             body = response.read()
@@ -79,20 +78,99 @@ def upload_and_start(base, name, gcode):
     return job["id"]
 
 
-def main():
+def verify_image_version(image, version):
+    result = docker("run", "--rm", image, "-version")
+    actual = (result.stdout or "").strip()
+    expected = f"EmberDeck {version}"
+    if result.returncode != 0 or actual != expected:
+        raise RuntimeError(f"expected {expected} from image {image}, got {actual!r}")
+
+
+def start_container(name, volume, image):
+    run = docker(
+        "run", "--detach", "--name", name, "--publish", "127.0.0.1::8080",
+        "--mount", f"type=volume,source={volume},target=/data",
+        "--env", f"EMBERDECK_API_KEY={KEY}", image,
+        "serve", "-listen", "0.0.0.0:8080", "-data", "/data", "-simulate",
+    )
+    return run.stdout.strip()
+
+
+def await_container_api(name):
+    base = wait_for("container port mapping", lambda: container_base(name))
+    wait_for("unauthenticated API rejection", lambda: api(base, "GET", "/api/v1/jobs", authenticated=False)[0] == 401)
+    wait_for("authenticated API startup", lambda: api(base, "GET", "/api/v1/jobs")[0] == 200)
+    return base
+
+
+def assert_jobs_persisted(base, job_ids, stage):
+    status, page = api(base, "GET", "/api/v1/jobs")
+    if status != 200 or not {job["id"] for job in page["jobs"]}.issuperset(job_ids):
+        raise RuntimeError(f"uploaded jobs were not retained {stage}")
+
+
+def run_published_image_smoke(previous_image, previous_version, current_image, current_version):
+    """Exercise two published images through installation, upgrade and cleanup."""
+    verify_image_version(previous_image, previous_version)
+    verify_image_version(current_image, current_version)
+
+    name = f"emberdeck-smoke-{uuid.uuid4().hex[:10]}"
+    volume = name + "-data"
+    container = None
+    try:
+        docker("volume", "create", volume)
+        container = start_container(name, volume, previous_image)
+        base = await_container_api(name)
+
+        previous_job = upload_and_start(base, f"install-{previous_version}.gcode", "G21\nG90\nG1 X10 F100\nM5")
+        completed = wait_state(base, previous_job, "completed")
+        if completed.get("acked") != 4:
+            raise RuntimeError(f"expected four acknowledged lines, got {completed.get('acked')}")
+
+        docker("restart", name)
+        base = wait_for("restarted container port mapping", lambda: container_base(name))
+        wait_for("restarted API", lambda: api(base, "GET", "/api/v1/jobs")[0] == 200)
+        assert_jobs_persisted(base, {previous_job}, "container restart")
+
+        # A released image upgrade replaces the container while retaining its volume.
+        docker("rm", "--force", name)
+        container = start_container(name, volume, current_image)
+        base = await_container_api(name)
+        assert_jobs_persisted(base, {previous_job}, "image upgrade")
+
+        current_job = upload_and_start(base, f"install-{current_version}.gcode", "G21\nG90\nG1 X12 F100\nM5")
+        completed = wait_state(base, current_job, "completed")
+        if completed.get("acked") != 4:
+            raise RuntimeError(f"expected four acknowledged lines after upgrade, got {completed.get('acked')}")
+        docker("restart", name)
+        base = wait_for("upgraded container restart", lambda: container_base(name))
+        wait_for("upgraded API", lambda: api(base, "GET", "/api/v1/jobs")[0] == 200)
+        assert_jobs_persisted(base, {previous_job, current_job}, "upgraded container restart")
+        print(f"Published container smoke passed: {previous_version} -> {current_version}; authenticated dispatch, upgrade, restart persistence, and uninstall.")
+    except Exception:
+        if container:
+            state = docker("inspect", "--format", "{{json .State}}", name, check=False)
+            print(f"Container state:\n{state.stdout or state.stderr}", file=sys.stderr)
+            logs = docker("logs", "--tail", "100", name, check=False)
+            if logs.stdout:
+                print(f"Container stdout:\n{logs.stdout}", file=sys.stderr)
+            if logs.stderr:
+                print(f"Container stderr:\n{logs.stderr}", file=sys.stderr)
+        raise
+    finally:
+        docker("rm", "--force", name, check=False)
+        docker("volume", "rm", "--force", volume, check=False)
+
+
+def run_local_image_smoke():
+    """Build and exercise the current source checkout as a local container."""
     name = f"emberdeck-smoke-{uuid.uuid4().hex[:10]}"
     volume = name + "-data"
     container = None
     try:
         docker("build", "--tag", IMAGE, ".")
         docker("volume", "create", volume)
-        run = docker(
-            "run", "--detach", "--name", name, "--publish", "127.0.0.1::8080",
-            "--mount", f"type=volume,source={volume},target=/data",
-            "--env", f"EMBERDECK_API_KEY={KEY}", IMAGE,
-            "serve", "-listen", "0.0.0.0:8080", "-data", "/data", "-simulate",
-        )
-        container = run.stdout.strip()
+        container = start_container(name, volume, IMAGE)
         base = wait_for("container port mapping", lambda: container_base(name))
         wait_for("authenticated API startup", lambda: api(base, "GET", "/api/v1/jobs")[0] == 200)
 
@@ -116,9 +194,7 @@ def main():
         docker("restart", name)
         base = wait_for("restarted container port mapping", lambda: container_base(name))
         wait_for("restarted API", lambda: api(base, "GET", "/api/v1/jobs")[0] == 200)
-        status, page = api(base, "GET", "/api/v1/jobs")
-        if status != 200 or not {job["id"] for job in page["jobs"]}.issuperset({complete_id, cancel_id}):
-            raise RuntimeError("uploaded jobs were not retained across container restart")
+        assert_jobs_persisted(base, {complete_id, cancel_id}, "container restart")
         print("Container smoke passed: non-root /data persistence, simulated execution, and cancellation.")
     except Exception:
         if container:
@@ -133,6 +209,22 @@ def main():
     finally:
         docker("rm", "--force", name, check=False)
         docker("volume", "rm", "--force", volume, check=False)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--previous-image", help="previous published container image")
+    parser.add_argument("--previous-version", help="expected version in the previous image")
+    parser.add_argument("--current-image", help="current published container image")
+    parser.add_argument("--current-version", help="expected version in the current image")
+    args = parser.parse_args(argv)
+    published = (args.previous_image, args.previous_version, args.current_image, args.current_version)
+    if any(published) and not all(published):
+        parser.error("published-image mode requires all four --previous/current-image/version options")
+    if all(published):
+        run_published_image_smoke(*published)
+    else:
+        run_local_image_smoke()
 
 
 if __name__ == "__main__":
