@@ -62,7 +62,8 @@ For Windows PowerShell, see the
 The [Published install validation workflow](../.github/workflows/published-install-validation.yml)
 runs weekly and can be started manually. It downloads the two newest published
 binary releases and verifies their SHA-256 manifests on Ubuntu x86-64, macOS
-Apple silicon, and Windows x86-64. It launches the prior binary, authenticates
+Apple silicon, Windows x86-64, and Linux ARM64 under QEMU user-mode emulation on
+an Ubuntu x86-64 runner. It launches the prior binary, authenticates
 with a test key, uploads and dispatches a simulated job, then starts the current
 binary against the same data directory to check upgrade and restart
 persistence. It also runs the released binary through the fake-GRBL artifact
@@ -77,6 +78,13 @@ image; the workflow removes the test container and volume afterward. This
 validates published Docker images on an Ubuntu x86-64 runner. The separate
 [Container workflow](../.github/workflows/container.yml) builds from the current
 checkout and exercises local image behavior.
+
+The ARM64 run executes the published `emberdeck-linux-arm64` release asset and
+checks its checksum, version, authentication, simulated dispatch, upgrade, and
+data persistence. QEMU user-mode emulation does not boot an ARM64 kernel or
+Raspberry Pi OS and does not validate Pi-specific services, serial permissions,
+GPIO, USB devices, or physical hardware. Raspberry Pi OS still needs a recorded
+native install run.
 
 The scheduled/manual published-install workflow installs the two newest
 published Linux binaries and both systemd units inside an Ubuntu guest under

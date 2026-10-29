@@ -302,6 +302,12 @@ The driver uses `-simulate`, so this does not verify serial permissions or
 controller behavior. It also does not qualify every LXC host, Raspberry Pi OS,
 host LXC autostart, or physical hardware.
 
+The same workflow also runs the published Linux ARM64 binary install smoke on
+an Ubuntu x86-64 runner with QEMU user-mode emulation. This verifies the ARM64
+asset checksum and runtime install/upgrade path, but does not boot Raspberry Pi
+OS or qualify Pi-specific services, serial permissions, GPIO, USB devices, or
+physical hardware. See the [install validation scope](install.md#published-install-checks).
+
 ### Uninstall a Linux or LXC systemd install
 
 Run these commands on the Linux host, or inside the guest for an LXC install.
