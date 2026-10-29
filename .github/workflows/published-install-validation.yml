@@ -8,6 +8,7 @@ on:
     paths:
       - '.github/workflows/published-install-validation.yml'
       - 'docs/install.md'
+      - 'docs/deployment.md'
       - 'scripts/container-smoke.py'
       - 'scripts/tests/test_container_smoke.py'
       - 'scripts/lxc_install_smoke.py'
@@ -30,12 +31,16 @@ jobs:
 
   published-binaries:
     if: github.event_name != 'pull_request'
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             asset: emberdeck-linux-amd64
+          - os: ubuntu-latest
+            asset: emberdeck-linux-arm64
+            qemu: true
           - os: macos-latest
             asset: emberdeck-darwin-arm64
           - os: windows-latest
@@ -48,6 +53,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
+      - name: Register Linux ARM64 emulation
+        if: matrix.qemu == true
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
       - name: Select the asset matching this runner architecture
         id: native-asset
         env:
