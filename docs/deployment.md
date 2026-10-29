@@ -587,7 +587,9 @@ device access and reaches the expected `ENOTTY` termios boundary on the
 production serial opener through DAC. It does not test a serial stream, GRBL
 protocol, USB/udev, modem-line behavior on a controller, or physical hardware.
 Windows COM, macOS serial devices, and Raspberry Pi OS still need recorded
-platform runs.
+platform runs. [Container workflow run
+40972583163](https://github.com/constructorfleet/emberdeck/actions/runs/40972583163)
+passed this check on 2026-10-29.
 
 To rotate a worker key, stop the worker and ensure it has no active job, revoke
 the old credential with `DELETE /api/v1/credentials/{id}`, create a new worker

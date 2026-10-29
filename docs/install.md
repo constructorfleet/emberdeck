@@ -132,7 +132,9 @@ serial opener against a disposable device. The serial worker reports
 post-open `ENOTTY` limit when the GID is supplied. See
 [Docker Compose serial setup](deployment.md#docker-compose) for the scope and
 remaining platform limits. This does not establish serial streaming or
-controller support.
+controller support. [Container workflow run
+40972583163](https://github.com/constructorfleet/emberdeck/actions/runs/40972583163)
+passed the check on 2026-10-29.
 
 ## Build from source
 
