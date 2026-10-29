@@ -23,6 +23,23 @@ SERVER_UNIT = "emberdeck.service"
 DRIVER_UNIT = "emberdeck-driver.service"
 DRIVER_ID = "lxc-smoke"
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+DIALOUT_PTY_PERMISSION_PROBE = r'''
+import grp, os, pty, subprocess
+
+master, slave = pty.openpty()
+path = os.ttyname(slave)
+os.chown(path, 0, grp.getgrnam("dialout").gr_gid)
+os.chmod(path, 0o660)
+probe = ["/usr/bin/python3", "-c", "import os,sys; fd=os.open(sys.argv[1], os.O_RDWR | os.O_NOCTTY); os.close(fd)", path]
+common = ["systemd-run", "--quiet", "--wait", "--pipe", "--collect", "--property=User=emberdeck", "--property=Group=emberdeck"]
+denied = subprocess.run(common + probe, capture_output=True, text=True, timeout=20)
+if denied.returncode == 0:
+    raise SystemExit("PTY unexpectedly opened without dialout supplementary group")
+allowed = subprocess.run(common + ["--property=SupplementaryGroups=dialout"] + probe, capture_output=True, text=True, timeout=20)
+if allowed.returncode != 0:
+    raise SystemExit(f"PTY open with dialout failed: {allowed.stderr or allowed.stdout}")
+print("PASS Linux PTY DAC access: root:dialout mode 0660 denied without dialout and opened with systemd SupplementaryGroups=dialout")
+'''.strip()
 
 
 def verify_asset_checksum(asset: pathlib.Path, manifest: pathlib.Path) -> None:
@@ -237,6 +254,32 @@ def main_pid(container: str, unit: str) -> int:
     return int(value)
 
 
+def proc_group_ids(status: str) -> set[str]:
+    for line in status.splitlines():
+        if line.startswith("Groups:"):
+            return set(line.split()[1:])
+    raise RuntimeError("process status does not contain a Groups line")
+
+
+def assert_service_supplementary_group(container: str, unit: str, group_name: str) -> None:
+    group = guest_text(container, "getent", "group", group_name)
+    fields = group.rstrip("\n").split(":")
+    if len(fields) < 3 or not fields[2].isdigit():
+        raise RuntimeError(f"could not find numeric gid for {group_name}: {group!r}")
+    gid = fields[2]
+    pid = main_pid(container, unit)
+    status = guest_text(container, "cat", f"/proc/{pid}/status")
+    groups = proc_group_ids(status)
+    if gid not in groups:
+        raise RuntimeError(f"{unit} process is missing {group_name} supplementary group (gid {gid})")
+    print(f"PASS systemd supplementary group: {unit} process includes {group_name} (gid {gid})")
+
+
+def verify_dialout_pty_permissions(container: str) -> None:
+    result = guest(container, "python3", "-c", DIALOUT_PTY_PERMISSION_PROBE)
+    print(result.stdout.strip())
+
+
 def wait_service_active(container: str, unit: str, timeout: float = 45) -> int:
     def active_pid():
         active = guest_text(container, "systemctl", "is-active", unit, check=False)
@@ -391,6 +434,8 @@ def run_lxc_install_smoke(container: str, previous_binary: pathlib.Path, previou
     start_driver(container)
     wait_service_active(container, DRIVER_UNIT)
     wait_driver_online(container, admin_key)
+    assert_service_supplementary_group(container, DRIVER_UNIT, "dialout")
+    verify_dialout_pty_permissions(container)
 
     previous_job = upload_and_dispatch(container, admin_key, f"lxc-install-{previous_version}.gcode")
     assert_job_persisted(container, admin_key, previous_job, "initial published install")
