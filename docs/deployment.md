@@ -326,6 +326,15 @@ passed this check. The test does not open the PTY through EmberDeck's serial
 transport, so USB enumeration, udev ownership, modem-bit ioctls, controller
 behavior, and physical serial access remain unverified.
 
+The published container job separately maps a temporary `/dev/null`-backed
+character-device node into a helper container running as UID 65532. [Run
+40967145179](https://github.com/constructorfleet/emberdeck/actions/runs/40967145179)
+passed the DAC denial without the device's numeric supplementary GID and the
+open with that GID. This checks Docker `--device` mapping and generic Linux
+character-device permissions; it does not test the published EmberDeck image,
+Compose serial configuration, PTY/devpts, USB/udev, serial transport, or
+physical hardware.
+
 ### Uninstall a Linux or LXC systemd install
 
 Run these commands on the Linux host, or inside the guest for an LXC install.

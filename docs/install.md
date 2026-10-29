@@ -117,6 +117,15 @@ This checks Linux group-based device-file access only. EmberDeck's serial
 transport does not open the PTY, which does not validate USB enumeration, udev
 rules, modem-bit ioctls, a controller, or physical serial access.
 
+The published container job also maps a temporary Linux character-device node
+into a helper container as a non-root UID. [Run
+40967145179](https://github.com/constructorfleet/emberdeck/actions/runs/40967145179)
+passed the negative check without the device's numeric supplementary GID and
+the positive check with it. This validates Docker `--device` mapping and Linux
+DAC group permissions for a generic character device. It does not exercise the
+published EmberDeck image, Compose serial configuration, PTY/devpts, USB/udev,
+serial transport, or physical hardware.
+
 ## Build from source
 
 To build rather than download, install Go 1.27 and clone the repository:
