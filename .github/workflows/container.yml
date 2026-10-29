@@ -23,5 +23,5 @@ jobs:
         run: python3 -m unittest scripts/tests/test_docker_compose_serial_smoke.py
       - name: Build and exercise container
         run: python3 scripts/container-smoke.py
-      - name: Exercise serial Compose profile image and configuration
+      - name: Exercise Compose EmberDeck serial device permissions
         run: python3 scripts/docker_compose_serial_smoke.py

@@ -1,10 +1,9 @@
-import errno
 import importlib.util
+import json
 import subprocess
-import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, call, patch
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "docker_compose_serial_smoke.py"
@@ -80,38 +79,82 @@ class DockerComposeSerialSmokeTests(unittest.TestCase):
                 config, "/dev/null", 0, "worker-key", "emberdeck:test"
             )
 
-    def test_compose_run_executes_image_version_with_profile_environment(self):
-        env = docker_compose_serial_smoke.serial_environment(device="/dev/null", gid=0)
-        expected = subprocess.CompletedProcess([], 0, stdout="EmberDeck dev\n", stderr="")
-        with patch.object(docker_compose_serial_smoke, "compose", return_value=expected) as run:
-            result = docker_compose_serial_smoke.run_image_version("test-project", env)
-        self.assertEqual(result, "EmberDeck dev")
-        self.assertEqual(run.call_args.args, (
-            "test-project", "run", "--rm", "--no-deps", "serial-driver", "-version",
-        ))
-        self.assertEqual(run.call_args.kwargs, {"env": env})
-
     def test_cleanup_removes_the_temporary_compose_project_and_image(self):
         env = docker_compose_serial_smoke.serial_environment(device="/dev/null", gid=0)
         result = subprocess.CompletedProcess([], 0, stdout="", stderr="")
         with (
             patch.object(docker_compose_serial_smoke.subprocess, "run", return_value=result) as run,
-            patch.object(docker_compose_serial_smoke, "docker", return_value=result) as docker,
+            patch.object(docker_compose_serial_smoke, "docker", side_effect=[result, result]) as docker,
         ):
-            docker_compose_serial_smoke.cleanup_compose_project("test-project", env, "emberdeck:test")
+            docker_compose_serial_smoke.cleanup_compose_project(
+                "test-project", env, "emberdeck:test", "/tmp/ports.yaml"
+            )
 
         self.assertEqual(run.call_args.args[0], docker_compose_serial_smoke.compose_command(
-            "test-project", "down", "--remove-orphans"
+            "test-project", "down", "--remove-orphans", "--volumes", override_file="/tmp/ports.yaml"
         ))
         self.assertEqual(run.call_args.kwargs, {
             "check": False, "text": True, "capture_output": True, "env": env,
         })
-        docker.assert_called_once_with("image", "rm", "--force", "emberdeck:test", check=False)
+        self.assertEqual(docker.call_args_list, [
+            call("image", "inspect", "emberdeck:test", check=False),
+            call("image", "rm", "--force", "emberdeck:test", check=False),
+        ])
 
-    def test_actual_pty_modem_ioctl_is_unsupported_on_this_linux_kernel(self):
-        if not sys.platform.startswith("linux"):
-            self.skipTest("Linux PTY modem ioctl behavior")
-        self.assertEqual(docker_compose_serial_smoke.confirm_pty_lacks_modem_ioctl(), errno.ENOTTY)
+    def test_settings_error_distinguishes_device_permission_from_post_open_ioctl(self):
+        docker_compose_serial_smoke.verify_settings_error(
+            'worker: open controller for settings read: serial transport: open "/tmp/probe": '
+            'permission denied', "permission denied"
+        )
+        docker_compose_serial_smoke.verify_settings_error(
+            'worker: open controller for settings read: serial transport: open "/tmp/probe": '
+            'inappropriate ioctl for device', "inappropriate ioctl for device"
+        )
+
+    def test_settings_error_rejects_a_different_failure_boundary(self):
+        with self.assertRaisesRegex(RuntimeError, "expected post-open ioctl failure"):
+            docker_compose_serial_smoke.verify_settings_error("permission denied", "inappropriate ioctl for device")
+
+    def test_worker_credential_helper_returns_the_one_time_secret(self):
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({"key": "scoped-worker-key"}).encode()
+        with patch.object(docker_compose_serial_smoke, "urlopen", return_value=response) as open_url:
+            key = docker_compose_serial_smoke.create_worker_credential(
+                "http://127.0.0.1:18080", "admin-key", "bench"
+            )
+        self.assertEqual(key, "scoped-worker-key")
+        request = open_url.call_args.args[0]
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(request.full_url, "http://127.0.0.1:18080/api/v1/credentials")
+        self.assertEqual(json.loads(request.data), {
+            "name": "Compose serial smoke worker", "role": "worker", "driver_ids": ["bench"],
+        })
+
+    def test_wait_for_settings_error_retries_until_expected_boundary(self):
+        with (
+            patch.object(docker_compose_serial_smoke, "read_driver_settings_error", side_effect=[None, "permission denied"]),
+            patch.object(docker_compose_serial_smoke.time, "sleep"),
+        ):
+            result = docker_compose_serial_smoke.wait_for_settings_error(
+                "http://127.0.0.1:18080", "admin-key", "bench", "permission denied", timeout=1
+            )
+        self.assertEqual(result, "permission denied")
+
+    def test_device_node_creation_sets_root_group_and_mode_0660(self):
+        with patch.object(docker_compose_serial_smoke, "run_privileged") as run:
+            docker_compose_serial_smoke.create_device_node("/tmp/controller", 20)
+        self.assertEqual(run.call_args_list, [
+            call(["mknod", "/tmp/controller", "c", "1", "3"]),
+            call(["chown", "0:20", "/tmp/controller"]),
+            call(["chmod", "0660", "/tmp/controller"]),
+        ])
+
+    def test_compose_command_includes_optional_ports_override(self):
+        command = docker_compose_serial_smoke.compose_command(
+            "emberdeck-serial-test", "up", "--detach", "emberdeck", override_file="/tmp/ports.yaml"
+        )
+        self.assertEqual(command[4:6], ["-f", str(docker_compose_serial_smoke.REPO_ROOT / "compose.yaml")])
+        self.assertEqual(command[6:8], ["-f", "/tmp/ports.yaml"])
 
 
 if __name__ == "__main__":

@@ -1,30 +1,30 @@
 #!/usr/bin/env python3
-"""Smoke the Compose serial profile and report the Linux PTY ioctl limitation.
+"""Verify Compose passes Linux device DAC through EmberDeck's serial opener.
 
-The built EmberDeck image is exercised through the `serial` Compose profile,
-including its resolved host-device mapping, numeric supplementary GID,
-dedicated key, baud rate, and DTR/RTS flags. Linux PTYs do not implement the
-modem-bit ioctls EmberDeck must apply to physical serial ports, so a PTY cannot
-serve as a fake GRBL controller without weakening production safety behavior.
-This smoke therefore does not claim serial protocol or hardware qualification.
+A disposable /dev/null-backed character device distinguishes EACCES without
+the configured GID from the expected post-open ENOTTY with it. This does not
+claim serial streaming, GRBL behavior, or physical hardware qualification.
 """
 
 from __future__ import annotations
 
 import argparse
-import errno
 import json
 import os
-import stat
+import socket
 import subprocess
 import sys
+import tempfile
+import time
 import uuid
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 IMAGE = "emberdeck:local"
-DEVICE = "/dev/null"
+ADMIN_KEY = "compose-serial-smoke-admin-key"
 DRIVER_KEY = "compose-serial-smoke-worker-key"
 DRIVER_ID = "compose-serial-smoke"
 BAUD = 115200
@@ -34,15 +34,43 @@ def docker(*args: str, check: bool = True, env: dict[str, str] | None = None) ->
     return subprocess.run(["docker", *args], check=check, text=True, capture_output=True, env=env)
 
 
-def compose_command(project: str, *args: str) -> list[str]:
-    return [
-        "docker", "compose", "--project-name", project, "-f", str(REPO_ROOT / "compose.yaml"),
-        "--profile", "serial", *args,
-    ]
+def compose_command(project: str, *args: str, override_file: str | None = None) -> list[str]:
+    command = ["docker", "compose", "--project-name", project, "-f", str(REPO_ROOT / "compose.yaml")]
+    if override_file:
+        command.extend(["-f", override_file])
+    return [*command, "--profile", "serial", *args]
 
 
-def compose(project: str, *args: str, env: dict[str, str]) -> subprocess.CompletedProcess:
-    return subprocess.run(compose_command(project, *args), check=True, text=True, capture_output=True, env=env)
+def compose(
+    project: str, *args: str, env: dict[str, str], override_file: str | None = None
+) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        compose_command(project, *args, override_file=override_file),
+        check=True, text=True, capture_output=True, env=env,
+    )
+
+
+def run_privileged(args: list[str]) -> subprocess.CompletedProcess:
+    command = args if os.geteuid() == 0 else ["sudo", *args]
+    return subprocess.run(command, check=True, text=True, capture_output=True)
+
+
+def create_device_node(device_path: str, group_id: int) -> None:
+    run_privileged(["mknod", device_path, "c", "1", "3"])
+    run_privileged(["chown", f"0:{group_id}", device_path])
+    run_privileged(["chmod", "0660", device_path])
+
+
+def remove_device_node(device_path: str) -> None:
+    if os.path.exists(device_path):
+        run_privileged(["rm", "-f", device_path])
+
+
+def write_port_override(path: str, port: int) -> None:
+    Path(path).write_text(
+        json.dumps({"services": {"emberdeck": {"ports": [f"127.0.0.1:{port}:8080"]}}}),
+        encoding="utf-8",
+    )
 
 
 def serial_environment(
@@ -100,82 +128,150 @@ def verify_serial_service_config(
         raise RuntimeError(f"serial-driver uses unexpected image {service.get('image')!r}, expected {image!r}")
 
 
-def confirm_pty_lacks_modem_ioctl() -> int:
-    """Return ENOTTY when devpts cannot model the modem bits required by OpenSerial."""
-    import fcntl
-    import pty
-    import struct
-    import termios
+def verify_settings_error(error: str, expected: str) -> None:
+    normalized = error.lower()
+    if expected == "permission denied" and "inappropriate ioctl" in normalized:
+        raise RuntimeError(f"expected permission denial before device open, got {error!r}")
+    if expected == "inappropriate ioctl for device" and "permission denied" in normalized:
+        raise RuntimeError(f"expected post-open ioctl failure, got permission denial: {error!r}")
+    if expected.lower() not in normalized:
+        raise RuntimeError(f"expected {expected!r} in controller settings error, got {error!r}")
 
-    if not hasattr(termios, "TIOCMGET"):
-        raise RuntimeError("platform does not expose TIOCMGET for the PTY diagnostic")
-    master_fd, slave_fd = pty.openpty()
-    try:
+
+def read_driver_settings_error(base_url: str, key: str, driver_id: str) -> str | None:
+    request = Request(
+        f"{base_url}/api/v1/drivers", headers={"Authorization": f"Bearer {key}"}
+    )
+    with urlopen(request, timeout=2) as response:
+        drivers = json.loads(response.read())
+    for driver_record in drivers:
+        if driver_record.get("id") == driver_id:
+            return driver_record.get("settings_error")
+    return None
+
+
+def wait_for_api(base_url: str, key: str, timeout: float = 30) -> None:
+    deadline = time.monotonic() + timeout
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
         try:
-            fcntl.ioctl(slave_fd, termios.TIOCMGET, struct.pack("i", 0))
-        except OSError as error:
-            if error.errno != errno.ENOTTY:
-                raise RuntimeError(f"PTY TIOCMGET failed unexpectedly: {error}") from error
-            return error.errno
-        raise RuntimeError("PTY unexpectedly supports TIOCMGET; serial protocol smoke should be reconsidered")
-    finally:
-        os.close(master_fd)
-        os.close(slave_fd)
+            request = Request(f"{base_url}/api/v1/auth", headers={"Authorization": f"Bearer {key}"})
+            with urlopen(request, timeout=2):
+                return
+        except (OSError, URLError) as error:
+            last_error = error
+            time.sleep(0.25)
+    raise RuntimeError(f"EmberDeck API did not become ready: {last_error}")
 
 
-def run_image_version(project: str, env: dict[str, str]) -> str:
-    result = compose(project, "run", "--rm", "--no-deps", "serial-driver", "-version", env=env)
-    if result.returncode != 0 or "EmberDeck " not in result.stdout:
-        raise RuntimeError(f"serial profile image did not report its version: {result.stdout} {result.stderr}")
-    return result.stdout.strip()
+def create_worker_credential(base_url: str, admin_key: str, driver_id: str) -> str:
+    payload = json.dumps({
+        "name": "Compose serial smoke worker", "role": "worker", "driver_ids": [driver_id],
+    }).encode()
+    request = Request(
+        f"{base_url}/api/v1/credentials", data=payload, method="POST",
+        headers={"Authorization": f"Bearer {admin_key}", "Content-Type": "application/json"},
+    )
+    with urlopen(request, timeout=5) as response:
+        credential = json.loads(response.read())
+    key = credential.get("key")
+    if not key:
+        raise RuntimeError("EmberDeck did not return a one-time worker credential")
+    return key
 
 
-def cleanup_compose_project(project: str, env: dict[str, str], image: str) -> None:
+def wait_for_settings_error(
+    base_url: str, key: str, driver_id: str, expected: str, timeout: float = 30
+) -> str:
+    deadline = time.monotonic() + timeout
+    last_error = None
+    while time.monotonic() < deadline:
+        try:
+            last_error = read_driver_settings_error(base_url, key, driver_id)
+        except (OSError, URLError, json.JSONDecodeError):
+            pass
+        if last_error:
+            if expected.lower() in last_error.lower():
+                return last_error
+            # A stale previous result is allowed while the recreated worker reconnects.
+            if "permission denied" not in last_error.lower() and "inappropriate ioctl" not in last_error.lower():
+                raise RuntimeError(f"unexpected controller settings error: {last_error}")
+        time.sleep(0.25)
+    raise RuntimeError(f"timed out waiting for controller settings error {expected!r}; last={last_error!r}")
+
+
+def cleanup_compose_project(
+    project: str, env: dict[str, str], image: str, override_file: str | None = None
+) -> None:
     result = subprocess.run(
-        compose_command(project, "down", "--remove-orphans"),
+        compose_command(
+            project, "down", "--remove-orphans", "--volumes", override_file=override_file
+        ),
         check=False, text=True, capture_output=True, env=env,
     )
     if result.returncode != 0:
         raise RuntimeError(f"could not remove Compose smoke project: {result.stderr or result.stdout}")
-    image_result = docker("image", "rm", "--force", image, check=False)
-    if image_result.returncode != 0:
-        raise RuntimeError(f"could not remove Compose smoke image {image}: {image_result.stderr or image_result.stdout}")
+    exists = docker("image", "inspect", image, check=False)
+    if exists.returncode == 0:
+        image_result = docker("image", "rm", "--force", image, check=False)
+        if image_result.returncode != 0:
+            raise RuntimeError(
+                f"could not remove Compose smoke image {image}: {image_result.stderr or image_result.stdout}"
+            )
 
 
 def run_smoke() -> None:
     if not sys.platform.startswith("linux"):
         raise RuntimeError("Compose serial smoke requires Linux and Docker Compose")
-    metadata = os.stat(DEVICE)
-    if not stat.S_ISCHR(metadata.st_mode):
-        raise RuntimeError(f"smoke device must be a character device: {DEVICE}")
-    gid = metadata.st_gid
+    import grp
+
+    gid = grp.getgrnam("dialout").gr_gid
     suffix = uuid.uuid4().hex[:10]
     project = f"emberdeck-serial-{suffix}"
     image = f"emberdeck:compose-serial-smoke-{suffix}"
-    env = os.environ.copy()
-    env.update(serial_environment(device=DEVICE, gid=gid, image=image))
+    with tempfile.TemporaryDirectory(prefix="emberdeck-compose-serial-") as directory:
+        device = os.path.join(directory, "controller")
+        override_file = os.path.join(directory, "ports.yaml")
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            port = listener.getsockname()[1]
+        write_port_override(override_file, port)
+        create_device_node(device, gid)
+        env = os.environ.copy()
+        env.update(serial_environment(device=device, gid=gid, key=DRIVER_KEY, image=image))
+        env["EMBERDECK_API_KEY"] = ADMIN_KEY
+        base_url = f"http://127.0.0.1:{port}"
+        try:
+            docker("build", "--tag", image, ".")
+            compose(project, "up", "--detach", "emberdeck", env=env, override_file=override_file)
+            wait_for_api(base_url, ADMIN_KEY)
+            worker_key = create_worker_credential(base_url, ADMIN_KEY, DRIVER_ID)
+            env["EMBERDECK_DRIVER_API_KEY"] = worker_key
+            config = compose_config(project, env)
+            verify_serial_service_config(config, device, gid, worker_key, image)
 
-    # Build the exact image referenced by the Compose profile, then validate the
-    # fully interpolated active profile before executing any container.
-    docker("build", "--tag", image, ".")
-    try:
-        config = compose_config(project, env)
-        verify_serial_service_config(config, DEVICE, gid, DRIVER_KEY, image)
+            # First omit the device GID. The real worker probe must report EACCES.
+            denied_env = dict(env, EMBERDECK_SERIAL_GID=str(gid + 1))
+            compose(project, "up", "--detach", "serial-driver", env=denied_env, override_file=override_file)
+            denied = wait_for_settings_error(base_url, ADMIN_KEY, DRIVER_ID, "permission denied")
+            verify_settings_error(denied, "permission denied")
 
-        # Command override keeps this read-only check independent of a live
-        # server or hardware while retaining the service's image/device/group.
-        version = run_image_version(project, env)
-
-        # `go.bug.st/serial` applies the explicitly requested modem bits via
-        # TIOCMGET/TIOCMSET. A devpts fake controller cannot satisfy that API.
-        errno_value = confirm_pty_lacks_modem_ioctl()
-        print(
-            f"PASS Compose serial profile resolved {DEVICE} with supplementary GID {gid}, baud {BAUD}, "
-            f"DTR/RTS off, and ran the built EmberDeck image ({version}). "
-            f"PTY TIOCMGET returns ENOTTY ({errno_value}); no serial-stream or GRBL protocol claim is made."
-        )
-    finally:
-        cleanup_compose_project(project, env, image)
+            # Recreate with the configured numeric group. Open succeeds and the
+            # /dev/null-backed device reaches the expected termios ENOTTY limit.
+            compose(project, "stop", "serial-driver", env=denied_env, override_file=override_file)
+            compose(project, "rm", "--force", "serial-driver", env=denied_env, override_file=override_file)
+            compose(project, "up", "--detach", "serial-driver", env=env, override_file=override_file)
+            allowed = wait_for_settings_error(base_url, ADMIN_KEY, DRIVER_ID, "inappropriate ioctl for device")
+            verify_settings_error(allowed, "inappropriate ioctl for device")
+            print(
+                f"PASS Compose EmberDeck serial opener: mode 0660 root:dialout gid {gid} device denied without "
+                "the supplementary GID and reached post-open ENOTTY with it; no serial-stream or hardware claim is made."
+            )
+        finally:
+            try:
+                cleanup_compose_project(project, env, image, override_file)
+            finally:
+                remove_device_node(device)
 
 
 def main(argv: list[str] | None = None) -> int:
