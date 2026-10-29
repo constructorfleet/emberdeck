@@ -163,3 +163,63 @@ jobs:
             --previous-version "$PREVIOUS" \
             --current-image "ghcr.io/constructorfleet/emberdeck:$CURRENT" \
             --current-version "$CURRENT"
+
+  lxc-feasibility:
+    if: github.event_name != 'pull_request'
+    name: Classic LXC system guest feasibility
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Install classic LXC
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes lxc lxc-templates uidmap
+      - name: Record runner capabilities
+        run: |
+          uname -a
+          lxc-info --version
+          stat -fc 'host filesystem: %T' /sys/fs/cgroup
+          cat /proc/self/uid_map
+          sudo lxc-checkconfig || true
+      - name: Create and boot Ubuntu system guest
+        shell: bash
+        run: |
+          set -euo pipefail
+          name=emberdeck-lxc-feasibility
+          cleanup() {
+            sudo lxc-stop --name "$name" --kill 2>/dev/null || true
+            sudo lxc-destroy --name "$name" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          sudo lxc-create --name "$name" --template download --config /etc/lxc/default.conf -- \
+            --dist ubuntu --release noble --arch amd64
+          sudo sed -i '/^lxc.net\./d' "/var/lib/lxc/$name/config"
+          echo 'lxc.net.0.type = empty' | sudo tee -a "/var/lib/lxc/$name/config" >/dev/null
+          sudo lxc-start --name "$name" --daemon \
+            --logfile "$RUNNER_TEMP/lxc-start.log" --logpriority INFO
+          for attempt in $(seq 1 60); do
+            state=$(sudo lxc-info --name "$name" --state)
+            if [ "$state" = RUNNING ]; then
+              break
+            fi
+            sleep 1
+          done
+          if [ "${state:-}" != RUNNING ]; then
+            sudo lxc-info --name "$name" --state
+            sudo cat "$RUNNER_TEMP/lxc-start.log" || true
+            exit 1
+          fi
+          for attempt in $(seq 1 30); do
+            health=$(sudo lxc-attach --name "$name" -- systemctl is-system-running || true)
+            case "$health" in
+              running|degraded) break ;;
+            esac
+            sleep 1
+          done
+          echo "Guest systemd state: $health"
+          case "$health" in
+            running|degraded) ;;
+            *) exit 1 ;;
+          esac
+          sudo lxc-attach --name "$name" -- systemctl is-active systemd-journald

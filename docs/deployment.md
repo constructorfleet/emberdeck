@@ -289,6 +289,49 @@ that you intentionally use, and expose port 8080 only to trusted clients. The
 CLI can select serial ports, but LXC USB/serial passthrough must be configured
 by the host administrator before a worker can open a device.
 
+The scheduled/manual [published install workflow](../.github/workflows/published-install-validation.yml)
+also boots an Ubuntu system guest with classic LXC on GitHub's Ubuntu runner and
+checks that systemd starts. This is a feasibility check for that runner; it does
+not qualify every LXC host, the EmberDeck install/upgrade flow inside a guest,
+host autostart, or serial passthrough.
+
+### Uninstall a Linux or LXC systemd install
+
+Run these commands on the Linux host, or inside the guest for an LXC install.
+Stop and remove the server and driver units you installed:
+
+```sh
+sudo systemctl disable --now emberdeck.service
+sudo systemctl disable --now emberdeck-driver.service
+sudo rm -f /etc/systemd/system/emberdeck.service
+sudo rm -f /etc/systemd/system/emberdeck-driver.service
+sudo systemctl daemon-reload
+sudo systemctl reset-failed
+```
+
+If only one unit was installed, skip the commands for the other. Remove the
+binary and `/etc/emberdeck` environment files separately if you no longer need
+them:
+
+```sh
+sudo rm -f /usr/local/bin/emberdeck
+sudo rm -f /etc/emberdeck/emberdeck.env /etc/emberdeck/driver.env
+```
+
+The environment files contain API keys; remove them only after recording any
+values needed for a reinstall or credential rotation. The server's jobs,
+library, and credentials are stored in `/var/lib/emberdeck`. Keep that directory
+to preserve server data. Delete it only after backing up anything you need and
+deciding to permanently erase the saved data:
+
+```sh
+sudo rm -rf /var/lib/emberdeck
+```
+
+Do not use `userdel -r emberdeck` as an uninstall shortcut: the system user's
+home directory is `/var/lib/emberdeck`. Removing an LXC guest or its host-side
+storage is a separate operation and may delete all guest data.
+
 ## macOS native CLI
 
 Download the matching macOS asset (`emberdeck-darwin-arm64` for Apple silicon or
