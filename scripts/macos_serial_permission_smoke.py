@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -122,9 +123,16 @@ def wait_for_settings_error(base_url: str, driver_id: str, expected: str, timeou
     raise RuntimeError(f"timed out waiting for settings error {expected!r}; last={last_error!r}")
 
 
+def log_contents(path: str) -> str:
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="replace")[-4000:]
+    except OSError as error:
+        return f"<could not read log: {error}>"
+
+
 def start_process(command: list[str], env: dict[str, str], log_path: str):
     log_file = open(log_path, "w", encoding="utf-8")
-    process = subprocess.Popen(command, env=env, stdout=log_file, stderr=subprocess.STDOUT)
+    process = subprocess.Popen(command, env=env, cwd="/tmp", stdout=log_file, stderr=subprocess.STDOUT)
     return process, log_file
 
 
@@ -151,6 +159,11 @@ def run_smoke() -> None:
     master_fd, slave_fd = pty.openpty()
     pty_path = os.ttyname(slave_fd)
     os.chmod(pty_path, 0o600)
+    binary_directory = tempfile.mkdtemp(prefix="emberdeck-macos-worker-bin-", dir="/tmp")
+    os.chmod(binary_directory, 0o755)
+    worker_binary = os.path.join(binary_directory, "emberdeck")
+    shutil.copyfile(BINARY, worker_binary)
+    os.chmod(worker_binary, 0o755)
     with tempfile.TemporaryDirectory(prefix="emberdeck-macos-serial-") as directory:
         data_dir = os.path.join(directory, "data")
         server_log = os.path.join(directory, "server.log")
@@ -177,22 +190,34 @@ def run_smoke() -> None:
 
             denied_worker, denied_file = start_process(
                 worker_command(
-                    str(BINARY), server_url, worker_key, DENIED_ID, pty_path, identity="_www"
+                    worker_binary, server_url, worker_key, DENIED_ID, pty_path, identity="_www"
                 ),
                 worker_env, denied_log,
             )
-            denied = wait_for_settings_error(server_url, DENIED_ID, "permission denied")
+            try:
+                denied = wait_for_settings_error(server_url, DENIED_ID, "permission denied")
+            except RuntimeError as error:
+                raise RuntimeError(
+                    f"{error}; denied-worker log: {log_contents(denied_log)}; "
+                    f"server log: {log_contents(server_log)}"
+                ) from error
             verify_settings_error(denied, "permission denied")
             stop_process(denied_worker, denied_file)
             denied_worker, denied_file = None, None
 
             allowed_worker, allowed_file = start_process(
-                worker_command(str(BINARY), server_url, worker_key, ALLOWED_ID, pty_path),
+                worker_command(worker_binary, server_url, worker_key, ALLOWED_ID, pty_path),
                 worker_env, allowed_log,
             )
-            allowed = wait_for_settings_error(
-                server_url, ALLOWED_ID, "inappropriate ioctl for device"
-            )
+            try:
+                allowed = wait_for_settings_error(
+                    server_url, ALLOWED_ID, "inappropriate ioctl for device"
+                )
+            except RuntimeError as error:
+                raise RuntimeError(
+                    f"{error}; allowed-worker log: {log_contents(allowed_log)}; "
+                    f"server log: {log_contents(server_log)}"
+                ) from error
             verify_settings_error(allowed, "inappropriate ioctl for device")
             print(
                 f"PASS macOS serial DAC: _www was denied mode-0600 PTY access at {pty_path}; "
@@ -205,6 +230,7 @@ def run_smoke() -> None:
             stop_process(server, server_file)
             os.close(master_fd)
             os.close(slave_fd)
+            shutil.rmtree(binary_directory, ignore_errors=True)
 
 
 def main() -> int:
