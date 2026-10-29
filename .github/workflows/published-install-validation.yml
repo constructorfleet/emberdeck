@@ -239,6 +239,7 @@ jobs:
             --dist ubuntu --release noble --arch amd64
           sudo sed -i '/^lxc.net\./d' "/var/lib/lxc/$name/config"
           echo 'lxc.net.0.type = empty' | sudo tee -a "/var/lib/lxc/$name/config" >/dev/null
+          echo 'lxc.start.auto = 1' | sudo tee -a "/var/lib/lxc/$name/config" >/dev/null
           sudo lxc-start --name "$name" --daemon \
             --logfile "$RUNNER_TEMP/lxc-start.log" --logpriority INFO
           for attempt in $(seq 1 60); do
