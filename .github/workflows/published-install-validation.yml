@@ -199,7 +199,7 @@ jobs:
           sudo lxc-start --name "$name" --daemon \
             --logfile "$RUNNER_TEMP/lxc-start.log" --logpriority INFO
           for attempt in $(seq 1 60); do
-            state=$(sudo lxc-info --name "$name" --state)
+            state=$(sudo lxc-info --name "$name" --state | awk '{print $NF}')
             if [ "$state" = RUNNING ]; then
               break
             fi
