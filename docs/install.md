@@ -79,11 +79,14 @@ validates published Docker images on an Ubuntu x86-64 runner. The separate
 checkout and exercises local image behavior.
 
 The scheduled/manual published-install workflow also checks whether an Ubuntu
-system guest boots systemd under classic LXC on GitHub's Ubuntu runner. It does
-not run the EmberDeck installer inside that guest or verify LXC host autostart.
-Raspberry Pi OS, serial device permissions, Windows COM ports, macOS serial
-devices, and systemd reboot/crash behavior still need recorded platform runs;
-simulator and fake-controller results are not physical hardware evidence.
+system guest boots systemd under classic LXC on GitHub's Ubuntu runner. [Run
+40958394426](https://github.com/constructorfleet/emberdeck/actions/runs/40958394426)
+passed with LXC 5.0.3 and cgroup v2; the Ubuntu Noble guest reached systemd
+state `running` and `systemd-journald` was active. This does not run the EmberDeck
+installer inside that guest or verify LXC host autostart. Raspberry Pi OS,
+serial device permissions, Windows COM ports, macOS serial devices, and systemd
+reboot/crash behavior still need recorded platform runs; simulator and
+fake-controller results are not physical hardware evidence.
 
 ## Build from source
 
