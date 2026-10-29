@@ -171,7 +171,8 @@ class PublishedLxcInstallSmokeTests(unittest.TestCase):
             lxc_install_smoke.assert_service_supplementary_group("guest", "emberdeck-driver.service", "dialout")
 
     def test_dialout_pty_permission_probe_runs_inside_guest(self):
-        with patch.object(lxc_install_smoke, "guest") as guest:
+        result = subprocess.CompletedProcess([], 0, stdout="PASS Linux PTY DAC access\n", stderr="")
+        with patch.object(lxc_install_smoke, "guest", return_value=result) as guest:
             lxc_install_smoke.verify_dialout_pty_permissions("guest")
 
         args = guest.call_args.args
