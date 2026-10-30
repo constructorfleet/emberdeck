@@ -254,7 +254,7 @@ version = Path('version.txt').read_text().strip()
 groups = {
     'Getting Started': ['index', 'install', 'operator-guide'],
     'Deploy & Run': ['deployment', 'metrics', 'troubleshooting', 'glossary', 'safety', 'hardware-qualification'],
-    'Develop & Extend': ['CONTRIBUTING', 'architecture', 'plugins', 'browser-tests', 'artifact-tests', 'roadmap', 'designer-architecture', 'esp32-feasibility', 'driver', 'worker', 'serial'],
+    'Develop & Extend': ['CONTRIBUTING', 'architecture', 'plugins', 'browser-tests', 'artifact-tests', 'roadmap', 'designer-architecture', 'esp32-feasibility', 'pi-os-qemu-feasibility', 'driver', 'worker', 'serial'],
     'Reference': ['api', 'api-routes', 'cli', 'search'],
 }
 page_title_overrides = {}
