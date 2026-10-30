@@ -32,6 +32,8 @@ jobs:
           $extractDir = Join-Path $workDir 'package'
           $setupPath = Join-Path $extractDir 'Setup_com0com_v3.0.0.0_W7_x64_signed.exe'
           $setupcPath = Join-Path $installDir 'setupc.exe'
+          $setupcCreateLogPath = Join-Path $workDir 'setupc-create.log'
+          $setupcUpdateLogPath = Join-Path $workDir 'setupc-update.log'
           $uninstallerPath = Join-Path $installDir 'uninstall.exe'
           $installStarted = $false
           $originalFailure = $null
@@ -108,6 +110,15 @@ jobs:
             return @{ Entities = $entities; Ports = $ports; PortDrivers = $portDrivers }
           }
 
+          function Show-SetupLog([string] $Path) {
+            if (Test-Path -LiteralPath $Path) {
+              Write-Host "setupc log ($Path):"
+              Get-Content -LiteralPath $Path | ForEach-Object { Write-Host $_ }
+            } else {
+              Write-Host "setupc did not create its log: $Path"
+            }
+          }
+
           try {
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
             Write-Host "Exploratory Windows virtual COM feasibility run; package source: $archiveUrl"
@@ -152,9 +163,20 @@ jobs:
             if (-not (Test-Path -LiteralPath $setupcPath)) {
               throw "Installer returned success but setupc.exe is missing at $setupcPath"
             }
-            Write-Host 'Stage: create a temporary virtual COM pair (setupc wait limit 30 seconds).'
-            Invoke-CheckedProcess -FilePath $setupcPath -ArgumentList @('--silent', '--wait', '30', 'install', '-', '-') `
+            Write-Host 'Stage: create a temporary virtual COM pair without driver update (bounded to 60 seconds).'
+            $createPairArguments = @(
+              '--output', $setupcCreateLogPath, '--silent', '--wait', '5', '--no-update', 'install', '-', '-'
+            )
+            Invoke-CheckedProcess -FilePath $setupcPath -ArgumentList $createPairArguments `
+              -WorkingDirectory $installDir -TimeoutSeconds 60
+            Show-SetupLog $setupcCreateLogPath
+            Write-Host 'Stage: update/install drivers for the temporary pair (bounded to 120 seconds).'
+            $updateDriversArguments = @(
+              '--output', $setupcUpdateLogPath, '--silent', '--wait', '30', 'install'
+            )
+            Invoke-CheckedProcess -FilePath $setupcPath -ArgumentList $updateDriversArguments `
               -WorkingDirectory $installDir -TimeoutSeconds 120
+            Show-SetupLog $setupcUpdateLogPath
             Write-Host "Stage: configure virtual ports from $installDir."
             Invoke-CheckedProcess -FilePath $setupcPath -ArgumentList @('change', 'CNCA0', 'PortName=COM10') `
               -WorkingDirectory $installDir -TimeoutSeconds 60
@@ -218,6 +240,8 @@ jobs:
           catch {
             $originalFailure = $_
             Write-Host "ERROR: $_"
+            Show-SetupLog $setupcCreateLogPath
+            Show-SetupLog $setupcUpdateLogPath
             if ($installStarted) {
               # Capture failure evidence too, including installer failures and
               # devices that exist but Windows refuses to start (for example, Code 52).
