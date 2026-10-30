@@ -165,14 +165,14 @@ jobs:
             }
             Write-Host 'Stage: create a temporary virtual COM pair without driver update (bounded to 60 seconds).'
             $createPairArguments = @(
-              '--output', $setupcCreateLogPath, '--silent', '--wait', '5', '--no-update', 'install', '-', '-'
+              '--output', $setupcCreateLogPath, '--silent', '--no-update', 'install', '-', '-'
             )
             Invoke-CheckedProcess -FilePath $setupcPath -ArgumentList $createPairArguments `
               -WorkingDirectory $installDir -TimeoutSeconds 60
             Show-SetupLog $setupcCreateLogPath
             Write-Host 'Stage: update/install drivers for the temporary pair (bounded to 120 seconds).'
             $updateDriversArguments = @(
-              '--output', $setupcUpdateLogPath, '--silent', '--wait', '30', 'install'
+              '--output', $setupcUpdateLogPath, '--silent', 'install'
             )
             Invoke-CheckedProcess -FilePath $setupcPath -ArgumentList $updateDriversArguments `
               -WorkingDirectory $installDir -TimeoutSeconds 120
