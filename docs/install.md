@@ -150,6 +150,16 @@ behavior, or a physical controller.
 The [macOS CI job](https://github.com/constructorfleet/emberdeck/actions/runs/40976661169/job/123806267698)
 passed this check on 2026-10-30.
 
+The manual [Windows virtual COM feasibility workflow](../.github/workflows/windows-com0com-feasibility.yml)
+installs the hash-pinned signed com0com package without changing Windows
+driver-signing settings. If Windows accepts the driver, the workflow checks
+device status and signature, then uses EmberDeck's production port enumerator
+and serial opener to transfer bytes over the virtual COM pair. It also removes
+the pair and attempts to uninstall the package. This is an exploratory runner
+check, not Windows COM permission evidence: it uses a virtual driver under one
+identity and does not verify USB adapter access, device ACL boundaries, GRBL
+behavior, or physical hardware. Windows COM validation remains incomplete.
+
 ## Build from source
 
 To build rather than download, install Go 1.27 and clone the repository:
