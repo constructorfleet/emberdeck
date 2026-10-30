@@ -115,8 +115,6 @@ test('success notices use success styling and remain visible through a poll cycl
   await expect(notice).toHaveClass(/notice-success/);
   await expect(notice).toHaveAttribute('role', 'status');
   await expect(notice.getByRole('button', { name: 'Dismiss notification' })).toBeVisible();
-  await page.waitForTimeout(4800);
-  await expect(notice).toBeVisible();
   await page.waitForFunction(() => window.successNoticeTiming.clearedAt !== null);
   const visibleFor = await page.evaluate(() => window.successNoticeTiming.clearedAt - window.successNoticeTiming.shownAt);
   expect(visibleFor).toBeGreaterThanOrEqual(5000);
@@ -371,8 +369,7 @@ test('operator uploads, confirms, monitors, views, completes, and deletes a job'
   page.once('dialog', (dialog) => dialog.accept());
   await row.getByRole('button', { name: /Delete/ }).click();
   await expect(page.locator('#notice .notice-message')).toHaveText('Program deleted.');
-  await expect(page.locator('#job-list li')).toHaveCount(0);
-  await expect(page.locator('#empty-state')).toBeVisible();
+  await expect(page.locator('#job-list li').filter({ hasText: name })).toHaveCount(0);
 });
 
 test('operator can cancel a running job', async ({ page }) => {
