@@ -294,10 +294,10 @@ async function main() {
       const headers = { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' };
       const source = await (await fetch(`/api/v1/jobs/${sourceJobID}`, { headers })).json();
       const profile = source.provenance.profile;
-      const points = [{ x_mm: 0, y_mm: 0 }, { x_mm: 10, y_mm: 0 }, ...Array.from({ length: 500 }, (_, index) => {
-        const row = Math.floor(index / 25);
-        const column = index % 25;
-        return { x_mm: 10 + (row % 2 === 0 ? column : 24 - column) * 10, y_mm: 10 + row * 9 };
+      const points = [{ x_mm: 0, y_mm: 0 }, { x_mm: 10, y_mm: 0 }, ...Array.from({ length: 1500 }, (_, index) => {
+        const row = Math.floor(index / 30);
+        const column = index % 30;
+        return { x_mm: 10 + (row % 2 === 0 ? column : 29 - column) * 5, y_mm: 10 + row * 3.5 };
       })];
       const projectResponse = await fetch('/api/v1/projects', {
         method: 'POST', headers,
