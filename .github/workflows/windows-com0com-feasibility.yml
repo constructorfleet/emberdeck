@@ -28,6 +28,7 @@ jobs:
           $workDir = Join-Path $env:RUNNER_TEMP 'emberdeck-com0com-feasibility'
           $installDir = Join-Path $workDir 'installed'
           $archivePath = Join-Path $workDir $archiveName
+          $responseHeadersPath = Join-Path $workDir 'response-headers.txt'
           $extractDir = Join-Path $workDir 'package'
           $setupPath = Join-Path $extractDir 'Setup_com0com_v3.0.0.0_W7_x64_signed.exe'
           $setupcPath = Join-Path $installDir 'setupc.exe'
@@ -84,10 +85,19 @@ jobs:
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
             Write-Host "Exploratory Windows virtual COM feasibility run; package source: $archiveUrl"
             Write-Host "Pinned package SHA-256: $expectedSha256"
-            Invoke-WebRequest -Uri $archiveUrl -OutFile $archivePath
+            & curl.exe --fail --location --retry 3 --retry-all-errors --retry-delay 2 `
+              --user-agent 'Wget/1.21' --header 'Accept: application/octet-stream' `
+              --dump-header $responseHeadersPath --output $archivePath $archiveUrl
+            if ($LASTEXITCODE -ne 0) {
+              throw "SourceForge archive download failed with curl exit code $LASTEXITCODE."
+            }
             $actualSha256 = (Get-FileHash -Path $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($actualSha256 -ne $expectedSha256) {
-              throw "Archive SHA-256 mismatch: expected $expectedSha256, got $actualSha256. Refusing to install driver."
+              $archiveSize = (Get-Item -LiteralPath $archivePath).Length
+              $archivePrefix = (Get-Content -LiteralPath $archivePath -AsByteStream -TotalCount 4 | ForEach-Object { $_.ToString('X2') }) -join ' '
+              $responseSummary = @(Select-String -Path $responseHeadersPath -Pattern '^HTTP/[^ ]+ ', '^Content-Type:', '^Content-Length:' | ForEach-Object { $_.Line })
+              Write-Host "SourceForge response summary: $($responseSummary -join '; ')"
+              throw "Archive SHA-256 mismatch: expected $expectedSha256, got $actualSha256; bytes=$archiveSize; first-bytes='$archivePrefix'. Refusing to install driver."
             }
             Write-Host "Verified archive SHA-256: $actualSha256"
 
