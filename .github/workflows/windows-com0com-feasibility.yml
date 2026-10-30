@@ -47,8 +47,11 @@ jobs:
             $entities = @(Get-CimInstance Win32_PnPEntity | Where-Object {
               $_.Name -match 'com0com|CNCA0|CNCB0|COM10|COM11'
             })
-            $signedDrivers = @(Get-CimInstance Win32_PnPSignedDriver | Where-Object {
-              $_.DeviceName -match 'com0com|CNCA0|CNCB0|COM10|COM11'
+            $ports = @(Get-CimInstance Win32_SerialPort | Where-Object {
+              $_.DeviceID -in @('COM10', 'COM11')
+            })
+            $portDrivers = @(Get-CimInstance Win32_PnPSignedDriver | Where-Object {
+              $_.DeviceID -in @($ports | ForEach-Object { $_.PNPDeviceID })
             })
             if ($entities.Count -eq 0) {
               Write-Host 'Device evidence: no matching Win32_PnPEntity records found.'
@@ -57,14 +60,24 @@ jobs:
               Write-Host ("Device status: Name='{0}' Status='{1}' Code={2} PNPDeviceID='{3}'" -f `
                 $entity.Name, $entity.Status, $entity.ConfigManagerErrorCode, $entity.PNPDeviceID)
             }
-            if ($signedDrivers.Count -eq 0) {
-              Write-Host 'Signature evidence: no matching Win32_PnPSignedDriver records found.'
+            if ($ports.Count -eq 0) {
+              Write-Host 'COM evidence: no COM10/COM11 Win32_SerialPort records found.'
             }
-            foreach ($driver in $signedDrivers) {
-              Write-Host ("Driver signature: DeviceName='{0}' IsSigned={1} Signer='{2}' InfName='{3}' Version='{4}'" -f `
-                $driver.DeviceName, $driver.IsSigned, $driver.Signer, $driver.InfName, $driver.DriverVersion)
+            foreach ($port in $ports) {
+              $entity = @($entities | Where-Object { $_.PNPDeviceID -ieq $port.PNPDeviceID })
+              $driver = @($portDrivers | Where-Object { $_.DeviceID -ieq $port.PNPDeviceID })
+              $entityStatus = if ($entity.Count -eq 1) { $entity[0].Status } else { 'missing-or-ambiguous' }
+              $entityCode = if ($entity.Count -eq 1) { $entity[0].ConfigManagerErrorCode } else { -1 }
+              Write-Host ("COM mapping: Port='{0}' PNPDeviceID='{1}' Status='{2}' Code={3}" -f `
+                $port.DeviceID, $port.PNPDeviceID, $entityStatus, $entityCode)
+              if ($driver.Count -eq 1) {
+                Write-Host ("Driver signature: Port='{0}' DeviceID='{1}' IsSigned={2} Signer='{3}' InfName='{4}' Version='{5}'" -f `
+                  $port.DeviceID, $driver[0].DeviceID, $driver[0].IsSigned, $driver[0].Signer, $driver[0].InfName, $driver[0].DriverVersion)
+              } else {
+                Write-Host ("Driver signature: Port='{0}' matched records={1}" -f $port.DeviceID, $driver.Count)
+              }
             }
-            return @{ Entities = $entities; SignedDrivers = $signedDrivers }
+            return @{ Entities = $entities; Ports = $ports; PortDrivers = $portDrivers }
           }
 
           try {
@@ -106,9 +119,14 @@ jobs:
             Start-Sleep -Seconds 3
             $evidence = Show-Com0comDeviceEvidence
             $badEntities = @($evidence.Entities | Where-Object { $_.ConfigManagerErrorCode -ne 0 -or $_.Status -ne 'OK' })
-            $unsignedDrivers = @($evidence.SignedDrivers | Where-Object { -not $_.IsSigned })
-            if ($evidence.Entities.Count -lt 2 -or $badEntities.Count -gt 0 -or
-                $evidence.SignedDrivers.Count -lt 1 -or $unsignedDrivers.Count -gt 0) {
+            $unhealthyPortMappings = @($evidence.Ports | Where-Object {
+              $port = $_
+              $entity = @($evidence.Entities | Where-Object { $_.PNPDeviceID -ieq $port.PNPDeviceID })
+              $driver = @($evidence.PortDrivers | Where-Object { $_.DeviceID -ieq $port.PNPDeviceID })
+              $entity.Count -ne 1 -or $driver.Count -ne 1 -or -not $driver[0].IsSigned -or
+                [string]::IsNullOrWhiteSpace($driver[0].Signer)
+            })
+            if ($evidence.Ports.Count -ne 2 -or $badEntities.Count -gt 0 -or $unhealthyPortMappings.Count -gt 0) {
               throw 'com0com ports are not present and healthy with a signed driver. See the device status, problem code, and signature evidence above; Windows driver policy may have rejected the package (for example, Code 52). TESTSIGNING was not enabled.'
             }
 
