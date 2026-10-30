@@ -112,7 +112,8 @@ jobs:
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
             Write-Host "Exploratory Windows virtual COM feasibility run; package source: $archiveUrl"
             Write-Host "Pinned package SHA-256: $expectedSha256"
-            & curl.exe --fail --location --retry 3 --retry-all-errors --retry-delay 2 `
+            & curl.exe --fail --location --connect-timeout 20 --max-time 120 `
+              --retry 3 --retry-all-errors --retry-delay 2 `
               --user-agent 'Wget/1.21' --header 'Accept: application/octet-stream' `
               --dump-header $responseHeadersPath --output $archivePath $archiveUrl
             if ($LASTEXITCODE -ne 0) {
@@ -138,18 +139,22 @@ jobs:
               throw "COM10 or COM11 is already present; refusing to claim or alter an existing port."
             }
 
-            # Silent installation creates the default CNCA0/CNCB0 pair when this
-            # package-specific environment variable is set. No signing policy is changed.
-            $env:CNC_INSTALL_CNCA0_CNCB0_PORTS = 'YES'
+            # Separate copying the package files from PnP driver preinstallation.
+            # The latter can wait on interactive device-install UI on hosted Windows.
+            # Create the temporary pair explicitly through setupc below.
+            $env:CNC_INSTALL_SKIP_SETUP_PREINSTALL = 'YES'
             $installStarted = $true
             Write-Host 'Stage: install signed com0com package (bounded to 300 seconds).'
             Invoke-CheckedProcess -FilePath $setupPath -ArgumentList @('/S', "/D=$installDir") `
               -WorkingDirectory $extractDir -TimeoutSeconds 300
-            Remove-Item Env:\CNC_INSTALL_CNCA0_CNCB0_PORTS -ErrorAction SilentlyContinue
+            Remove-Item Env:\CNC_INSTALL_SKIP_SETUP_PREINSTALL -ErrorAction SilentlyContinue
 
             if (-not (Test-Path -LiteralPath $setupcPath)) {
               throw "Installer returned success but setupc.exe is missing at $setupcPath"
             }
+            Write-Host 'Stage: create a temporary virtual COM pair (setupc wait limit 30 seconds).'
+            Invoke-CheckedProcess -FilePath $setupcPath -ArgumentList @('--silent', '--wait', '30', 'install', '-', '-') `
+              -WorkingDirectory $installDir -TimeoutSeconds 120
             Write-Host "Stage: configure virtual ports from $installDir."
             Invoke-CheckedProcess -FilePath $setupcPath -ArgumentList @('change', 'CNCA0', 'PortName=COM10') `
               -WorkingDirectory $installDir -TimeoutSeconds 60
@@ -220,18 +225,7 @@ jobs:
             }
           }
           finally {
-            Remove-Item Env:\CNC_INSTALL_CNCA0_CNCB0_PORTS -ErrorAction SilentlyContinue
-            if ($installStarted -and (Test-Path -LiteralPath $setupcPath)) {
-              try {
-                Write-Host 'Stage: remove temporary virtual port pair (bounded to 60 seconds).'
-                Invoke-CheckedProcess -FilePath $setupcPath -ArgumentList @('remove', 'CNCA0', 'CNCB0') `
-                  -WorkingDirectory $installDir -TimeoutSeconds 60
-                Write-Host 'Removed the temporary CNCA0/CNCB0 virtual port pair.'
-              }
-              catch {
-                $cleanupFailures += "Could not remove the temporary port pair: $_"
-              }
-            }
+            Remove-Item Env:\CNC_INSTALL_SKIP_SETUP_PREINSTALL -ErrorAction SilentlyContinue
             if ($installStarted -and (Test-Path -LiteralPath $uninstallerPath)) {
               try {
                 Write-Host 'Stage: run package uninstaller (bounded to 120 seconds).'
