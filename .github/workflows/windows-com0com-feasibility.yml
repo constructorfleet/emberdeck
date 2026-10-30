@@ -23,7 +23,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $archiveName = 'com0com-3.0.0.0-i386-and-x64-signed.zip'
-          $archiveUrl = 'https://sourceforge.net/projects/com0com/files/com0com/3.0.0.0/com0com-3.0.0.0-i386-and-x64-signed.zip/download'
+          $archiveUrl = 'https://downloads.sourceforge.net/project/com0com/com0com/3.0.0.0/com0com-3.0.0.0-i386-and-x64-signed.zip?viasf=1'
           $expectedSha256 = '6e5d4359865277430d4ae88c73fb7e648a0ed8e81aea5002478179cfcb0bb0e1'
           $workDir = Join-Path $env:RUNNER_TEMP 'emberdeck-com0com-feasibility'
           $installDir = Join-Path $workDir 'installed'
