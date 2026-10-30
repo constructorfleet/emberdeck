@@ -490,6 +490,8 @@ past file access to the PTY's `ENOTTY` modem-control boundary. macOS denies
 creating test aliases inside `/dev`; this does not test real `/dev/cu.*` IOKit
 enumeration, USB adapter permissions, serial streaming, or physical controller
 behavior. Windows COM and Raspberry Pi OS evidence remain outstanding.
+The [macOS CI job](https://github.com/constructorfleet/emberdeck/actions/runs/40976661169/job/123806267698)
+passed this check on 2026-10-30.
 
 ## Driver as a service
 

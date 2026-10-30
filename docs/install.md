@@ -142,6 +142,8 @@ that its owner reaches the post-open `ENOTTY` boundary. macOS denies creating
 test aliases inside `/dev`, so this verifies macOS filesystem permissions and
 the opener but not a real `/dev/cu.*` IOKit/USB device, serial streaming, modem
 behavior, or a physical controller.
+The [macOS CI job](https://github.com/constructorfleet/emberdeck/actions/runs/40976661169/job/123806267698)
+passed this check on 2026-10-30.
 
 ## Build from source
 
