@@ -86,6 +86,11 @@ passed on 2026-10-29. QEMU user-mode emulation does not boot an ARM64 kernel or
 Raspberry Pi OS and does not validate Pi-specific services, serial permissions,
 GPIO, USB devices, or physical hardware. Raspberry Pi OS still needs a recorded
 native install run.
+An exploratory full-system QEMU run booted the Pi OS kernel and reached systemd,
+but its emulated guest network did not complete an SSH handshake, so the
+published install smoke could not run. See the
+[QEMU feasibility evidence](research/pi-os-qemu-feasibility.md); this is not a
+native Pi OS install result.
 
 The scheduled/manual published-install workflow installs the two newest
 published Linux binaries and both systemd units inside an Ubuntu guest under

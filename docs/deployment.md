@@ -309,6 +309,9 @@ asset checksum and runtime install/upgrade path. [Run
 passed on 2026-10-29. This does not boot Raspberry Pi OS or qualify Pi-specific
 services, serial permissions, GPIO, USB devices, or physical hardware. See the
 [install validation scope](install.md#published-install-checks).
+The separate [Pi OS system-emulation experiment](research/pi-os-qemu-feasibility.md)
+reached systemd but could not establish guest networking or run the published
+install smoke; it does not satisfy native Raspberry Pi OS validation.
 
 The LXC smoke also checks that the fixture is selected by the host's
 `lxc-autostart --list` and that a host `lxc-autostart` dispatch starts it with
