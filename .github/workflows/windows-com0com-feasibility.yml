@@ -34,6 +34,7 @@ jobs:
           $setupcPath = Join-Path $installDir 'setupc.exe'
           $setupcCreateLogPath = Join-Path $workDir 'setupc-create.log'
           $setupcUpdateLogPath = Join-Path $workDir 'setupc-update.log'
+          $setupcCleanupLogPath = Join-Path $workDir 'setupc-cleanup.log'
           $uninstallerPath = Join-Path $installDir 'uninstall.exe'
           $installStarted = $false
           $originalFailure = $null
@@ -242,6 +243,7 @@ jobs:
             Write-Host "ERROR: $_"
             Show-SetupLog $setupcCreateLogPath
             Show-SetupLog $setupcUpdateLogPath
+            Show-SetupLog $setupcCleanupLogPath
             if ($installStarted) {
               # Capture failure evidence too, including installer failures and
               # devices that exist but Windows refuses to start (for example, Code 52).
@@ -250,6 +252,19 @@ jobs:
           }
           finally {
             Remove-Item Env:\CNC_INSTALL_SKIP_SETUP_PREINSTALL -ErrorAction SilentlyContinue
+            if ($installStarted -and (Test-Path -LiteralPath $setupcPath)) {
+              try {
+                Write-Host 'Stage: remove temporary com0com devices through setupc uninstall (bounded to 60 seconds).'
+                $uninstallDevicesArguments = @('--output', $setupcCleanupLogPath, '--silent', 'uninstall')
+                Invoke-CheckedProcess -FilePath $setupcPath -ArgumentList $uninstallDevicesArguments `
+                  -WorkingDirectory $installDir -TimeoutSeconds 60
+                Show-SetupLog $setupcCleanupLogPath
+              }
+              catch {
+                $cleanupFailures += "setupc uninstall could not remove temporary devices: $_"
+                Show-SetupLog $setupcCleanupLogPath
+              }
+            }
             if ($installStarted -and (Test-Path -LiteralPath $uninstallerPath)) {
               try {
                 Write-Host 'Stage: run package uninstaller (bounded to 120 seconds).'
@@ -262,9 +277,14 @@ jobs:
               }
             }
             if ($installStarted) {
-              $remaining = @(Get-CimInstance Win32_PnPEntity | Where-Object {
-                $_.Name -match 'com0com|CNCA0|CNCB0|COM10|COM11'
-              })
+              $remaining = @()
+              for ($attempt = 0; $attempt -lt 6; $attempt++) {
+                $remaining = @(Get-CimInstance Win32_PnPEntity | Where-Object {
+                  $_.Name -match 'com0com|CNCA0|CNCB0|COM10|COM11'
+                })
+                if ($remaining.Count -eq 0) { break }
+                Start-Sleep -Seconds 2
+              }
               if ($remaining.Count -gt 0) {
                 foreach ($device in $remaining) {
                   Write-Host ("After cleanup: Name='{0}' Status='{1}' Code={2} PNPDeviceID='{3}'" -f `
