@@ -162,6 +162,19 @@ leftovers, and the package uninstaller completed. The workflow failed at the
 original driver-update timeout. This run provides no COM-port or serial-transfer
 evidence.
 
+In manual [run 41016455703](https://github.com/constructorfleet/emberdeck/actions/runs/41016455703),
+the `setupc` driver update again timed out after 120 seconds. The appended
+[SetupAPI device-installation log](https://learn.microsoft.com/en-us/windows-hardware/drivers/install/setupapi-device-installation-log-entries)
+showed catalog signature verification errors `0x800b0109` (the certificate
+chain terminated at an untrusted root) and `0xe0000242` (the publisher was not
+established as trusted), even though a later entry reported the catalog as
+Authenticode-signed. No matching entries appeared in the queried Kernel-PnP,
+DeviceSetupManager, or Code Integrity logs. Windows still reported only the
+com0com bus device, with no COM10/COM11 ports. Bounded cleanup removed the
+device and driver registrations. These results suggest a trust rejection, but
+do not establish where `setupc` waits. No signing policy was changed, and this
+run provides no port or serial-transfer evidence.
+
 This remains an exploratory virtual-driver check, not Windows COM permission
 evidence. It uses one runner identity and does not verify USB adapter access,
 device ACL boundaries, GRBL behavior, or physical hardware. Windows COM
