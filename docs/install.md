@@ -152,13 +152,20 @@ passed this check on 2026-10-30.
 
 The manual [Windows virtual COM feasibility workflow](../.github/workflows/windows-com0com-feasibility.yml)
 installs the hash-pinned signed com0com package without changing Windows
-driver-signing settings. If Windows accepts the driver, the workflow checks
-device status and signature, then uses EmberDeck's production port enumerator
-and serial opener to transfer bytes over the virtual COM pair. It also removes
-the pair and attempts to uninstall the package. This is an exploratory runner
-check, not Windows COM permission evidence: it uses a virtual driver under one
-identity and does not verify USB adapter access, device ACL boundaries, GRBL
-behavior, or physical hardware. Windows COM validation remains incomplete.
+driver-signing settings. In manual [run 41001948130](https://github.com/constructorfleet/emberdeck/actions/runs/41001948130),
+the archive hash passed and package installation and virtual-pair creation
+completed. The subsequent `setupc` driver update timed out after 120 seconds.
+The runner reported only the com0com bus device; it found no COM10/COM11 ports
+and produced no port endpoint signature records. Bounded `setupc uninstall`
+removed the device, service, and driver registrations; cleanup found no matching
+leftovers, and the package uninstaller completed. The workflow failed at the
+original driver-update timeout. This run provides no COM-port or serial-transfer
+evidence.
+
+This remains an exploratory virtual-driver check, not Windows COM permission
+evidence. It uses one runner identity and does not verify USB adapter access,
+device ACL boundaries, GRBL behavior, or physical hardware. Windows COM
+validation remains incomplete.
 
 ## Build from source
 
