@@ -37,8 +37,35 @@ jobs:
           $originalFailure = $null
           $cleanupFailures = @()
 
-          function Invoke-CheckedProcess([string] $FilePath, [string[]] $ArgumentList) {
-            $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -Wait -PassThru -NoNewWindow
+          function Invoke-CheckedProcess(
+            [string] $FilePath,
+            [string[]] $ArgumentList,
+            [string] $WorkingDirectory,
+            [int] $TimeoutSeconds
+          ) {
+            $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $FilePath
+            $startInfo.WorkingDirectory = $WorkingDirectory
+            $startInfo.UseShellExecute = $false
+            $startInfo.CreateNoWindow = $true
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            foreach ($argument in $ArgumentList) { [void] $startInfo.ArgumentList.Add($argument) }
+
+            $process = [System.Diagnostics.Process]::new()
+            $process.StartInfo = $startInfo
+            if (-not $process.Start()) { throw "Could not start process: $FilePath" }
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrTask = $process.StandardError.ReadToEndAsync()
+            if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+              $process.Kill($true)
+              [void] $process.WaitForExit(10000)
+              throw "Process timed out after ${TimeoutSeconds}s: $FilePath $($ArgumentList -join ' ')"
+            }
+            $stdout = $stdoutTask.GetAwaiter().GetResult()
+            $stderr = $stderrTask.GetAwaiter().GetResult()
+            if ($stdout) { Write-Host $stdout.TrimEnd() }
+            if ($stderr) { Write-Host $stderr.TrimEnd() }
             if ($process.ExitCode -ne 0) {
               throw "Process failed with exit code $($process.ExitCode): $FilePath $($ArgumentList -join ' ')"
             }
@@ -115,16 +142,22 @@ jobs:
             # package-specific environment variable is set. No signing policy is changed.
             $env:CNC_INSTALL_CNCA0_CNCB0_PORTS = 'YES'
             $installStarted = $true
-            Invoke-CheckedProcess -FilePath $setupPath -ArgumentList @('/S', "/D=$installDir")
+            Write-Host 'Stage: install signed com0com package (bounded to 300 seconds).'
+            Invoke-CheckedProcess -FilePath $setupPath -ArgumentList @('/S', "/D=$installDir") `
+              -WorkingDirectory $extractDir -TimeoutSeconds 300
             Remove-Item Env:\CNC_INSTALL_CNCA0_CNCB0_PORTS -ErrorAction SilentlyContinue
 
             if (-not (Test-Path -LiteralPath $setupcPath)) {
               throw "Installer returned success but setupc.exe is missing at $setupcPath"
             }
-            Invoke-CheckedProcess -FilePath $setupcPath -ArgumentList @('change', 'CNCA0', 'PortName=COM10')
-            Invoke-CheckedProcess -FilePath $setupcPath -ArgumentList @('change', 'CNCB0', 'PortName=COM11')
-            & $setupcPath list
-            if ($LASTEXITCODE -ne 0) { throw "setupc list failed with exit code $LASTEXITCODE" }
+            Write-Host "Stage: configure virtual ports from $installDir."
+            Invoke-CheckedProcess -FilePath $setupcPath -ArgumentList @('change', 'CNCA0', 'PortName=COM10') `
+              -WorkingDirectory $installDir -TimeoutSeconds 60
+            Invoke-CheckedProcess -FilePath $setupcPath -ArgumentList @('change', 'CNCB0', 'PortName=COM11') `
+              -WorkingDirectory $installDir -TimeoutSeconds 60
+            Write-Host 'Stage: enumerate configured virtual ports.'
+            Invoke-CheckedProcess -FilePath $setupcPath -ArgumentList @('list') `
+              -WorkingDirectory $installDir -TimeoutSeconds 60
 
             Start-Sleep -Seconds 3
             $evidence = Show-Com0comDeviceEvidence
@@ -143,6 +176,7 @@ jobs:
             $goTestExitCode = $null
             try {
               $env:EMBERDECK_WINDOWS_COM_SMOKE = '1'
+              Write-Host 'Stage: run EmberDeck production serial transport round trip.'
               go test ./transport -run '^TestWindowsVirtualCOMPairRoundTrip$' -count=1 -v
               $goTestExitCode = $LASTEXITCODE
             }
@@ -153,6 +187,7 @@ jobs:
               throw "Production Windows virtual COM integration test failed with exit code $goTestExitCode."
             }
 
+            Write-Host 'Stage: independently transfer bytes through COM10 and COM11.'
             $portA = [System.IO.Ports.SerialPort]::new('COM10', 115200, [System.IO.Ports.Parity]::None, 8, [System.IO.Ports.StopBits]::One)
             $portB = [System.IO.Ports.SerialPort]::new('COM11', 115200, [System.IO.Ports.Parity]::None, 8, [System.IO.Ports.StopBits]::One)
             try {
@@ -188,8 +223,9 @@ jobs:
             Remove-Item Env:\CNC_INSTALL_CNCA0_CNCB0_PORTS -ErrorAction SilentlyContinue
             if ($installStarted -and (Test-Path -LiteralPath $setupcPath)) {
               try {
-                & $setupcPath remove CNCA0 CNCB0
-                if ($LASTEXITCODE -ne 0) { throw "setupc remove exited with code $LASTEXITCODE" }
+                Write-Host 'Stage: remove temporary virtual port pair (bounded to 60 seconds).'
+                Invoke-CheckedProcess -FilePath $setupcPath -ArgumentList @('remove', 'CNCA0', 'CNCB0') `
+                  -WorkingDirectory $installDir -TimeoutSeconds 60
                 Write-Host 'Removed the temporary CNCA0/CNCB0 virtual port pair.'
               }
               catch {
@@ -198,7 +234,9 @@ jobs:
             }
             if ($installStarted -and (Test-Path -LiteralPath $uninstallerPath)) {
               try {
-                Invoke-CheckedProcess -FilePath $uninstallerPath -ArgumentList @('/S')
+                Write-Host 'Stage: run package uninstaller (bounded to 120 seconds).'
+                Invoke-CheckedProcess -FilePath $uninstallerPath -ArgumentList @('/S') `
+                  -WorkingDirectory $installDir -TimeoutSeconds 120
                 Write-Host 'Ran the package uninstaller.'
               }
               catch {
