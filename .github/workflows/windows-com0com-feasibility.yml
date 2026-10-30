@@ -35,6 +35,7 @@ jobs:
           $setupcCreateLogPath = Join-Path $workDir 'setupc-create.log'
           $setupcUpdateLogPath = Join-Path $workDir 'setupc-update.log'
           $setupcCleanupLogPath = Join-Path $workDir 'setupc-cleanup.log'
+          $setupApiLogPath = Join-Path $env:SystemRoot 'inf\setupapi.dev.log'
           $uninstallerPath = Join-Path $installDir 'uninstall.exe'
           $installStarted = $false
           $originalFailure = $null
@@ -120,6 +121,99 @@ jobs:
             }
           }
 
+          function Show-DriverUpdateDiagnostics([DateTimeOffset] $StartedAtUtc, [long] $SetupApiStartLength) {
+            $endedAtUtc = [DateTimeOffset]::UtcNow
+            Write-Host "Driver update diagnostics window: $($StartedAtUtc.ToString('o')) through $($endedAtUtc.ToString('o'))."
+
+            if (Test-Path -LiteralPath $setupApiLogPath) {
+              $stream = [System.IO.File]::Open($setupApiLogPath, [System.IO.FileMode]::Open, `
+                [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+              try {
+                $currentLength = $stream.Length
+                if ($currentLength -lt $SetupApiStartLength) {
+                  Write-Host 'SetupAPI.dev.log was truncated during the driver-update window; scanning the current file.'
+                  $SetupApiStartLength = 0
+                }
+                if ($currentLength -le $SetupApiStartLength) {
+                  Write-Host 'SetupAPI.dev.log has no appended bytes from the driver-update window.'
+                } else {
+                  $maximumBytes = 1048576
+                  $readOffset = [Math]::Max($SetupApiStartLength, $currentLength - $maximumBytes)
+                  if ($readOffset -gt $SetupApiStartLength) {
+                    Write-Host "SetupAPI.dev.log appended section exceeds 1 MiB; scanning its final 1 MiB (byte offset $readOffset)."
+                  }
+                  [void] $stream.Seek($readOffset, [System.IO.SeekOrigin]::Begin)
+                  $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8, $true)
+                  try { $appendedText = $reader.ReadToEnd() } finally { $reader.Dispose() }
+                  $lines = @($appendedText -split "`r?`n")
+                  $matchingLines = [System.Collections.Generic.List[int]]::new()
+                  for ($lineIndex = 0; $lineIndex -lt $lines.Count; $lineIndex++) {
+                    if ($lines[$lineIndex] -match '(?i)(com0com|ROOT\\COM0COM|CNCA0|CNCB0|COM10|COM11|!!!|error|fail|sign|status|problem|code.?52)') {
+                      $matchingLines.Add($lineIndex)
+                    }
+                  }
+                  if ($matchingLines.Count -eq 0) {
+                    Write-Host 'SetupAPI.dev.log appended section has no matching com0com, device, error, or signature lines.'
+                  } else {
+                    Write-Host "SetupAPI.dev.log matching appended evidence (up to 120 lines; byte offset $readOffset):"
+                    $selected = [System.Collections.Generic.SortedSet[int]]::new()
+                    foreach ($lineIndex in $matchingLines) {
+                      for ($contextIndex = [Math]::Max(0, $lineIndex - 2); $contextIndex -le [Math]::Min($lines.Count - 1, $lineIndex + 2); $contextIndex++) {
+                        [void] $selected.Add($contextIndex)
+                      }
+                    }
+                    $selectedLines = @($selected | Select-Object -Last 120)
+                    if ($selected.Count -gt $selectedLines.Count) { Write-Host 'SetupAPI output truncated to the latest 120 context lines.' }
+                    foreach ($contextIndex in $selectedLines) {
+                      $line = $lines[$contextIndex]
+                      if ($line.Length -gt 1200) { $line = $line.Substring(0, 1200) + ' [truncated]' }
+                      Write-Host $line
+                    }
+                  }
+                }
+              } finally { $stream.Dispose() }
+            } else {
+              Write-Host 'SetupAPI.dev.log does not exist on this runner.'
+            }
+
+            $eventLogs = @(
+              'Microsoft-Windows-Kernel-PnP/Configuration',
+              'Microsoft-Windows-DeviceSetupManager/Admin',
+              'Microsoft-Windows-CodeIntegrity/Operational'
+            )
+            $startLocal = $StartedAtUtc.ToLocalTime().DateTime
+            $endLocal = $endedAtUtc.ToLocalTime().DateTime
+            foreach ($logName in $eventLogs) {
+              try {
+                $log = Get-WinEvent -ListLog $logName -ErrorAction Stop
+                if (-not $log.IsEnabled) {
+                  Write-Host "Event log is disabled; left unchanged: $logName"
+                  continue
+                }
+                $events = @(Get-WinEvent -FilterHashtable @{
+                  LogName = $logName
+                  StartTime = $startLocal
+                  EndTime = $endLocal
+                } -MaxEvents 100 -ErrorAction SilentlyContinue)
+                $relevant = @($events | Where-Object {
+                  $_.Message -match '(?i)(com0com|ROOT\\COM0COM|CNCA0|CNCB0|COM10|COM11|driver|sign|install|device|0x[0-9a-f]+)'
+                } | Select-Object -First 20)
+                if ($relevant.Count -eq 0) {
+                  Write-Host "No matching events in $logName during the driver-update window."
+                  continue
+                }
+                foreach ($event in $relevant) {
+                  $message = ($event.Message -replace '[\r\n]+', ' ')
+                  if ($message.Length -gt 1200) { $message = $message.Substring(0, 1200) + ' [truncated]' }
+                  Write-Host ("Event UTC='{0}' Log='{1}' Provider='{2}' ID={3} Message='{4}'" -f `
+                    $event.TimeCreated.ToUniversalTime().ToString('o'), $logName, $event.ProviderName, $event.Id, $message)
+                }
+              } catch {
+                Write-Host "Could not query existing event log $logName`: $_"
+              }
+            }
+          }
+
           try {
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
             Write-Host "Exploratory Windows virtual COM feasibility run; package source: $archiveUrl"
@@ -175,8 +269,21 @@ jobs:
             $updateDriversArguments = @(
               '--output', $setupcUpdateLogPath, '--silent', 'install'
             )
-            Invoke-CheckedProcess -FilePath $setupcPath -ArgumentList $updateDriversArguments `
-              -WorkingDirectory $installDir -TimeoutSeconds 120
+            $driverUpdateStartedAtUtc = [DateTimeOffset]::UtcNow
+            $setupApiStartLength = if (Test-Path -LiteralPath $setupApiLogPath) {
+              (Get-Item -LiteralPath $setupApiLogPath).Length
+            } else { 0L }
+            Write-Host "Driver update start UTC: $($driverUpdateStartedAtUtc.ToString('o')); SetupAPI.dev.log starting length: $setupApiStartLength bytes."
+            try {
+              Invoke-CheckedProcess -FilePath $setupcPath -ArgumentList $updateDriversArguments `
+                -WorkingDirectory $installDir -TimeoutSeconds 120
+            } catch {
+              $updateFailure = $_
+              Write-Host 'Stage: collect bounded Windows driver-install diagnostics before cleanup.'
+              try { Show-DriverUpdateDiagnostics -StartedAtUtc $driverUpdateStartedAtUtc -SetupApiStartLength $setupApiStartLength }
+              catch { Write-Host "Windows driver-install diagnostics collection failed: $_" }
+              throw $updateFailure
+            }
             Show-SetupLog $setupcUpdateLogPath
             Write-Host "Stage: configure virtual ports from $installDir."
             Invoke-CheckedProcess -FilePath $setupcPath -ArgumentList @('change', 'CNCA0', 'PortName=COM10') `
