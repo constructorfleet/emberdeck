@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.19.0](https://github.com/constructorfleet/emberdeck/compare/v0.18.0...v0.19.0) (2026-10-30)
+
+
+### Features
+
+* add ESP32 chunked worker transport ([#154](https://github.com/constructorfleet/emberdeck/issues/154)) ([778db94](https://github.com/constructorfleet/emberdeck/commit/778db94fd9558096bf912082a0ce341a710701da))
+* add Linux Compose serial worker profile ([#165](https://github.com/constructorfleet/emberdeck/issues/165)) ([edfecbc](https://github.com/constructorfleet/emberdeck/commit/edfecbc0c8d8916795b233de0e125599c78663b8))
+* review fully known uploads as in bounds ([#151](https://github.com/constructorfleet/emberdeck/issues/151)) ([b67a559](https://github.com/constructorfleet/emberdeck/commit/b67a55998e2ba0e14dd6c8c62659285b64a67701))
+* validate classic LXC system guest ([#157](https://github.com/constructorfleet/emberdeck/issues/157)) ([b9781c1](https://github.com/constructorfleet/emberdeck/commit/b9781c1c42fa81a48c79ebdf1bd41c4a4d625cb0))
+* validate published LXC systemd install ([#160](https://github.com/constructorfleet/emberdeck/issues/160)) ([ebfe64f](https://github.com/constructorfleet/emberdeck/commit/ebfe64fdd3ad7a80222afae6efe5aeb419c6d856))
+
+
+### Bug Fixes
+
+* parse LXC guest state in validation ([#158](https://github.com/constructorfleet/emberdeck/issues/158)) ([86bcea3](https://github.com/constructorfleet/emberdeck/commit/86bcea3651b9edc32f8deb0e7b07ac954e0c6843))
+* show field-level validation errors ([#153](https://github.com/constructorfleet/emberdeck/issues/153)) ([9c0cd67](https://github.com/constructorfleet/emberdeck/commit/9c0cd67f8e4cc4b951e11f54cfa8fd92cc9cc2fa)), closes [#24](https://github.com/constructorfleet/emberdeck/issues/24)
+
 ## [0.18.0](https://github.com/constructorfleet/emberdeck/compare/v0.17.0...v0.18.0) (2026-10-28)
 
 
