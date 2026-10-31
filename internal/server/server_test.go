@@ -24,6 +24,52 @@ func request(t *testing.T, h http.Handler, method, path, body, key string) *http
 	return w
 }
 
+func TestServerWithoutConfiguredKeyAcceptsUnauthenticatedRequests(t *testing.T) {
+	dir := t.TempDir()
+	s, err := server.Open(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	for _, path := range []string{"/api/v1/auth", "/api/v1/jobs"} {
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s without Authorization = %d %s; want 200", path, w.Code, w.Body.String())
+		}
+		if path == "/api/v1/auth" && (!strings.Contains(w.Body.String(), `"role":"admin"`) || !strings.Contains(w.Body.String(), `"authentication_required":false`)) {
+			t.Fatalf("unauthenticated identity = %s; want an admin with authentication disabled", w.Body.String())
+		}
+	}
+	poll := httptest.NewRequest(http.MethodPost, "/api/v1/drivers/simulator/poll", strings.NewReader(`{"session":"keyless-session","capabilities":[]}`))
+	poll.Header.Set("Content-Type", "application/json")
+	polled := httptest.NewRecorder()
+	s.ServeHTTP(polled, poll)
+	if polled.Code != http.StatusOK {
+		t.Fatalf("keyless worker poll = %d %s; want 200", polled.Code, polled.Body.String())
+	}
+	if w := request(t, s, http.MethodGet, "/api/v1/drivers", "", ""); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"simulator"`) {
+		t.Fatalf("keyless worker was not listed as a driver: %d %s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "credentials.json")); !os.IsNotExist(err) {
+		t.Fatalf("keyless start created a credential store: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	keyed, err := server.Open(dir, "configured-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = keyed.Close() })
+	if w := request(t, keyed, http.MethodGet, "/api/v1/jobs", "", ""); w.Code != http.StatusUnauthorized {
+		t.Fatalf("keyed reopen without a credential = %d; want 401", w.Code)
+	}
+}
+
 func TestUploadRejectsDriverInvalidProgramWithLineNumber(t *testing.T) {
 	s, err := server.Open(t.TempDir(), "test-key")
 	if err != nil {

@@ -9,7 +9,8 @@ import (
 var uiAssets embed.FS
 
 // serveUI serves only the public console shell and its static assets. Job data
-// remains available exclusively through the authenticated API.
+// remains available exclusively through the API, which requires authentication
+// unless the server was started without a configured key.
 func (s *Server) serveUI(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return false

@@ -34,6 +34,7 @@ type Server struct {
 	mu               sync.Mutex
 	dir              string
 	key              string
+	authDisabled     bool
 	jobs             map[string]jobRecord
 	terminalReceipts map[string]terminalReceiptTombstone
 	// progressDirty marks in-memory progress newer than jobs.json. Progress-only
@@ -73,11 +74,9 @@ func Open(dir, key string) (*Server, error) {
 }
 
 // OpenWithOptions opens a server with plugins, logging, and job event
-// retention. Plugin discovery and every library load fail closed.
+// retention. Plugin discovery and every library load fail closed. An empty key
+// disables authentication; callers should only do that on a trusted network.
 func OpenWithOptions(dir, key string, options Options) (*Server, error) {
-	if key == "" {
-		return nil, errors.New("API key is required")
-	}
 	if options.EventLimit < 0 || options.EventRetention < 0 {
 		return nil, errors.New("job event retention must not be negative")
 	}
@@ -108,7 +107,7 @@ func OpenWithOptions(dir, key string, options Options) (*Server, error) {
 			_ = lock.Close()
 		}
 	}()
-	s := &Server{lock: lock, drivers: make(map[string]Driver), dir: dir, key: key, plugins: plugins, profiles: make(map[string]MachineProfile), projects: make(map[string]DesignerProject), cameras: make(map[string]cameraSource), cameraLastGet: make(map[string]time.Time), manualControls: make(map[string]*manualControlLease), parserQuarantine: make(map[string]string), mux: http.NewServeMux(), logger: defaultLogger(options.Logger)}
+	s := &Server{lock: lock, drivers: make(map[string]Driver), dir: dir, key: key, authDisabled: key == "", plugins: plugins, profiles: make(map[string]MachineProfile), projects: make(map[string]DesignerProject), cameras: make(map[string]cameraSource), cameraLastGet: make(map[string]time.Time), manualControls: make(map[string]*manualControlLease), parserQuarantine: make(map[string]string), mux: http.NewServeMux(), logger: defaultLogger(options.Logger)}
 	s.history.limit, s.history.retention = options.EventLimit, options.EventRetention
 	s.metrics = newServerMetrics(s)
 	defer func() {

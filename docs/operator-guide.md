@@ -34,15 +34,21 @@ operator; the key field is masked. The first-start key is migrated into the
 `bootstrap-admin` credential. After initial access, rotate to named credentials;
 see the [HTTP API and worker contract](api.md) for the credential contract.
 Surrounding whitespace is removed before the key is checked. **Connect**
-validates the key with the server before saving it in this browser session or
-starting library refreshes. While that check is in progress, the button reads
-**Connecting…** and is disabled. A rejected key is not saved or retried; the
-console stops polling, focuses the key field, and lets you correct it and try
-again. API-dependent controls remain disabled until the key is accepted.
+validates the key with the server before saving it in this browser's local
+storage or starting library refreshes. While that check is in progress, the
+button reads **Connecting…** and is disabled. A rejected key is not saved or
+retried; the console stops polling, focuses the key field, and lets you correct
+it and try again. API-dependent controls remain disabled until the key is
+accepted. A saved key is reused automatically after a reload, until you choose
+**Disconnect** or the server rejects it.
+
+If the server was started without `EMBERDECK_API_KEY`, authentication is
+disabled. The console detects that mode, connects without a key, and shows no
+key form. Use that mode only on a trusted local or isolated network.
 
 After connecting, the access panel collapses to **Connected · Change key ·
 Disconnect**. Choose **Change key** to return to the key field and validate a
-different key, or **Disconnect** to forget the session key and stop polling. In
+different key, or **Disconnect** to forget the stored key and stop polling. In
 either case the library controls are disabled until you connect again. Once
 connected, choose the driver assigned to the machine you prepared.
 

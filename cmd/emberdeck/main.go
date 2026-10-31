@@ -102,7 +102,7 @@ func runServe(args []string) error {
 		return err
 	}
 	if key == "" {
-		return errors.New("EMBERDECK_API_KEY is required")
+		logger.Warn("EMBERDECK_API_KEY is not set; authentication is disabled and every request is an admin. Use only on a trusted network")
 	}
 	logger.Info("starting EmberDeck server", "version", version, "data", *data, "plugins", *plugins)
 	handler, err := server.OpenWithOptions(*data, key, server.Options{
@@ -299,7 +299,7 @@ func runDriver(args []string) error {
 		return err
 	}
 	if key == "" {
-		return errors.New("EMBERDECK_API_KEY is required")
+		logger.Warn("EMBERDECK_API_KEY is not set; the worker will connect without a bearer token, which only works when the server has authentication disabled")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

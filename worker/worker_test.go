@@ -272,6 +272,39 @@ func TestRunRejectsBadCredentialsWithoutConnecting(t *testing.T) {
 	}
 }
 
+func TestRunWithoutKeyOmitsAuthorizationHeader(t *testing.T) {
+	headers := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case headers <- r.Header.Get("Authorization"):
+		default:
+		}
+		io.WriteString(w, `{"command":"idle"}`)
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	var connected atomic.Bool
+	err := RunWithOptions(ctx, server.URL, "", "laser", func(context.Context) (io.ReadWriteCloser, error) {
+		connected.Store(true)
+		return driver.NewSimulator(), nil
+	}, fastOptions(nil))
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	if connected.Load() {
+		t.Fatal("keyless idle worker connected to the controller")
+	}
+	select {
+	case got := <-headers:
+		if got != "" {
+			t.Fatalf("Authorization header = %q; want none", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker did not poll")
+	}
+}
+
 func fastOptions(logs *logRecorder) Options {
 	options := Options{RetryMin: 5 * time.Millisecond, RetryMax: 20 * time.Millisecond}
 	if logs != nil {

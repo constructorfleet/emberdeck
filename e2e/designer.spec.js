@@ -186,7 +186,7 @@ test('reload keeps edits made while the latest project request is pending in bot
   const rectangleRow = page.locator('#project-list li').filter({ hasText: rectangleName });
   const rectangleID = await rectangleRow.getByRole('button', { name: `Reopen project ${rectangleName}` }).getAttribute('data-project-id');
   const vector = await page.evaluate(async (name) => {
-    const headers = { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' };
+    const headers = { Authorization: `Bearer ${localStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' };
     const profileID = document.querySelector('#profile-select').value;
     const result = await fetch('/api/v1/projects', { method: 'POST', headers, body: JSON.stringify({
       schema_version: 2, name, units: 'mm', profile_id: profileID, profile_revision: 1,
@@ -204,7 +204,7 @@ test('reload keeps edits made while the latest project request is pending in bot
 
   async function publishNewerRevision(projectID) {
     const result = await page.evaluate(async (id) => {
-      const headers = { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' };
+      const headers = { Authorization: `Bearer ${localStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' };
       const current = await (await fetch(`/api/v1/projects/${id}`, { headers })).json();
       const body = {
         schema_version: current.schema_version, name: current.name, profile_id: current.profile_id,
@@ -575,12 +575,12 @@ test('multi-path vector project saves, reopens, generates mixed operations, and 
   await expect(page.locator('#profile-select')).toHaveValue(/.+/);
   const pathName = `E2E imported path ${attempt}`;
   const imported = await page.evaluate(async ({ name, profileName }) => {
-    const profilesResponse = await fetch('/api/v1/profiles', { headers: { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}` } });
+    const profilesResponse = await fetch('/api/v1/profiles', { headers: { Authorization: `Bearer ${localStorage.getItem('emberdeck-api-key')}` } });
     const profile = (await profilesResponse.json()).find((candidate) => candidate.name === profileName);
     if (!profile) throw new Error(`The saved profile ${profileName} was not returned by the profile API (${profilesResponse.status})`);
     const response = await fetch('/api/v1/projects', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${localStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         schema_version: 2, name, units: 'mm', profile_id: profile.id, profile_revision: profile.revision,
         objects: [{ id: 'imported-path', kind: 'path', operation_id: 'path-engrave', subpaths: [

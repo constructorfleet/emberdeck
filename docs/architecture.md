@@ -119,8 +119,11 @@ Revoking a worker credential removes its sessions and interrupts its active
 leases before acknowledging revocation; no other worker is changed and no job is
 replayed. If the credential-store file is absent, startup atomically seeds an
 admin hash from `EMBERDECK_API_KEY` for explicit single-key migration. Once the
-store exists, the environment key is not a fallback. Admin's worker-poll access
-is retained only for bootstrap/local-worker compatibility; distributed workers
+store exists, the environment key is not a fallback. If `EMBERDECK_API_KEY` is
+unset, startup disables authentication instead: every API request receives an
+implicit `local-admin` principal, and a missing credential store is left absent
+so a later keyed start can seed it normally. Admin's worker-poll access is
+retained only for bootstrap/local-worker compatibility; distributed workers
 should use scoped worker credentials.
 
 Remote workers must use TLS or a trusted TLS tunnel. Use a separate, revocable
@@ -128,9 +131,9 @@ worker credential for each device and scope it to the driver's ID. Camera access
 controls are not implemented.
 
 The browser console shell, its stylesheet, script, and favicon are public assets.
-Only paths under `/api/` require the bearer key, so a mistyped URL returns an
-ordinary `404` instead of an authentication error. The assets never include job,
-profile, or project data.
+When authentication is enabled, only paths under `/api/` require the bearer key,
+so a mistyped URL returns an ordinary `404` instead of an authentication error.
+The assets never include job, profile, or project data.
 
 ## Verification boundaries
 

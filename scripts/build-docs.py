@@ -109,7 +109,7 @@ api_route_links = '\n'.join(
     '- [`' + route + '`](api.html#' + slugify('`' + route + '`', '-') + ')'
     for route in sorted(routes)
 )
-pages['api-routes'] = '# API route index\n\nGenerated from the registered server routes in this release. Every entry links to its request, response, and error contract in the [API reference](api.html). All API routes require bearer authentication.\n\n' + api_route_links + '\n'
+pages['api-routes'] = '# API route index\n\nGenerated from the registered server routes in this release. Every entry links to its request, response, and error contract in the [API reference](api.html). API routes require bearer authentication unless the server was started without `EMBERDECK_API_KEY`.\n\n' + api_route_links + '\n'
 exe = Path('bin/emberdeck' + ('.exe' if os.name == 'nt' else '')).resolve()
 help_text = []
 for command in ['serve', 'driver']:
@@ -123,10 +123,18 @@ to confirm the installed build.
 
 ## Environment
 
-`emberdeck serve` requires `EMBERDECK_API_KEY`. On first start it becomes the
-named `bootstrap-admin` credential, so choose a long random secret and keep it
-out of shell history where possible. A local worker started by `serve -simulate`,
-`-tcp`, or `-serial` uses the same key.
+`EMBERDECK_API_KEY` is strongly recommended. When set, the first start in a data
+directory without `credentials.json` migrates it to the named `bootstrap-admin`
+credential, so choose a long random secret and keep it out of shell history where
+possible. A local worker started by `serve -simulate`, `-tcp`, or `-serial` uses
+the same key.
+
+When `EMBERDECK_API_KEY` is unset, `emberdeck serve` starts in an unauthenticated
+mode: every API request is treated as an administrator and no key is required in
+the browser. Use that mode only on a trusted local or isolated network, never on
+an untrusted interface. `emberdeck driver` likewise connects without a bearer
+token when no key is configured; the server must also have authentication
+disabled.
 
 `EMBERDECK_METRICS_KEY` is optional. When set, the separately configured
 `serve -metrics-listen` endpoint requires that key as a bearer token. See

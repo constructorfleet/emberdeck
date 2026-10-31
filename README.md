@@ -70,7 +70,9 @@ server migrates the key into its initial `bootstrap-admin` credential. After ini
 access, rotate to named credentials; see the
 [HTTP API and worker contract](docs/api.md) for the credential contract. Open
 `http://127.0.0.1:8080` (type this address in your browser) and enter the
-displayed key. `-simulate` runs software only and sends no commands to a cutter.
+displayed key. To skip the key for a throwaway local demo, omit the export; the
+server then runs without authentication, which is only suitable on a trusted
+local machine. `-simulate` runs software only and sends no commands to a cutter.
 For Windows PowerShell, follow the
 [native CLI steps](docs/deployment.md#windows-powershell-native-cli) after
 downloading `emberdeck-windows-amd64.exe`.

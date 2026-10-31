@@ -225,7 +225,7 @@ async function main() {
     await page.locator('#rect-x').fill('10');
     await page.locator('#rect-y').fill('20');
     await page.evaluate(async () => {
-      const headers = { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' };
+      const headers = { Authorization: `Bearer ${localStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' };
       const projects = await (await fetch('/api/v1/projects', { headers })).json();
       const project = projects.find((candidate) => candidate.name === 'Panel outline');
       const update = { schema_version: 1, name: project.name, profile_id: project.profile_id, profile_revision: project.profile_revision,
@@ -291,7 +291,7 @@ async function main() {
     const sourceJobID = await designerRow.getByRole('button', { name: /^View / }).getAttribute('data-job-id');
     await page.locator('#close-program').click();
     const runningGenerated = await page.evaluate(async (sourceJobID) => {
-      const headers = { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' };
+      const headers = { Authorization: `Bearer ${localStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' };
       const source = await (await fetch(`/api/v1/jobs/${sourceJobID}`, { headers })).json();
       const profile = source.provenance.profile;
       const points = [{ x_mm: 0, y_mm: 0 }, { x_mm: 10, y_mm: 0 }, ...Array.from({ length: 1500 }, (_, index) => {
@@ -332,7 +332,7 @@ async function main() {
     await runningGeneratedRow.getByRole('button', { name: /Delete Running generated profile view\.gcode/ }).click();
     await expect(runningGeneratedRow).toHaveCount(0);
     await page.evaluate(async (projectID) => {
-      const response = await fetch(`/api/v1/projects/${projectID}`, { method: 'DELETE', headers: { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: 1 }) });
+      const response = await fetch(`/api/v1/projects/${projectID}`, { method: 'DELETE', headers: { Authorization: `Bearer ${localStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: 1 }) });
       if (!response.ok) throw new Error(`Could not remove screenshot project: ${response.status}`);
     }, runningGenerated.project.id);
     await page.getByRole('link', { name: 'Designer' }).click();
@@ -444,7 +444,7 @@ async function main() {
 
     // Controller settings read with $$, a refused profile mismatch, and an M3 warning.
     const docsApi = (method, path, body) => page.evaluate(async ({ method, path, body }) => {
-      const response = await fetch(path, { method, headers: { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+      const response = await fetch(path, { method, headers: { Authorization: `Bearer ${localStorage.getItem('emberdeck-api-key')}`, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
       if (!response.ok) throw new Error(`${method} ${path}: ${response.status} ${await response.text()}`);
       return response.status === 204 ? null : response.json();
     }, { method, path, body });
@@ -540,7 +540,7 @@ async function main() {
     const holdReports = [];
     await expect.poll(async () => {
       const jobs = await page.evaluate(async (jobName) => {
-        const response = await fetch(`/api/v1/jobs?name=${encodeURIComponent(jobName)}`, { headers: { Authorization: `Bearer ${sessionStorage.getItem('emberdeck-api-key')}` } });
+        const response = await fetch(`/api/v1/jobs?name=${encodeURIComponent(jobName)}`, { headers: { Authorization: `Bearer ${localStorage.getItem('emberdeck-api-key')}` } });
         return (await response.json()).jobs;
       }, name);
       const job = jobs.find((candidate) => candidate.name === name);

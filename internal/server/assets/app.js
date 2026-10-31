@@ -27,6 +27,7 @@
   const actionDialog = $("#action-dialog");
   let pendingAction = null;
   let token = "";
+  let authRequired = true;
   let connected = false;
   let serverAvailable = false;
   let lastUpdatedAt = null;
@@ -195,10 +196,29 @@
     $("#connect-arrow").style.display = isConnecting ? "none" : "";
   }
 
+  function applyAuthMode() {
+    authForm.hidden = connected || !authRequired;
+    $("#change-key").hidden = !authRequired;
+    $("#disconnect").hidden = !authRequired;
+    keyInput.required = authRequired;
+    const hint = $("#auth-hint");
+    if (hint) {
+      hint.textContent = authRequired
+        ? "Your key is saved in this browser and is sent only to this EmberDeck server."
+        : "This server has authentication disabled, so no key is needed.";
+    }
+  }
+
+  function requireAuthentication() {
+    if (authRequired) return;
+    authRequired = true;
+    applyAuthMode();
+  }
+
   function setSessionConnected(isConnected) {
     connected = isConnected;
     serverAvailable = isConnected;
-    authForm.hidden = isConnected;
+    authForm.hidden = isConnected || !authRequired;
     connectionState.hidden = isConnected;
     connectionControls.hidden = !isConnected;
     connectionState.textContent = isConnected ? "Connected · library synced" : "Not connected";
@@ -227,7 +247,7 @@
     token = "";
     sessionVersion++;
     stopPolling();
-    sessionStorage.removeItem("emberdeck-api-key");
+    localStorage.removeItem("emberdeck-api-key");
     setSessionConnected(false);
     jobs = [];
     for (const frame of cameraFrames.values()) URL.revokeObjectURL(frame.url);
@@ -273,10 +293,14 @@
     if (focus) keyInput.focus();
   }
 
+  function authorizationHeaders() {
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
   async function api(path, options = {}) {
     const requestToken = token;
     const headers = new Headers(options.headers || {});
-    headers.set("Authorization", `Bearer ${requestToken}`);
+    if (requestToken) headers.set("Authorization", `Bearer ${requestToken}`);
     if (options.body) headers.set("Content-Type", "application/json");
     let response;
     try { response = await fetch(path, { ...options, headers }); }
@@ -291,6 +315,7 @@
       try { payload = await response.json(); detail = payload.error || detail; } catch (_) { /* keep status */ }
       if (response.status === 401) detail = "That API key was not accepted. Check it and try again.";
       if (response.status === 401 && token === requestToken) {
+        requireAuthentication();
         forgetSession({ focus: true, clearInput: false });
         notify("error", detail, { sticky: true, connection: true });
       }
@@ -306,13 +331,14 @@
   async function apiBlob(path) {
     const requestToken = token;
     let response;
-    try { response = await fetch(path, { headers: { Authorization: `Bearer ${requestToken}` }, cache: "no-store" }); }
+    try { response = await fetch(path, { headers: authorizationHeaders(), cache: "no-store" }); }
     catch (cause) { throw new Error(cause instanceof TypeError ? "Could not reach EmberDeck. Check your connection and try again." : "The request could not be completed. Try again."); }
     if (!response.ok) {
       let detail = `Request failed (${response.status})`;
       try { detail = (await response.json()).error || detail; } catch (_) { /* keep status */ }
       if (response.status === 401) detail = "That API key was not accepted. Check it and try again.";
       if (response.status === 401 && token === requestToken) {
+        requireAuthentication();
         forgetSession({ focus: true, clearInput: false });
         notify("error", detail, { sticky: true, connection: true });
       }
@@ -1670,14 +1696,15 @@
       try {
         response = await fetch("/api/v1/designer/text-geometry", {
           method: "POST",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          headers: { ...authorizationHeaders(), "Content-Type": "application/json" },
           body: JSON.stringify(text),
         });
       } catch (cause) {
         throw new Error(cause instanceof TypeError ? "Could not reach EmberDeck. Check your connection and try again." : "The request could not be completed. Try again.");
       }
       const result = await response.json();
-      if (response.status === 401 && token) {
+      if (response.status === 401) {
+        requireAuthentication();
         forgetSession({ focus: true, clearInput: false });
         throw new Error("That API key was not accepted. Check it and try again.");
       }
@@ -1907,14 +1934,15 @@
       try {
         response = await fetch("/api/v1/svg-import", {
           method: "POST",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "image/svg+xml" },
+          headers: { ...authorizationHeaders(), "Content-Type": "image/svg+xml" },
           body: file,
         });
       } catch (cause) {
         throw new Error(cause instanceof TypeError ? "Could not reach EmberDeck. Check your connection and try again." : "The request could not be completed. Try again.");
       }
       const imported = await response.json();
-      if (response.status === 401 && token) {
+      if (response.status === 401) {
+        requireAuthentication();
         forgetSession({ focus: true, clearInput: false });
         notify("error", "That API key was not accepted. Check it and try again.", { sticky: true, connection: true });
         throw new Error("That API key was not accepted. Check it and try again.");
@@ -2813,27 +2841,65 @@
     } catch (error) { notify("error", error.message); }
   }
 
-  async function connectWithKey(rawKey) {
+  async function connectWithKey(rawKey, { allowEmpty = false } = {}) {
     const candidate = rawKey.trim();
-    if (!candidate || connectButton.disabled) return;
+    if ((!candidate && !allowEmpty) || connectButton.disabled) return;
     keyInput.value = candidate;
-    sessionStorage.removeItem("emberdeck-api-key");
     token = candidate;
     setConnecting(true);
     try {
       await api("/api/v1/jobs");
       if (token !== candidate) return;
-      sessionStorage.setItem("emberdeck-api-key", candidate);
+      if (candidate) localStorage.setItem("emberdeck-api-key", candidate);
       sessionVersion++;
       setSessionConnected(true);
       await refresh();
       if (connected) startPolling();
     } catch (error) {
-      if (token === candidate) forgetSession({ clearInput: false });
+      if (token === candidate) {
+        if (error.status === 401) {
+          forgetSession({ clearInput: false });
+        } else {
+          // Keep a remembered key through a transient failure so a reload or
+          // retry does not force the operator to find it again.
+          setSessionConnected(false);
+          if (candidate) localStorage.setItem("emberdeck-api-key", candidate);
+        }
+      }
       notify("error", error.message, { sticky: true, connection: true });
       keyInput.focus();
     } finally {
       setConnecting(false);
+    }
+  }
+
+  // The identity route reports whether this server needs a key. Probe it before
+  // showing a form that cannot help, or before reusing a key for a server that
+  // has authentication disabled.
+  async function authenticationRequired(storedKey) {
+    try {
+      const headers = storedKey ? { Authorization: `Bearer ${storedKey}` } : {};
+      const response = await fetch("/api/v1/auth", { headers: { ...headers, Accept: "application/json" }, cache: "no-store" });
+      if (!response.ok) return true;
+      const info = await response.json();
+      return info.authentication_required !== false;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  async function restoreSession() {
+    const rememberedKey = (localStorage.getItem("emberdeck-api-key") || "").trim();
+    authRequired = await authenticationRequired(rememberedKey);
+    applyAuthMode();
+    if (!authRequired) {
+      localStorage.removeItem("emberdeck-api-key");
+      await connectWithKey("", { allowEmpty: true });
+      return;
+    }
+    if (rememberedKey) {
+      keyInput.value = rememberedKey;
+      connectWithKey(rememberedKey);
     }
   }
 
@@ -2925,10 +2991,5 @@
   setSessionConnected(false);
   renderDrivers();
   renderJobs();
-  const rememberedKey = (sessionStorage.getItem("emberdeck-api-key") || "").trim();
-  sessionStorage.removeItem("emberdeck-api-key");
-  if (rememberedKey) {
-    keyInput.value = rememberedKey;
-    connectWithKey(rememberedKey);
-  }
+  restoreSession();
 })();

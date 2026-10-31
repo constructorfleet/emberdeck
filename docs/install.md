@@ -53,7 +53,10 @@ credential. Keep the displayed key private. Once initial access is established,
 rotate to named credentials; see the
 [HTTP API and worker contract](api.md) for the credential contract. Open
 `http://127.0.0.1:8080` (type it into your browser) and enter the displayed key.
-The simulator is software only and sends no commands to a physical cutter.
+If you omit `EMBERDECK_API_KEY`, the server starts without authentication and
+the console connects automatically, but every request becomes an administrator;
+use that only on a trusted local network. The simulator is software only and
+sends no commands to a physical cutter.
 For Windows PowerShell, see the
 [native CLI steps in Deployment](deployment.md#windows-powershell-native-cli).
 
