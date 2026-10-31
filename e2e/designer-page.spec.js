@@ -52,7 +52,7 @@ test('designer only shows shape inputs for a selected shape and guides an empty 
   await expect(page.locator('label:has(#vector-width)')).toBeHidden();
   await expect(page.locator('label:has(#vector-height)')).toBeHidden();
 
-  await page.getByRole('button', { name: '1. rectangle' }).click();
+  await page.getByRole('button', { name: '1. Rectangle' }).click();
   await expect(page.locator('#vector-text-fields')).toBeHidden();
   await expect(page.locator('label:has(#vector-width)')).toBeVisible();
   await expect(page.locator('#vector-inspector-summary')).toContainText(/rectangle/i);
@@ -60,6 +60,71 @@ test('designer only shows shape inputs for a selected shape and guides an empty 
   await expect(page.locator('#vector-operation-list .layer-feed')).toContainText(/feed mm\/min/i);
   await expect(page.locator('#vector-operation-list .layer-power')).toContainText(/power %/i);
   await expect(page.locator('#vector-operation-list .layer-type')).toContainText(/type/i);
+});
+
+test('designer undo and redo restore shapes, text geometry, and operation layers', async ({ page }) => {
+  const attempt = `${test.info().repeatEachIndex}-${Date.now()}`;
+  await page.goto('/designer');
+  await connect(page);
+  await createProfile(page, `History profile ${attempt}`);
+  await page.getByRole('button', { name: 'New vector project' }).click();
+
+  const undo = page.getByRole('button', { name: 'Undo' });
+  const redo = page.getByRole('button', { name: 'Redo' });
+  await expect(undo).toBeDisabled();
+  await expect(redo).toBeDisabled();
+
+  await page.getByRole('button', { name: 'Add rectangle' }).click();
+  await expect(undo).toBeEnabled();
+  await expect(redo).toBeDisabled();
+
+  await page.getByRole('button', { name: 'Add text' }).click();
+  await expect(page.locator('#vector-shape-count')).toHaveText('2');
+  await expect.poll(() => page.locator('#vector-preview-content .vector-path').count()).toBe(2);
+
+  await undo.click();
+  await expect(page.locator('#vector-shape-count')).toHaveText('1');
+  await expect(page.locator('#vector-text-fields')).toBeHidden();
+  await expect(undo).toBeEnabled();
+
+  await undo.click();
+  await expect(page.locator('#vector-shape-count')).toHaveText('0');
+  await expect(page.locator('#vector-inspector-empty')).toBeVisible();
+  await expect(undo).toBeDisabled();
+  await expect(redo).toBeEnabled();
+
+  await redo.click();
+  await expect(page.locator('#vector-shape-count')).toHaveText('1');
+  await redo.click();
+  await expect(page.locator('#vector-shape-count')).toHaveText('2');
+  await expect(page.locator('#vector-text-fields')).toBeVisible();
+  await expect(page.locator('#vector-text-content')).toHaveValue('EMBER');
+  await expect.poll(() => page.locator('#vector-preview-content .vector-path').count()).toBe(2);
+
+  await page.getByRole('button', { name: '2. Text' }).focus();
+  await page.keyboard.press('Control+z');
+  await expect(page.locator('#vector-shape-count')).toHaveText('1');
+  await page.keyboard.press('Control+Shift+z');
+  await expect(page.locator('#vector-shape-count')).toHaveText('2');
+
+  await page.locator('#vector-translate-x').fill('5');
+  await undo.click();
+  await expect(page.locator('#vector-translate-x')).toHaveValue('0');
+
+  await page.getByLabel('Operation 1 feed (mm/min)').fill('300');
+  await undo.click();
+  await expect(page.getByLabel('Operation 1 feed (mm/min)')).toHaveValue('600');
+
+  await page.locator('#vector-name').fill('Renamed design');
+  await undo.click();
+  await expect(page.locator('#vector-name')).toHaveValue('Untitled vector design');
+
+  await page.getByRole('button', { name: 'Add layer' }).click();
+  await expect(page.locator('#vector-operation-list li')).toHaveCount(2);
+  await undo.click();
+  await expect(page.locator('#vector-operation-list li')).toHaveCount(1);
+  await redo.click();
+  await expect(page.locator('#vector-operation-list li')).toHaveCount(2);
 });
 
 test('designer has its own page and supports selecting, dragging, and scaling a shape on the workspace', async ({ page }) => {

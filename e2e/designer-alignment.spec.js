@@ -36,7 +36,7 @@ test('keyboard multi-selection aligns transformed shapes and persists the new pl
   await expect(alignLeft).toBeDisabled();
 
   // Rotate the second shape so alignment must use its actual transformed bounds.
-  await page.getByRole('button', { name: '2. ellipse' }).click();
+  await page.getByRole('button', { name: '2. Ellipse' }).click();
   await page.getByLabel('Rotation (degrees)').fill('90');
   await expect(page.locator('#vector-validation')).toBeHidden();
 
@@ -61,21 +61,21 @@ test('keyboard multi-selection aligns transformed shapes and persists the new pl
   await alignLeft.click();
   await expect(page.locator('#vector-align-status')).toContainText('2 shapes aligned left');
   await expect(page.locator('#vector-validation')).toBeHidden();
-  await page.getByRole('button', { name: '2. ellipse' }).click();
+  await page.getByRole('button', { name: '2. Ellipse' }).click();
   await expect(page.getByLabel('Translate X (mm)')).toHaveValue('-10');
   await page.getByRole('button', { name: 'Align horizontal centers' }).click();
   await expect(page.getByLabel('Translate X (mm)')).toHaveValue('-5');
   await page.getByRole('button', { name: 'Align right' }).click();
   await expect(page.getByLabel('Translate X (mm)')).toHaveValue('0');
   await page.getByRole('button', { name: 'Align top' }).click();
-  await page.getByRole('button', { name: '1. rectangle' }).click();
+  await page.getByRole('button', { name: '1. Rectangle' }).click();
   await expect(page.getByLabel('Translate Y (mm)')).toHaveValue('10');
   await page.getByRole('button', { name: 'Align vertical centers' }).click();
   await expect(page.getByLabel('Translate Y (mm)')).toHaveValue('5');
   await page.getByRole('button', { name: 'Align bottom' }).click();
   await expect(page.getByLabel('Translate Y (mm)')).toHaveValue('0');
   await page.getByRole('button', { name: 'Align left' }).click();
-  await page.getByRole('button', { name: '2. ellipse' }).click();
+  await page.getByRole('button', { name: '2. Ellipse' }).click();
   await expect(page.getByLabel('Translate X (mm)')).toHaveValue('-10');
 
   await page.getByRole('button', { name: 'Save vector project' }).click();
@@ -87,7 +87,7 @@ test('keyboard multi-selection aligns transformed shapes and persists the new pl
   await page.reload();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
   await page.getByRole('button', { name: `Reopen vector project ${projectName}` }).click();
-  await page.getByRole('button', { name: '2. ellipse' }).click();
+  await page.getByRole('button', { name: '2. Ellipse' }).click();
   await expect(page.getByLabel('Translate X (mm)')).toHaveValue('-10');
   await expect(page.getByLabel('Rotation (degrees)')).toHaveValue('90');
   await page.locator('#generate-vector-project').click();

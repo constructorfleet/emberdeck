@@ -15,9 +15,9 @@ Simulator and software checks do not qualify a physical machine. See
   and separate queued G-code generation for review and explicit dispatch. The
   editor supports vector cutting and engraving and a bounded static SVG importer
   for line/Bezier paths, basic shapes, element transforms, multi-shape
-  alignment, editable monoline text engraving, bounded nested SVG groups, and
-  bounded SVG `<text>` import. Arc commands, undo/redo, and raster engraving
-  remain future work.
+  alignment, editable monoline text engraving, bounded nested SVG groups,
+  bounded SVG `<text>` import, and in-editor undo/redo. Arc commands and raster
+  engraving remain future work.
 - Uploaded-job review against a selected machine profile, including upload-time
   line validation, known or unknown path bounds, unsupported/incomplete-motion
   warnings, a static envelope preview, and an explicit override before dispatch

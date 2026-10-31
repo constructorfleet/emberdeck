@@ -1181,9 +1181,24 @@ footer {
 .vector-editor-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(360px, .85fr);
+  grid-template-areas:
+    "canvas sidebar"
+    "layers sidebar";
   align-items: start;
   gap: var(--space-4);
   margin-top: var(--space-4);
+}
+
+.vector-canvas-panel {
+  grid-area: canvas;
+}
+
+.vector-layers-panel {
+  grid-area: layers;
+}
+
+.vector-sidebar {
+  grid-area: sidebar;
 }
 
 .vector-canvas-panel,
@@ -1207,6 +1222,7 @@ footer {
 
 .vector-panel-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-2);
@@ -1221,6 +1237,11 @@ footer {
   color: var(--text-muted);
   font: var(--type-xs) var(--mono);
   text-align: right;
+}
+
+.vector-history {
+  display: flex;
+  gap: var(--space-1);
 }
 
 .count-chip {
@@ -1504,10 +1525,6 @@ footer {
 .vector-layers {
   display: grid;
   gap: var(--space-2);
-}
-
-.vector-layers-panel {
-  margin-top: var(--space-3);
 }
 
 .vector-layers .layer-row {
@@ -1847,6 +1864,10 @@ footer {
 @media (max-width: 1040px) {
   .vector-editor-grid {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "canvas"
+      "sidebar"
+      "layers";
   }
 
   .vector-canvas-panel {

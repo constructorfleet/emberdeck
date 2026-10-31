@@ -113,6 +113,10 @@
                   <h4 id="vector-canvas-title" class="vector-subhead">Workspace</h4>
                   <p id="vector-profile-summary" class="vector-profile-summary">No declared profile selected</p>
                 </div>
+                <div class="vector-history" role="group" aria-label="Edit history">
+                  <button id="vector-undo" class="button button-small" type="button" disabled title="Undo the last design edit">Undo</button>
+                  <button id="vector-redo" class="button button-small" type="button" disabled title="Redo the last undone edit">Redo</button>
+                </div>
               </div>
               <div class="vector-toolbar" aria-label="Add or import vector geometry">
                 <span class="vector-toolbar-label" aria-hidden="true">Add</span>
@@ -190,16 +194,16 @@
                 </div>
               </section>
             </div>
+            <section class="vector-panel vector-layers-panel" aria-labelledby="vector-layers-title">
+              <div class="vector-panel-head">
+                <h4 id="vector-layers-title" class="vector-subhead">Operation layers</h4>
+                <button id="add-operation" class="button button-small" type="button">Add layer</button>
+              </div>
+              <p class="hint">Layers run from first to last. Each shape uses the layer assigned to it. Set the feed and commanded power for each layer, then assign shapes from the selected-shape panel.</p>
+              <ol id="vector-operation-list" class="vector-list vector-layers" aria-label="Ordered operation layers"></ol>
+              <p id="vector-layer-empty" class="list-empty vector-empty" hidden>No operation layers yet. Add one to engrave or cut.</p>
+            </section>
           </div>
-          <section class="vector-panel vector-layers-panel" aria-labelledby="vector-layers-title">
-            <div class="vector-panel-head">
-              <h4 id="vector-layers-title" class="vector-subhead">Operation layers</h4>
-              <button id="add-operation" class="button button-small" type="button">Add layer</button>
-            </div>
-            <p class="hint">Layers run from first to last. Each shape uses the layer assigned to it. Set the feed and commanded power for each layer, then assign shapes from the selected-shape panel.</p>
-            <ol id="vector-operation-list" class="vector-list vector-layers" aria-label="Ordered operation layers"></ol>
-            <p id="vector-layer-empty" class="list-empty vector-empty" hidden>No operation layers yet. Add one to engrave or cut.</p>
-          </section>
           <div class="vector-form-actions">
             <div class="vector-action-group">
               <button class="button button-primary" type="submit">Save vector project</button>

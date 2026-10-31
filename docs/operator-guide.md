@@ -96,10 +96,11 @@ Select a screenshot to open the full-size image.
 ## Open the designer
 
 Choose **Designer** in the top navigation to open the dedicated design page.
-Machine profiles, rectangle projects, and multi-path vector projects live on
-that page. Choose **Job library** to return to G-code intake and stored
-programs. Generating a design creates a separate queued job; inspect and
-explicitly dispatch it from the job library.
+The page follows three steps: declare the machine, design, then review and
+generate. Machine profiles, rectangle quick projects, and multi-path vector
+projects live on that page. Choose **Job library** to return to G-code intake
+and stored programs. Generating a design creates a separate queued job;
+inspect and explicitly dispatch it from the job library.
 
 On phones, page links move to a second row below the brand and driver selection
 stacks below its label. The library uses a two-column layout on wide screens and
@@ -343,19 +344,34 @@ confirmation and **Start** control when ready.
 
 ## Create a multi-path vector project
 
-Select **New vector project** to add multiple rectangle, ellipse, and line
-shapes. Click a path in the workspace to select it; drag the path to translate
-it, or drag the corner handle to scale it in X and Y. The handle follows the
-shape's transformed top-right corner, and resizing follows the shape's local
-axes even when it is rotated. The object list also supports keyboard selection.
-The numeric fields remain available for exact translation, nonuniform scaling,
-and rotation around the source bounding-box center. The preview and profile bounds check use the
-transformed geometry. Assign the shape to an
-operation layer or remove it. Add engraving or cutting layers, set each
-layer's feed and commanded power, and move layers to change execution order.
-Every path must be assigned before generation. Lines can be engraved; cutting
-requires closed shapes with nonzero area. The preview uses green for engraving,
-red dashed outlines for cutting, and gray dotted paths for unassigned geometry.
+Select **New vector project** to add multiple rectangle, ellipse, line, and
+text shapes or import SVG geometry. The editor keeps the workspace on the left
+with operation layers below it, and the shape list and selected-shape inspector
+on the right. Narrow screens stack the workspace, shape list and inspector, then
+layers. An empty project explains how to start instead of showing unused fields.
+Position, size, text, and transform inputs appear only when a shape is selected,
+and text inputs appear only for a text object.
+
+Click a path in the workspace to select it; drag the path to translate it, or
+drag the corner handle to scale it in X and Y. The handle follows the shape's
+transformed top-right corner, and resizing follows the shape's local axes even
+when it is rotated. The object list also supports keyboard selection. Each
+shape row shows its size, position, and assigned operation. The numeric fields
+remain available for exact translation, nonuniform scaling, and rotation around
+the source bounding-box center. The preview and profile bounds check use the
+transformed geometry. Assign the shape to an operation layer or remove it. Add
+engraving or cutting layers, set each layer's labeled feed and commanded power,
+and move layers to change execution order. A readiness line above the action
+buttons explains why **Generate queued job** is unavailable, including
+unassigned shapes. Every path must be assigned before generation. Lines can be
+engraved; cutting requires closed shapes with nonzero area. The preview uses
+green for engraving, red dashed outlines for cutting, and gray dotted paths for
+unassigned geometry.
+
+Use **Undo** and **Redo** in the workspace header to step through design edits.
+The same actions work with `Ctrl+Z` and `Ctrl+Shift+Z` (or `Command` on macOS)
+when focus is outside a text field. History is local to the open editor and is
+not saved in the project or generated program.
 
 Choose **Add text** to create a text object. Its source content, fixed font ID
 `emberdeck-stick-v1`, height, and X/Y origin remain editable and are saved in
@@ -371,7 +387,7 @@ runtime font dependency. This is vector engraving; raster engraving remains
 unsupported. Static SVG `<text>` import supports only the fixed monoline font
 and bounded character set described in the SVG importer section.
 
-![Editable monoline text source, size, and generated stroke preview](assets/screenshots/designer-monoline-text.png)
+![Editable monoline text source and height controls](assets/screenshots/designer-monoline-text.png)
 
 ![Monoline text controls and preview on a narrow screen](assets/screenshots/designer-monoline-text-mobile.png)
 
@@ -383,11 +399,11 @@ preview and profile bounds check update immediately, and any out-of-workspace
 warning still blocks saving. Select a shape name to edit its geometry and
 transform while keeping the group selection.
 
-![Multi-path designer with editable shapes, ordered engraving and cutting layers, and profile-aware preview](assets/screenshots/designer-vector-project.png)
+![Multi-path designer with the workspace, shape list, selected-shape inspector, and profile-aware preview](assets/screenshots/designer-vector-project.png)
 
 ![Selected vector shape with saved translation, X/Y scale, and rotation controls](assets/screenshots/designer-vector-transform.png)
 
-![Two transformed shapes selected for alignment with updated preview and alignment status](assets/screenshots/designer-vector-alignment.png)
+![Alignment controls for two or more selected transformed shapes](assets/screenshots/designer-vector-alignment.png)
 
 Choose **Import SVG** inside an open vector project to add static geometry. The
 importer supports straight path commands (M/L/H/V/Z), cubic Bezier commands
@@ -545,9 +561,11 @@ Regenerate the screenshots from the current console and simulator with
 
 ## Requested UI that is not available yet
 
-The current designer does not have undo/redo or raster engraving. Native
-editable monoline text and bounded static SVG `<text>` import are supported as
-described above.
+The designer records a bounded undo/redo history for design edits while a
+vector project is open. The history is not saved with the project or included
+in generated G-code. Raster engraving is not available. Native editable
+monoline text and bounded static SVG `<text>` import are supported as described
+above.
 SVG import supports straight paths, C/c/S/s cubic and Q/q/T/t quadratic Bezier
 curves, and nested `<g>` groups up to 16 levels deep. Group transforms compose
 with descendant group and element transforms. A/a arcs are not available. Live

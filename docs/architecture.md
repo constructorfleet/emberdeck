@@ -187,9 +187,11 @@ to 16 levels. Static `<text>` uses `emberdeck-stick-v1`, a unitless font size
 from 1 to 100, and up to 32 ASCII characters (A–Z, a–z, digits, space, and
 `. , : ; ! ? + - / _ ( )`); it becomes open, unassigned stroke geometry.
 Unsupported attributes and styles, other fonts, nested text such as `<tspan>`,
-foreign namespaces, and active or external content are rejected. Arc commands,
-arbitrary path editing, undo/redo, and raster engraving remain future work; see
-the [designer plan](research/designer-architecture.md) and
+foreign namespaces, and active or external content are rejected. The vector
+editor keeps a bounded in-browser undo/redo history of design edits that is not
+part of the saved project. Arc commands, arbitrary path editing, and raster
+engraving remain future work; see the
+[designer plan](research/designer-architecture.md) and
 [operator guide](operator-guide.md).
 
 ## Confirmed controller control

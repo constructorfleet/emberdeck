@@ -80,6 +80,8 @@
   let vectorPreviewMap = null;
   let vectorPointerDrag = null;
   let vectorIDSequence = 0;
+  let vectorHistory = [];
+  let vectorHistoryIndex = -1;
   const toolpathCache = new Map();
   const generatedReviewCache = new Map();
   const toolpathViewports = new Map();
@@ -983,6 +985,73 @@
     return value.translate_x_mm === 0 && value.translate_y_mm === 0 && value.scale_x === 1 && value.scale_y === 1 && value.rotation_deg === 0;
   }
 
+  function vectorHistorySnapshot() {
+    return JSON.stringify({
+      name: $("#vector-name").value,
+      objects: vectorObjects.map(vectorObjectPayload),
+      operations: vectorOperations.map(({ id, type, feed_mm_min, power_percent }) => ({ id, type, feed_mm_min, power_percent })),
+      selection: { primary: selectedVectorObject, all: [...selectedVectorObjects] },
+    });
+  }
+
+  function updateVectorHistoryControls() {
+    $("#vector-undo").disabled = vectorHistoryIndex <= 0;
+    $("#vector-redo").disabled = vectorHistoryIndex >= vectorHistory.length - 1;
+  }
+
+  function resetVectorHistory() {
+    vectorHistory = [vectorHistorySnapshot()];
+    vectorHistoryIndex = 0;
+    updateVectorHistoryControls();
+  }
+
+  function recordVectorHistory() {
+    if ($("#vector-form").hidden) return;
+    const snapshot = vectorHistorySnapshot();
+    if (vectorHistory[vectorHistoryIndex] === snapshot) return;
+    vectorHistory.splice(vectorHistoryIndex + 1);
+    vectorHistory.push(snapshot);
+    if (vectorHistory.length > 40) vectorHistory.shift();
+    vectorHistoryIndex = vectorHistory.length - 1;
+    updateVectorHistoryControls();
+  }
+
+  function applyVectorHistorySnapshot(snapshot) {
+    const state = JSON.parse(snapshot);
+    $("#vector-name").value = state.name;
+    vectorObjects = state.objects.map((object) => ({
+      ...object,
+      kind: objectKind(object),
+      text: object.text ? { ...object.text } : undefined,
+      transform: object.transform ? { ...object.transform } : undefined,
+      subpaths: object.subpaths.map((path) => ({ ...path, points: path.points.map((point) => ({ ...point })) })),
+    }));
+    vectorObjects.forEach((object) => {
+      if (objectKind(object) === "text") object.textGeometry = newTextGeometryState();
+    });
+    vectorOperations = state.operations.map((operation) => ({ ...operation }));
+    const known = new Set(vectorObjects.map((object) => object.id));
+    selectedVectorObject = known.has(state.selection.primary) ? state.selection.primary : vectorObjects[0]?.id || "";
+    selectedVectorObjects = new Set(state.selection.all.filter((id) => known.has(id)));
+    if (selectedVectorObject && !selectedVectorObjects.size) selectedVectorObjects.add(selectedVectorObject);
+    if (!selectedVectorObject) selectedVectorObjects.clear();
+    vectorObjects.filter((object) => objectKind(object) === "text").forEach((object) => requestTextGeometry(object));
+    renderVectorEditor();
+    updateVectorHistoryControls();
+  }
+
+  function undoVectorEdit() {
+    if (vectorHistoryIndex <= 0) return;
+    vectorHistoryIndex--;
+    applyVectorHistorySnapshot(vectorHistory[vectorHistoryIndex]);
+  }
+
+  function redoVectorEdit() {
+    if (vectorHistoryIndex >= vectorHistory.length - 1) return;
+    vectorHistoryIndex++;
+    applyVectorHistorySnapshot(vectorHistory[vectorHistoryIndex]);
+  }
+
   function objectKind(object) { return object.kind || "path"; }
 
   function vectorKindLabel(kind) {
@@ -1092,7 +1161,7 @@
       checkbox.className = "vector-alignment-select";
       checkbox.checked = selectedVectorObjects.has(object.id);
       checkbox.dataset.vectorObjectId = object.id;
-      checkbox.setAttribute("aria-label", `Select shape ${index + 1} ${objectKind(object)} for alignment`);
+      checkbox.setAttribute("aria-label", `Select shape ${index + 1} ${vectorKindLabel(objectKind(object))} for alignment`);
       checkbox.addEventListener("change", () => {
         if (checkbox.checked) {
           selectedVectorObjects.add(object.id);
@@ -1106,7 +1175,7 @@
           .find((candidate) => candidate.dataset.vectorObjectId === object.id);
         nextCheckbox?.focus({ preventScroll: true });
       });
-      const select = button(`${index + 1}. ${objectKind(object)}`, "vector-select", () => {
+      const select = button(`${index + 1}. ${vectorKindLabel(objectKind(object))}`, "vector-select", () => {
         selectedVectorObject = object.id;
         if (!selectedVectorObjects.has(object.id)) selectedVectorObjects = new Set([object.id]);
         renderVectorEditor();
@@ -1123,6 +1192,7 @@
         selectedVectorObjects.delete(object.id);
         selectedVectorObject = vectorObjects[0]?.id || "";
         renderVectorEditor();
+        recordVectorHistory();
       }, `Remove shape ${index + 1}`);
       row.append(checkbox, select, details, detail, remove);
       list.append(row);
@@ -1170,7 +1240,7 @@
     const assignment = $("#vector-object-operation");
     assignment.replaceChildren(new Option("Unassigned", ""));
     vectorOperations.forEach((operation, index) => {
-      const option = new Option(`${index + 1}. ${operation.type.replace("vector-", "")}`, operation.id);
+      const option = new Option(`${index + 1}. ${operation.type === "vector-cut" ? "Cut" : "Engrave"}`, operation.id);
       if (textObject && operation.type === "vector-cut") option.disabled = true;
       assignment.append(option);
     });
@@ -1207,6 +1277,7 @@
     const names = { left: "left", "center-x": "horizontal centers", right: "right", top: "top", "center-y": "vertical centers", bottom: "bottom" };
     $("#vector-align-status").textContent = `${selected.length} shapes aligned ${names[alignment]}.`;
     renderVectorEditor();
+    recordVectorHistory();
   }
 
   function layerField(labelText, control, className) {
@@ -1232,7 +1303,7 @@
       type.setAttribute("aria-label", `Operation ${index + 1} type`);
       [["vector-engrave", "Engrave"], ["vector-cut", "Cut"]].forEach(([value, label]) => type.append(new Option(label, value)));
       type.value = operation.type;
-      type.addEventListener("change", () => { operation.type = type.value; renderVectorEditor(); });
+      type.addEventListener("change", () => { operation.type = type.value; renderVectorEditor(); recordVectorHistory(); });
       const feed = document.createElement("input");
       feed.type = "number"; feed.min = "0.001"; feed.step = "0.001"; feed.value = operation.feed_mm_min;
       feed.setAttribute("aria-label", `Operation ${index + 1} feed (mm/min)`);
@@ -1251,6 +1322,7 @@
         const removed = vectorOperations.splice(index, 1)[0];
         vectorObjects.forEach((object) => { if (object.operation_id === removed.id) delete object.operation_id; });
         renderVectorEditor();
+        recordVectorHistory();
       }, `Delete operation ${index + 1}`);
       remove.classList.add("layer-remove");
       type.classList.add("layer-type-control");
@@ -1266,6 +1338,7 @@
     if (target < 0 || target >= vectorOperations.length) return;
     [vectorOperations[index], vectorOperations[target]] = [vectorOperations[target], vectorOperations[index]];
     renderVectorEditor();
+    recordVectorHistory();
   }
 
   function renderVectorPreview(profile) {
@@ -1362,7 +1435,11 @@
     renderVectorEditor();
     event.preventDefault();
   });
-  const finishVectorPointer = () => { vectorPointerDrag = null; };
+  const finishVectorPointer = () => {
+    const moved = vectorPointerDrag?.moved;
+    vectorPointerDrag = null;
+    if (moved) recordVectorHistory();
+  };
   $("#vector-preview").addEventListener("pointerup", finishVectorPointer);
   $("#vector-preview").addEventListener("pointercancel", finishVectorPointer);
 
@@ -1501,6 +1578,7 @@
     $("#vector-form-title").textContent = project ? `Edit ${project.name}` : "New vector project";
     $("#delete-vector-project").hidden = !project;
     vectorDraftBaseline = vectorFormState(selectedProfile());
+    resetVectorHistory();
     renderVectorEditor();
     $("#vector-name").focus();
     return true;
@@ -1511,6 +1589,9 @@
     openVectorProject = null;
     pendingVectorProjectUpdate = null;
     vectorDraftBaseline = null;
+    vectorHistory = [];
+    vectorHistoryIndex = -1;
+    updateVectorHistoryControls();
     $("#vector-form").hidden = true;
     restoreFocus(vectorReturnFocus, "#new-vector-project");
     vectorReturnFocus = null;
@@ -1559,6 +1640,7 @@
     selectedVectorObjects = new Set([object.id]);
     if (type === "text") await requestTextGeometry(object);
     renderVectorEditor();
+    recordVectorHistory();
   }
 
   function localTextErrors(text) {
@@ -1849,6 +1931,7 @@
       selectedVectorObjects = new Set(objects.length ? [objects[0].id] : []);
       $("#vector-svg-file-name").textContent = `Imported ${file.name}`;
       renderVectorEditor();
+      recordVectorHistory();
       notify("success", `Imported ${objects.length} editable SVG path${objects.length === 1 ? "" : "s"}. Assign each path to an operation layer; no machine settings were imported.`);
     } catch (error) { setDesignerError(error.message); }
   });
@@ -1856,6 +1939,7 @@
     const operation = { id: vectorID("operation"), type: "vector-engrave", feed_mm_min: 600, power_percent: 25 };
     vectorOperations.push(operation);
     renderVectorEditor();
+    recordVectorHistory();
   });
   document.querySelectorAll("[data-align]").forEach((control) => {
     control.addEventListener("click", () => alignSelectedVectorObjects(control.dataset.align));
@@ -1873,12 +1957,24 @@
       if (object) { if (event.target.value) object.operation_id = event.target.value; else delete object.operation_id; }
       renderVectorEditor();
     } else updateVectorValidation();
+    if (event.target.matches(".layer-row input, #vector-object-operation, #vector-name, #vector-text-content, #vector-text-size, #vector-x, #vector-y, #vector-width, #vector-height, #vector-translate-x, #vector-translate-y, #vector-scale-x, #vector-scale-y, #vector-rotation")) recordVectorHistory();
   });
   $("#close-vector-project").addEventListener("click", closeVectorEditor);
   $("#vector-reload-latest").addEventListener("click", () => reloadProjectRevision(2));
   $("#vector-copy-local").addEventListener("click", () => continueProjectAsCopy(2));
   $("#delete-vector-project").addEventListener("click", () => { if (openVectorProject) deleteVectorProject(openVectorProject.id, openVectorProject.name); });
   $("#generate-vector-project").addEventListener("click", generateVectorProject);
+  $("#vector-undo").addEventListener("click", undoVectorEdit);
+  $("#vector-redo").addEventListener("click", redoVectorEdit);
+  document.addEventListener("keydown", (event) => {
+    if ($("#vector-form").hidden || event.defaultPrevented || !(event.metaKey || event.ctrlKey) || event.altKey) return;
+    if (event.key.toLowerCase() !== "z") return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest("input, textarea, select")) return;
+    event.preventDefault();
+    if (event.shiftKey) redoVectorEdit();
+    else undoVectorEdit();
+  });
 
   function renderDrivers() {
     const prior = selectedDriver;
