@@ -104,7 +104,7 @@ test('invalid text stays blocked when another text object is edited', async ({ p
   await expect(page.locator('#vector-validation')).toContainText('Use A–Z');
   await expect(page.getByRole('button', { name: 'Save vector project' })).toBeDisabled();
 
-  await page.getByRole('button', { name: '1. text' }).click();
+  await page.getByRole('button', { name: '1. Text' }).click();
   await expect(page.locator('#vector-text-error')).toContainText('Use A–Z');
   await page.locator('#vector-text-content').fill('ALPHA');
   await expect(page.locator('#vector-text-error')).toBeHidden();
@@ -117,7 +117,7 @@ test('invalid text stays blocked when another text object is edited', async ({ p
   });
   const alphaResponse = page.waitForResponse((response) => response.request().postDataJSON()?.content === 'ALPHA');
   await page.locator('#vector-text-content').fill('ALPHA');
-  await page.getByRole('button', { name: '2. text' }).click();
+  await page.getByRole('button', { name: '2. Text' }).click();
   const bravoResponse = page.waitForResponse((response) => response.request().postDataJSON()?.content === 'BRAVO');
   await page.locator('#vector-text-content').fill('BRAVO');
   await bravoResponse;

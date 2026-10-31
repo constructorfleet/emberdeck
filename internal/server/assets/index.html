@@ -36,6 +36,11 @@
     <section id="designer-panel" class="panel designer-panel" aria-labelledby="designer-title">
       <div class="section-title"><div><p class="eyebrow">02 / DESIGN SOURCE</p><h1 id="designer-title">Designer</h1><p class="lede">Create and edit vector designs for a declared machine workspace.</p></div><div class="section-actions" aria-hidden="true"></div></div>
       <p class="designer-intro">Declare the prepared work area, edit a rectangle or multi-path vector design, and review its generated job before dispatch. Coordinates use millimetres and the lower-left work origin; controller settings are read for verification but never changed.</p>
+      <ol class="designer-steps" aria-label="Designer workflow">
+        <li><span class="step-number">01</span><span><strong>Declare the machine</strong>Select or create a profile that matches the prepared work area.</span></li>
+        <li><span class="step-number">02</span><span><strong>Design</strong>Add shapes, assign engraving or cutting layers, and check the preview.</span></li>
+        <li><span class="step-number">03</span><span><strong>Review and generate</strong>Save, generate a queued job, then review and dispatch it explicitly.</span></li>
+      </ol>
       <div id="designer-status" class="designer-status" role="status">Connect to load saved profiles and projects.</div>
       <div class="designer-columns">
         <section class="designer-section" aria-labelledby="profiles-title">
@@ -60,7 +65,7 @@
           </form>
         </section>
         <section class="designer-section" aria-labelledby="projects-title">
-          <div class="designer-heading"><h3 id="projects-title">Rectangle projects</h3><button id="new-project" class="button button-small" type="button" disabled>New rectangle project</button></div>
+          <div class="designer-heading"><div><h3 id="projects-title">Rectangle quick project</h3><p class="hint">One rectangle with one engraving operation. Use a vector project for multiple shapes, cutting, or text.</p></div><button id="new-project" class="button button-small" type="button" disabled>New rectangle project</button></div>
           <ul id="project-list" class="project-list" aria-label="Saved rectangle projects"></ul>
           <p id="project-empty" class="list-empty" hidden>No rectangle projects yet. Choose <strong>New rectangle project</strong> to create one.</p>
           <form id="project-form" class="designer-form" novalidate hidden>
@@ -88,64 +93,128 @@
         </section>
       </div>
       <section class="designer-section vector-section" aria-labelledby="vector-projects-title">
-        <div class="designer-heading"><div><h3 id="vector-projects-title">Multi-path vector projects</h3><p class="hint">Create editable rectangle, ellipse, and line paths. Add ordered engraving or cutting operations, then assign each shape.</p></div><button id="new-vector-project" class="button button-small" type="button" disabled>New vector project</button></div>
+        <div class="designer-heading"><div><h3 id="vector-projects-title">Multi-path vector projects</h3><p class="hint">Create editable rectangle, ellipse, line, and text paths, or import an SVG. Add engraving or cutting layers, assign every shape, then review the preview.</p></div><button id="new-vector-project" class="button button-small" type="button" disabled>New vector project</button></div>
         <ul id="vector-project-list" class="project-list" aria-label="Saved multi-path vector projects"></ul>
         <p id="vector-project-empty" class="list-empty" hidden>No vector projects yet. Choose <strong>New vector project</strong> to create one.</p>
-        <form id="vector-form" class="designer-form" hidden>
-          <h4 id="vector-form-title">New vector project</h4>
-          <label for="vector-name">Project name</label><input id="vector-name" maxlength="120" required>
+        <form id="vector-form" class="designer-form vector-form" hidden>
+          <div class="vector-form-header">
+            <div class="vector-form-heading">
+              <h4 id="vector-form-title">New vector project</h4>
+              <p class="vector-step-hint">Add shapes, assign each one to an engraving or cutting layer, then save and review the generated job.</p>
+            </div>
+            <label class="vector-name-field" for="vector-name">Project name<input id="vector-name" maxlength="120" required></label>
+          </div>
           <p id="vector-validation" class="form-validation" role="alert" hidden></p>
           <section id="vector-remote-change" class="remote-project-change" role="status" aria-live="polite" hidden><p id="vector-remote-message"></p><div class="designer-actions"><button id="vector-reload-latest" class="button button-small" type="button">Reload latest</button><button id="vector-copy-local" class="button button-small" type="button">Continue as separate project</button></div></section>
           <div class="vector-editor-grid">
-            <div>
+            <section class="vector-canvas-panel" aria-labelledby="vector-canvas-title">
+              <div class="vector-panel-head">
+                <div>
+                  <h4 id="vector-canvas-title" class="vector-subhead">Workspace</h4>
+                  <p id="vector-profile-summary" class="vector-profile-summary">No declared profile selected</p>
+                </div>
+                <div class="vector-history" role="group" aria-label="Edit history">
+                  <button id="vector-undo" class="button button-small" type="button" disabled title="Undo the last design edit">Undo</button>
+                  <button id="vector-redo" class="button button-small" type="button" disabled title="Redo the last undone edit">Redo</button>
+                </div>
+              </div>
               <div class="vector-toolbar" aria-label="Add or import vector geometry">
+                <span class="vector-toolbar-label" aria-hidden="true">Add</span>
                 <button class="button button-small" type="button" data-add-shape="rectangle">Add rectangle</button>
                 <button class="button button-small" type="button" data-add-shape="ellipse">Add ellipse</button>
                 <button class="button button-small" type="button" data-add-shape="line">Add line</button>
                 <button class="button button-small" type="button" data-add-shape="text">Add text</button>
                 <label class="button button-small svg-import-button" for="vector-svg-file">Import SVG<input id="vector-svg-file" type="file" accept=".svg,image/svg+xml" disabled></label>
+                <span id="vector-svg-file-name" class="vector-import-name" aria-live="polite"></span>
               </div>
-              <p class="hint">Imports static paths, basic shapes, and text in the emberdeck-stick-v1 monoline font. Text accepts 1–32 ASCII letters, digits, spaces, and .,:;!?+-/_() at a unitless font size of 1–100 viewBox units; it becomes open strokes for engraving. Nested SVG groups compose transforms through 16 levels. SVG C/c/S/s and Q/q/T/t curves become lines within 0.05 mm chord deviation; circles and ellipses become 32-point paths. M/L/H/V/Z and cubic/quadratic path commands and element transforms are supported. Text styling, tspan, unsupported attributes, and machine settings are rejected.</p>
-              <h4 class="vector-subhead">Shapes</h4><p class="hint">Click a path to select it, drag it to move it, or drag its corner handle to scale it. Use the shape checkboxes for alignment or select a shape name to edit exact geometry and transforms.</p><ul id="vector-object-list" class="vector-list" aria-label="Project shapes"></ul>
-              <div id="vector-align-controls" class="vector-align-controls" role="group" aria-label="Align selected shapes">
-                <span class="vector-subhead">Align selected shapes</span>
-                <div class="vector-toolbar">
-                  <button class="button button-small" type="button" data-align="left" disabled>Align left</button>
-                  <button class="button button-small" type="button" data-align="center-x" disabled>Align horizontal centers</button>
-                  <button class="button button-small" type="button" data-align="right" disabled>Align right</button>
-                  <button class="button button-small" type="button" data-align="top" disabled>Align top</button>
-                  <button class="button button-small" type="button" data-align="center-y" disabled>Align vertical centers</button>
-                  <button class="button button-small" type="button" data-align="bottom" disabled>Align bottom</button>
+              <div class="preview-wrap vector-preview-wrap">
+                <svg id="vector-preview" viewBox="0 0 620 360" role="img" aria-label="Multi-path design preview in declared workspace"><title>Multi-path design preview</title><desc>Vector paths are shown in the selected profile workspace and colored by operation type.</desc><g id="vector-preview-content"></g></svg>
+                <p id="vector-canvas-empty" class="vector-canvas-empty">No shapes yet. Add a shape above or import an SVG to see it in the workspace.</p>
+              </div>
+              <div class="vector-canvas-footer">
+                <p id="vector-preview-legend" class="preview-legend"><span class="legend-item engrave">Engrave</span><span class="legend-item cut">Cut</span><span class="legend-item unassigned">Unassigned</span></p>
+                <p class="hint">Click a shape to select it, drag to move it, and drag the corner handle to resize it. Coordinates use the lower-left workspace origin; the starting position remains unknown.</p>
+              </div>
+              <details class="vector-import-help">
+                <summary>What shapes and SVG files can I use?</summary>
+                <p class="hint">Imports static paths, basic shapes, and text in the emberdeck-stick-v1 monoline font. Text accepts 1–32 ASCII letters, digits, spaces, and .,:;!?+-/_() at a unitless font size of 1–100 viewBox units; it becomes open strokes for engraving. Nested SVG groups compose transforms through 16 levels. SVG C/c/S/s and Q/q/T/t curves become lines within 0.05 mm chord deviation; circles and ellipses become 32-point paths. M/L/H/V/Z and cubic/quadratic path commands and element transforms are supported. Text styling, tspan, unsupported attributes, and machine settings are rejected.</p>
+              </details>
+            </section>
+            <div class="vector-sidebar">
+              <section class="vector-panel" aria-labelledby="vector-shapes-title">
+                <div class="vector-panel-head">
+                  <h4 id="vector-shapes-title" class="vector-subhead">Shapes <span id="vector-shape-count" class="count-chip">0</span></h4>
+                  <span class="vector-panel-note">Tick two or more to align</span>
                 </div>
-                <p id="vector-align-status" class="hint" aria-live="polite"></p>
-              </div>
-              <div id="vector-geometry" class="numeric-grid vector-fields" hidden>
-                <div id="vector-text-fields" class="numeric-grid vector-fields" hidden>
-                  <label>Text<input id="vector-text-content" maxlength="32" autocomplete="off" aria-describedby="vector-text-error"></label>
-                  <label>Text height (mm)<input id="vector-text-size" type="number" min="1" max="100" step="0.001" aria-describedby="vector-text-error"></label>
-                  <p id="vector-text-error" class="field-error" role="alert" hidden></p>
-                  <p class="hint">Monoline font EmberDeck Stick v1. Engraving only. Use A–Z, 0–9, space, and . , : ; ! ? + - / _ ( ). Lowercase becomes uppercase; up to 32 characters, 1–100 mm high.</p>
+                <p id="vector-object-empty" class="list-empty vector-empty">No shapes yet. Add one above.</p>
+                <ul id="vector-object-list" class="vector-list" aria-label="Project shapes"></ul>
+                <div id="vector-align-controls" class="vector-align-controls" role="group" aria-label="Align selected shapes">
+                  <span class="vector-subhead">Align selected shapes</span>
+                  <p class="hint">Tick two or more shapes, then choose an alignment.</p>
+                  <div class="vector-toolbar">
+                    <button class="button button-small" type="button" data-align="left" disabled>Align left</button>
+                    <button class="button button-small" type="button" data-align="center-x" disabled>Align horizontal centers</button>
+                    <button class="button button-small" type="button" data-align="right" disabled>Align right</button>
+                    <button class="button button-small" type="button" data-align="top" disabled>Align top</button>
+                    <button class="button button-small" type="button" data-align="center-y" disabled>Align vertical centers</button>
+                    <button class="button button-small" type="button" data-align="bottom" disabled>Align bottom</button>
+                  </div>
+                  <p id="vector-align-status" class="hint" aria-live="polite"></p>
                 </div>
-                <label id="vector-x-label">X (mm)<input id="vector-x" type="number" min="0" step="0.001"></label>
-                <label id="vector-y-label">Y (mm)<input id="vector-y" type="number" min="0" step="0.001"></label>
-                <label>Width (mm)<input id="vector-width" type="number" min="0.001" step="0.001"></label>
-                <label>Height (mm)<input id="vector-height" type="number" min="0.001" step="0.001"></label>
-                <label>Operation layer<select id="vector-object-operation"></select></label>
-              </div>
-              <div id="vector-transform" class="numeric-grid vector-fields" hidden>
-                <label>Translate X (mm)<input id="vector-translate-x" type="number" step="0.001" value="0"></label>
-                <label>Translate Y (mm)<input id="vector-translate-y" type="number" step="0.001" value="0"></label>
-                <label>Scale X<input id="vector-scale-x" type="number" min="0.01" max="100" step="0.001" value="1"></label>
-                <label>Scale Y<input id="vector-scale-y" type="number" min="0.01" max="100" step="0.001" value="1"></label>
-                <label>Rotation (degrees)<input id="vector-rotation" type="number" min="-360" max="360" step="0.001" value="0"></label>
-              </div>
-              <div class="layer-heading"><h4 class="vector-subhead">Ordered operation layers</h4><button id="add-operation" class="button button-small" type="button">Add layer</button></div>
-              <ol id="vector-operation-list" class="vector-list vector-layers" aria-label="Ordered operation layers"></ol>
+              </section>
+              <section class="vector-panel" aria-labelledby="vector-inspector-title">
+                <div class="vector-panel-head">
+                  <h4 id="vector-inspector-title" class="vector-subhead">Selected shape</h4>
+                  <span id="vector-inspector-summary" class="count-chip" aria-live="polite">None</span>
+                </div>
+                <p id="vector-inspector-empty" class="list-empty vector-empty">Select a shape in the list or on the canvas to edit its position, size, and operation.</p>
+                <div id="vector-geometry" class="numeric-grid vector-fields" hidden>
+                  <div id="vector-text-fields" class="numeric-grid vector-fields" hidden>
+                    <label>Text<input id="vector-text-content" maxlength="32" autocomplete="off" aria-describedby="vector-text-error"></label>
+                    <label>Text height (mm)<input id="vector-text-size" type="number" min="1" max="100" step="0.001" aria-describedby="vector-text-error"></label>
+                    <p id="vector-text-error" class="field-error" role="alert" hidden></p>
+                    <p class="hint">Monoline font EmberDeck Stick v1. Engraving only. Use A–Z, 0–9, space, and . , : ; ! ? + - / _ ( ). Lowercase becomes uppercase; up to 32 characters, 1–100 mm high.</p>
+                  </div>
+                  <h4 id="vector-position-heading" class="vector-field-heading">Position and size</h4>
+                  <label id="vector-x-label">X (mm)<input id="vector-x" type="number" min="0" step="0.001"></label>
+                  <label id="vector-y-label">Y (mm)<input id="vector-y" type="number" min="0" step="0.001"></label>
+                  <label>Width (mm)<input id="vector-width" type="number" min="0.001" step="0.001"></label>
+                  <label>Height (mm)<input id="vector-height" type="number" min="0.001" step="0.001"></label>
+                  <label>Operation layer<select id="vector-object-operation"></select></label>
+                  <p id="vector-position-note" class="hint vector-field-note">Width and height scale the shape around its lower-left corner. Drag the corner handle on the canvas for quick resizing.</p>
+                </div>
+                <div id="vector-transform" class="numeric-grid vector-fields" hidden>
+                  <h4 class="vector-field-heading">Transform</h4>
+                  <label>Translate X (mm)<input id="vector-translate-x" type="number" step="0.001" value="0"></label>
+                  <label>Translate Y (mm)<input id="vector-translate-y" type="number" step="0.001" value="0"></label>
+                  <label>Scale X<input id="vector-scale-x" type="number" min="0.01" max="100" step="0.001" value="1"></label>
+                  <label>Scale Y<input id="vector-scale-y" type="number" min="0.01" max="100" step="0.001" value="1"></label>
+                  <label>Rotation (degrees)<input id="vector-rotation" type="number" min="-360" max="360" step="0.001" value="0"></label>
+                  <p class="hint vector-field-note">Translate moves the shape from its saved position. Scale and rotation apply around the shape center.</p>
+                </div>
+              </section>
             </div>
-            <div class="preview-wrap"><svg id="vector-preview" viewBox="0 0 620 360" role="img" aria-label="Multi-path design preview in declared workspace"><title>Multi-path design preview</title><desc>Vector paths are shown in the selected profile workspace and colored by operation type.</desc><g id="vector-preview-content"></g></svg><p>Workspace uses the selected declared profile and lower-left origin. Paths are design geometry; starting position remains unknown.</p></div>
+            <section class="vector-panel vector-layers-panel" aria-labelledby="vector-layers-title">
+              <div class="vector-panel-head">
+                <h4 id="vector-layers-title" class="vector-subhead">Operation layers</h4>
+                <button id="add-operation" class="button button-small" type="button">Add layer</button>
+              </div>
+              <p class="hint">Layers run from first to last. Each shape uses the layer assigned to it. Set the feed and commanded power for each layer, then assign shapes from the selected-shape panel.</p>
+              <ol id="vector-operation-list" class="vector-list vector-layers" aria-label="Ordered operation layers"></ol>
+              <p id="vector-layer-empty" class="list-empty vector-empty" hidden>No operation layers yet. Add one to engrave or cut.</p>
+            </section>
           </div>
-          <p id="vector-save-hint" class="hint" hidden>Save changes before generating. Generation only queues a job; use the existing explicit Start control after reviewing it.</p>
-          <div class="designer-actions"><button class="button button-primary" type="submit">Save vector project</button><button id="generate-vector-project" class="button button-start" type="button" disabled>Generate queued job</button><button id="delete-vector-project" class="button button-small button-danger" type="button" hidden>Delete project</button><button id="close-vector-project" class="button button-small" type="button">Close editor</button></div>
+          <div class="vector-form-actions">
+            <div class="vector-action-group">
+              <button class="button button-primary" type="submit">Save vector project</button>
+              <button id="generate-vector-project" class="button button-start" type="button" disabled>Generate queued job</button>
+            </div>
+            <p id="vector-save-hint" class="hint vector-save-hint" hidden>Save changes before generating. Generation only queues a job; use the existing explicit Start control after reviewing it.</p>
+            <div class="designer-actions">
+              <button id="delete-vector-project" class="button button-small button-danger" type="button" hidden>Delete project</button>
+              <button id="close-vector-project" class="button button-small" type="button">Close editor</button>
+            </div>
+          </div>
         </form>
       </section>
     </section>

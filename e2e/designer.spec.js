@@ -513,10 +513,10 @@ test('multi-path vector project saves, reopens, generates mixed operations, and 
   await page.getByRole('combobox', { name: 'Operation 2 type' }).selectOption('vector-cut');
   await page.getByLabel('Operation 2 feed (mm/min)').fill('300');
   await page.getByLabel('Operation 2 power (%)').fill('50');
-  await page.getByRole('button', { name: '2. ellipse' }).click();
-  await page.locator('#vector-object-operation').selectOption({ label: '2. cut' });
-  await page.getByRole('button', { name: '3. line' }).click();
-  await page.locator('#vector-object-operation').selectOption({ label: '1. engrave' });
+  await page.getByRole('button', { name: '2. Ellipse' }).click();
+  await page.locator('#vector-object-operation').selectOption({ label: '2. Cut' });
+  await page.getByRole('button', { name: '3. Line' }).click();
+  await page.locator('#vector-object-operation').selectOption({ label: '1. Engrave' });
   await expect(page.locator('#vector-validation')).toBeHidden();
   await expect(page.locator('#vector-preview-content .vector-path')).toHaveCount(3);
   await expect(page.locator('#generate-vector-project')).toBeDisabled();
@@ -532,7 +532,7 @@ test('multi-path vector project saves, reopens, generates mixed operations, and 
   await page.getByRole('button', { name: `Reopen vector project ${projectName}` }).click();
   await expect(page.locator('#vector-name')).toHaveValue(projectName);
   await expect(page.locator('#vector-object-list li')).toHaveCount(3);
-  await expect(page.getByRole('button', { name: '2. ellipse' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '2. Ellipse' })).toBeVisible();
   await expect(page.locator('#vector-operation-list li')).toHaveCount(2);
   await expect(page.locator('#generate-vector-project')).toBeEnabled();
   await page.locator('#vector-width').fill('0');
@@ -596,7 +596,7 @@ test('multi-path vector project saves, reopens, generates mixed operations, and 
   await page.reload();
   await expect(page.locator('#connection-state')).toHaveText('Connected · library synced');
   await page.getByRole('button', { name: `Reopen vector project ${pathName}` }).click();
-  await expect(page.getByRole('button', { name: '1. path' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '1. Path' })).toBeVisible();
   await page.locator('#vector-width').fill('20');
   await page.locator('#vector-height').fill('20');
   let updatedPathPayload;
@@ -684,7 +684,7 @@ test('operator imports SVG paths and bounded text into an editable project and d
   await page.locator('#vector-svg-file').setInputFiles({ name: 'outside.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(outsideSVG) });
   await expect(page.locator('#vector-validation')).toContainText(/outside the declared workspace/i);
   await expect(page.locator('#vector-object-list li')).toHaveCount(4);
-  await page.getByRole('button', { name: '4. path' }).click();
+  await page.getByRole('button', { name: '4. Path' }).click();
   await page.getByRole('button', { name: 'Remove shape 4' }).click();
   await expect(page.locator('#vector-validation')).toBeHidden();
   for (const width of [1024, 760, 390]) {
@@ -693,12 +693,12 @@ test('operator imports SVG paths and bounded text into an editable project and d
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
 
-  await page.getByRole('button', { name: '1. path' }).click();
-  await page.locator('#vector-object-operation').selectOption({ label: '1. engrave' });
-  await page.getByRole('button', { name: '2. path' }).click();
-  await page.locator('#vector-object-operation').selectOption({ label: '1. engrave' });
-  await page.getByRole('button', { name: '3. path' }).click();
-  await page.locator('#vector-object-operation').selectOption({ label: '1. engrave' });
+  await page.getByRole('button', { name: '1. Path' }).click();
+  await page.locator('#vector-object-operation').selectOption({ label: '1. Engrave' });
+  await page.getByRole('button', { name: '2. Path' }).click();
+  await page.locator('#vector-object-operation').selectOption({ label: '1. Engrave' });
+  await page.getByRole('button', { name: '3. Path' }).click();
+  await page.locator('#vector-object-operation').selectOption({ label: '1. Engrave' });
   await expect(page.locator('#vector-validation')).toBeHidden();
   await page.getByRole('button', { name: 'Save vector project' }).click();
   await expect(page.locator('#notice .notice-message')).toContainText('Vector project saved');

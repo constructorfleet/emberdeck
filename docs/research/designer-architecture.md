@@ -67,10 +67,12 @@ scale, and rotation around the source bounds center; profile validation,
 preview, and generation apply the same rounded transform. Group alignment uses
 the transformed point bounds of selected objects, adding only the necessary
 rounded translation to each object; normal profile validation remains in force.
-The v2 model does not provide arbitrary path-node editing,
-undo/redo, kerf compensation, tabs, passes, or raster engraving. Ellipses are polygonal and the
-editor does not claim live execution progress. Version 1 projects and
-`rectangle-v1` jobs remain supported with their original data and G-code.
+The v2 model does not provide arbitrary path-node editing, kerf compensation,
+tabs, passes, or raster engraving. The editor keeps a bounded undo/redo history
+of design edits in the browser; that history is not saved in the project or
+serialized into generated G-code. Ellipses are polygonal and the editor does
+not claim live execution progress. Version 1 projects and `rectangle-v1` jobs
+remain supported with their original data and G-code.
 
 ## Pre-designer baseline
 
