@@ -91,6 +91,13 @@ func (s *Server) loadCredentials(bootstrapSecret string) error {
 	if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	// Without a configured key authentication is disabled, so there is nothing
+	// to seed. Do not create a credential store: a later keyed start should
+	// still migrate its key into a bootstrap admin credential.
+	if bootstrapSecret == "" {
+		s.credentials = make(map[string]credentialRecord)
+		return nil
+	}
 	// A missing library is the explicit migration boundary for existing installs:
 	// seed their current EMBERDECK_API_KEY as a durable, hashed admin credential.
 	id, err := randomID()
@@ -229,6 +236,9 @@ func bearerSecret(header string) (string, bool) {
 }
 
 func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) (*http.Request, bool) {
+	if s.authDisabled {
+		return withPrincipal(r, principal{ID: "local", Name: "local-admin", Role: "admin"}), true
+	}
 	secret, valid := bearerSecret(r.Header.Get("Authorization"))
 	if !valid {
 		fail(w, http.StatusUnauthorized, "authentication required")
@@ -283,7 +293,8 @@ func (s *Server) handleAPI(pattern string, allowedRoles []string, workerScope bo
 
 func (s *Server) authInfo(w http.ResponseWriter, r *http.Request) {
 	identity := requestPrincipal(r)
-	respond(w, http.StatusOK, map[string]any{"id": identity.ID, "name": identity.Name, "role": identity.Role, "driver_ids": identity.DriverIDs})
+	respond(w, http.StatusOK, map[string]any{"id": identity.ID, "name": identity.Name, "role": identity.Role, "driver_ids": identity.DriverIDs,
+		"authentication_required": !s.authDisabled})
 }
 
 func (s *Server) listCredentials(w http.ResponseWriter, _ *http.Request) {

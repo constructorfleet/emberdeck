@@ -465,14 +465,16 @@ func sameCapabilities(left, right []string) bool {
 func (s *Server) pollLocked(w http.ResponseWriter, id string, cause transitionCause, in *pollReport) (*pollAssignment, bool, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	credential, credentialActive := s.credentials[cause.actor.ID]
-	if !credentialActive || credential.Revoked {
-		fail(w, http.StatusUnauthorized, "authentication required")
-		return nil, false, false
-	}
-	if credential.Role == "worker" && !containsDriver(credential.DriverIDs, id) {
-		fail(w, http.StatusForbidden, "worker credential is not authorized for this driver ID")
-		return nil, false, false
+	if !s.authDisabled {
+		credential, credentialActive := s.credentials[cause.actor.ID]
+		if !credentialActive || credential.Revoked {
+			fail(w, http.StatusUnauthorized, "authentication required")
+			return nil, false, false
+		}
+		if credential.Role == "worker" && !containsDriver(credential.DriverIDs, id) {
+			fail(w, http.StatusForbidden, "worker credential is not authorized for this driver ID")
+			return nil, false, false
+		}
 	}
 	if err := s.expire(); err != nil {
 		fail(w, 500, "could not persist driver expiration")

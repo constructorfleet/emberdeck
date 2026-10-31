@@ -47,9 +47,11 @@ server accepts only active stored credentials, so changing the environment
 value does not rotate a key. Check that the browser or worker uses a credential
 created through the admin API, that it has not been revoked, and that a worker
 credential's `driver_ids` includes its `-id`. In the browser, use **Change key**
-to enter the correct value; the console validates it before saving it for that
-tab session. Keep the bootstrap admin key on the server side and give each
-remote worker its own credential. See the
+to enter the correct value; the console validates it before saving it in local
+storage and reuses it after a reload. Keep the bootstrap admin key on the server
+side and give each remote worker its own credential. If the server was started
+without `EMBERDECK_API_KEY`, authentication is disabled and no key is expected;
+set a key and restart if that was not intentional. See the
 [credential contract](api.md#authentication-and-roles) and the
 [Operator Guide](operator-guide.md#connect-and-choose-a-driver).
 

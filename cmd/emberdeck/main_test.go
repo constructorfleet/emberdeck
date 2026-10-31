@@ -78,11 +78,15 @@ func TestServeReportsUnreadableSecretFile(t *testing.T) {
 
 func TestServeMetricsListenFlagIsOptionalAndRecognized(t *testing.T) {
 	t.Setenv("EMBERDECK_API_KEY", "")
-	if err := runServe([]string{"-metrics-listen", "127.0.0.1:0"}); err == nil || !strings.Contains(err.Error(), "EMBERDECK_API_KEY is required") {
+	if err := runServe([]string{"-listen", "not-an-address", "-data", t.TempDir(), "-metrics-listen", "127.0.0.1:0"}); err == nil || !strings.Contains(err.Error(), "listen:") {
 		t.Fatalf("metrics listen flag was not accepted: %v", err)
 	}
-	if err := runServe(nil); err == nil || !strings.Contains(err.Error(), "EMBERDECK_API_KEY is required") {
-		t.Fatalf("default serve behavior changed: %v", err)
+}
+
+func TestServeDoesNotRequireAPIKey(t *testing.T) {
+	t.Setenv("EMBERDECK_API_KEY", "")
+	if err := runServe([]string{"-listen", "not-an-address", "-data", t.TempDir()}); err == nil || !strings.Contains(err.Error(), "listen:") {
+		t.Fatalf("keyless serve did not reach the listener: %v", err)
 	}
 }
 
@@ -189,7 +193,7 @@ func TestServeRejectsInvalidLogLevelBeforeOpeningLibrary(t *testing.T) {
 
 func TestServeJobEventRetentionFlagsAreValidated(t *testing.T) {
 	t.Setenv("EMBERDECK_API_KEY", "")
-	if err := runServe([]string{"-job-event-limit", "1000", "-job-event-retention", "720h"}); err == nil || !strings.Contains(err.Error(), "EMBERDECK_API_KEY is required") {
+	if err := runServe([]string{"-listen", "not-an-address", "-data", t.TempDir(), "-job-event-limit", "1000", "-job-event-retention", "720h"}); err == nil || !strings.Contains(err.Error(), "listen:") {
 		t.Fatalf("job event retention flags were not accepted: %v", err)
 	}
 	for _, args := range [][]string{{"-job-event-limit", "0"}, {"-job-event-limit", "-1"}, {"-job-event-retention", "-1h"}} {

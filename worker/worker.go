@@ -311,8 +311,8 @@ func RunWithOptions(ctx context.Context, serverURL, key, id string, connect Conn
 // RunWithAdapterRegistry polls the same lease-owning HTTP API as RunWithOptions,
 // routing jobs for id through an explicitly registered in-process adapter.
 func RunWithAdapterRegistry(ctx context.Context, serverURL, key, id string, registry *AdapterRegistry, options Options) error {
-	if ctx == nil || strings.TrimSpace(serverURL) == "" || key == "" || id == "" || registry == nil {
-		return errors.New("worker: context, server URL, key, driver ID, and adapter registry are required")
+	if ctx == nil || strings.TrimSpace(serverURL) == "" || id == "" || registry == nil {
+		return errors.New("worker: context, server URL, driver ID, and adapter registry are required")
 	}
 	registration, ok := registry.lookup(id)
 	if !ok {
@@ -530,10 +530,18 @@ func Supervise(ctx context.Context, serverURL, key, id string, connect Connector
 }
 
 func validArguments(ctx context.Context, serverURL, key, id string, connect Connector) error {
-	if ctx == nil || connect == nil || strings.TrimSpace(serverURL) == "" || key == "" || id == "" {
-		return errors.New("worker: context, server URL, key, driver ID, and connector are required")
+	if ctx == nil || connect == nil || strings.TrimSpace(serverURL) == "" || id == "" {
+		return errors.New("worker: context, server URL, driver ID, and connector are required")
 	}
 	return nil
+}
+
+// setAuthorization omits the header when no key is configured, matching a
+// server that has authentication disabled.
+func setAuthorization(req *http.Request, key string) {
+	if key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
 }
 
 func runJob(ctx context.Context, client *http.Client, endpoint, key, session string, a assignment, connect Connector, report *controllerReport) (progress, error) {
@@ -729,7 +737,7 @@ func fetchContentChunk(ctx context.Context, client *http.Client, endpoint, key, 
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Set("Authorization", "Bearer "+key)
+		setAuthorization(req, key)
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
 		req.Header.Set(contentSessionHeader, session)
 		req.Header.Set(contentLeaseHeader, lease)
@@ -795,7 +803,7 @@ func post(ctx context.Context, client *http.Client, endpoint, key string, payloa
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+key)
+	setAuthorization(req, key)
 	req.Header.Set("Content-Type", "application/json")
 	response, err := client.Do(req)
 	if err != nil {

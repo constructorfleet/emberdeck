@@ -18,13 +18,13 @@ function portAvailable() {
   });
 }
 
-function runTests(baseURL) {
+function runTests(baseURL, openBaseURL) {
   return new Promise((resolve, reject) => {
     const cli = require.resolve('@playwright/test/cli');
     const child = spawn(process.execPath, [cli, 'test', '--config', 'e2e/playwright.config.js'], {
       cwd: root,
       stdio: 'inherit',
-      env: { ...process.env, EMBERDECK_E2E_BASE_URL: baseURL },
+      env: { ...process.env, EMBERDECK_E2E_BASE_URL: baseURL, EMBERDECK_E2E_OPEN_BASE_URL: openBaseURL },
     });
     child.once('error', reject);
     child.once('exit', (code, signal) => {
@@ -57,6 +57,23 @@ async function stopServer(child) {
   try { await exited; } finally { clearTimeout(timeout); }
 }
 
+function startServer(binary, port, env) {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emberdeck-browser-e2e-'));
+  const child = spawn(binary, ['serve', '-listen', `127.0.0.1:${port}`, '-data', dataDir, '-simulate'], {
+    cwd: root,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env,
+  });
+  let output = '';
+  const remember = (chunk) => {
+    output = (output + chunk.toString()).slice(-12000);
+    process.stderr.write(chunk);
+  };
+  child.stdout.on('data', remember);
+  child.stderr.on('data', remember);
+  return { child, dataDir, log: () => output };
+}
+
 async function main() {
   const binary = path.resolve(process.env.EMBERDECK_BINARY || path.join(root, 'bin', process.platform === 'win32' ? 'emberdeck.exe' : 'emberdeck'));
   if (!process.env.EMBERDECK_BINARY) {
@@ -67,27 +84,23 @@ async function main() {
   const requestedPort = process.env.EMBERDECK_E2E_PORT;
   const port = requestedPort ? Number(requestedPort) : await portAvailable();
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('EMBERDECK_E2E_PORT must be a TCP port from 1 through 65535');
+  let openPort = await portAvailable();
+  while (openPort === port) openPort = await portAvailable();
   const baseURL = `http://127.0.0.1:${port}`;
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emberdeck-browser-e2e-'));
-  const server = spawn(binary, ['serve', '-listen', `127.0.0.1:${port}`, '-data', dataDir, '-simulate'], {
-    cwd: root,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, EMBERDECK_API_KEY: apiKey },
-  });
-  let output = '';
-  const remember = (chunk) => {
-    output = (output + chunk.toString()).slice(-12000);
-    process.stderr.write(chunk);
-  };
-  server.stdout.on('data', remember);
-  server.stderr.on('data', remember);
+  const openBaseURL = `http://127.0.0.1:${openPort}`;
+  const keyed = startServer(binary, port, { ...process.env, EMBERDECK_API_KEY: apiKey });
+  const openEnv = { ...process.env };
+  delete openEnv.EMBERDECK_API_KEY;
+  delete openEnv.EMBERDECK_API_KEY_FILE;
+  const open = startServer(binary, openPort, openEnv);
   try {
-    await waitForServer(baseURL, server, () => output);
-    const exitCode = await runTests(baseURL);
+    await Promise.all([waitForServer(baseURL, keyed.child, keyed.log), waitForServer(openBaseURL, open.child, open.log)]);
+    const exitCode = await runTests(baseURL, openBaseURL);
     if (exitCode !== 0) process.exitCode = exitCode;
   } finally {
-    await stopServer(server);
-    fs.rmSync(dataDir, { recursive: true, force: true });
+    await Promise.all([stopServer(keyed.child), stopServer(open.child)]);
+    fs.rmSync(keyed.dataDir, { recursive: true, force: true });
+    fs.rmSync(open.dataDir, { recursive: true, force: true });
   }
 }
 

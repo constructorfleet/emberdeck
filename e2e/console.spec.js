@@ -185,13 +185,16 @@ test('rejected key is not stored or polled, then a trimmed correct key connects'
     await route.continue();
   });
   await page.goto('/');
+  // The console probes the identity route once when no key is remembered.
+  await expect.poll(() => apiRequests).toBe(1);
+  const probeRequests = apiRequests;
   await page.locator('#api-key').fill(' wrong-key ');
   await page.locator('#auth-form button[type="submit"]').click();
   const connect = page.locator('#auth-form button[type="submit"]');
   await expect(connect).toContainText('Connecting…');
   await expect(connect).toBeDisabled();
   await expect(page.locator('#connect-arrow')).toBeHidden();
-  expect(await page.evaluate(() => sessionStorage.getItem('emberdeck-api-key'))).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('emberdeck-api-key'))).toBeNull();
   expect(driverPolls).toBe(0);
   await expect.poll(() => Boolean(releaseValidation)).toBe(true);
   holdValidation = false;
@@ -200,9 +203,9 @@ test('rejected key is not stored or polled, then a trimmed correct key connects'
   await expect(page.locator('#api-key')).toBeFocused();
   await expect(page.locator('#notice')).toContainText('That API key was not accepted. Check it and try again.');
   await expect(page.locator('.status-dot')).toHaveAttribute('data-state', 'error');
-  expect(await page.evaluate(() => sessionStorage.getItem('emberdeck-api-key'))).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('emberdeck-api-key'))).toBeNull();
   const rejectedRequestCount = apiRequests;
-  expect(rejectedRequestCount).toBe(1);
+  expect(rejectedRequestCount).toBe(probeRequests + 1);
   await page.waitForTimeout(2300);
   expect(apiRequests).toBe(rejectedRequestCount);
 
@@ -215,9 +218,19 @@ test('rejected key is not stored or polled, then a trimmed correct key connects'
   await expect(page.locator('#connection-controls')).toContainText('Disconnect');
   await expect(page.locator('#notice')).toBeHidden();
   await expect(page.locator('.status-dot')).toHaveAttribute('data-state', 'connected');
-  expect(await page.evaluate(() => sessionStorage.getItem('emberdeck-api-key'))).toBe(apiKey);
+  expect(await page.evaluate(() => localStorage.getItem('emberdeck-api-key'))).toBe(apiKey);
   await page.locator('#change-key').click();
   await expect(page.locator('#api-key')).toHaveValue(apiKey);
+});
+
+test('an accepted key is remembered in local storage and reused after reload', async ({ page }) => {
+  await connect(page);
+  expect(await page.evaluate(() => localStorage.getItem('emberdeck-api-key'))).toBe(apiKey);
+  await page.reload();
+  await expect(page.locator('#connection-controls')).toContainText('Connected');
+  await expect(page.locator('#auth-form')).toBeHidden();
+  await expect(page.locator('#driver-select')).toHaveValue('simulator');
+  expect(await page.evaluate(() => localStorage.getItem('emberdeck-api-key'))).toBe(apiKey);
 });
 
 test('disconnect forgets the key and stops polling', async ({ page }) => {
@@ -231,7 +244,7 @@ test('disconnect forgets the key and stops polling', async ({ page }) => {
   await expect(page.locator('#auth-form')).toBeVisible();
   await expect(page.locator('#connection-state')).toHaveText('Not connected');
   await expect(page.locator('.status-dot')).toHaveAttribute('data-state', 'disconnected');
-  expect(await page.evaluate(() => sessionStorage.getItem('emberdeck-api-key'))).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('emberdeck-api-key'))).toBeNull();
   const pollCountAtDisconnect = driverPolls;
   await page.waitForTimeout(2300);
   expect(driverPolls).toBe(pollCountAtDisconnect);
@@ -242,7 +255,7 @@ test('disconnect forgets the key and stops polling', async ({ page }) => {
 test('a 401 during refresh clears a stored key, focuses the key field, and stops polling', async ({ page }) => {
   let rejectedDriverRequests = 0;
   await connect(page);
-  expect(await page.evaluate(() => sessionStorage.getItem('emberdeck-api-key'))).toBe(apiKey);
+  expect(await page.evaluate(() => localStorage.getItem('emberdeck-api-key'))).toBe(apiKey);
   await page.route('**/api/v1/drivers', async (route) => {
     rejectedDriverRequests++;
     await route.fulfill({ status: 401, contentType: 'application/json', body: '{"error":"authentication required"}' });
@@ -253,7 +266,7 @@ test('a 401 during refresh clears a stored key, focuses the key field, and stops
   await expect(page.locator('#notice')).toContainText('That API key was not accepted. Check it and try again.');
   await expect(page.locator('.status-dot')).toHaveAttribute('data-state', 'error');
   await expect(page.locator('#api-key')).toBeFocused();
-  expect(await page.evaluate(() => sessionStorage.getItem('emberdeck-api-key'))).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('emberdeck-api-key'))).toBeNull();
   expect(rejectedDriverRequests).toBe(1);
   await page.waitForTimeout(2300);
   expect(rejectedDriverRequests).toBe(1);

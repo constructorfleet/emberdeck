@@ -38,6 +38,9 @@ credentials cannot read job libraries or call operator routes. The server
 rejects a credential used for an unassigned ID. Use one credential per device;
 do not copy the server's admin/bootstrap key to a remote worker. Admin access to
 poll remains only as compatibility for the legacy bootstrap key and local worker.
+If the server was started without `EMBERDECK_API_KEY`, authentication is disabled
+and the worker omits its bearer token; use that combination only on a trusted
+local or isolated network.
 
 The worker applies `pause` and `resume` commands to the active GRBL stream. A
 paused assignment is connected and preflighted without sending source lines;

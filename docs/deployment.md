@@ -52,11 +52,14 @@ chmod +x ./emberdeck-darwin-arm64
 ./emberdeck-darwin-arm64 -version
 ```
 
-The server requires a private `EMBERDECK_API_KEY`. Keep the displayed key
-private. The native listener defaults to loopback; bind to all interfaces only
-on a trusted network or behind a TLS reverse proxy. Remote workers should use
-HTTPS or a trusted TLS tunnel. A raw TCP controller connection is separate from
-the worker's authenticated HTTP connection.
+Set a private `EMBERDECK_API_KEY` for every networked deployment and keep the
+displayed key private. If it is unset, the server starts with authentication
+disabled and treats every API request as an administrator; that mode is only
+appropriate on a trusted local or isolated network. The native listener defaults
+to loopback; bind to all interfaces only on a trusted network or behind a TLS
+reverse proxy. Remote workers should use HTTPS or a trusted TLS tunnel. A raw TCP
+controller connection is separate from the worker's authenticated HTTP
+connection.
 
 ## Build from source
 

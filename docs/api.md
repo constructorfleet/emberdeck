@@ -1,9 +1,11 @@
 # HTTP API and worker contract
 
-API prefix: `/api/v1`. Every API request requires `Authorization: Bearer KEY`.
-The HTML, CSS, and JavaScript console shell are public; API data is private. The
-browser keeps the entered key in session storage for the browser tab session.
-Use HTTPS through a TLS reverse proxy for remote access. The native listener is
+API prefix: `/api/v1`. API requests require `Authorization: Bearer KEY`, except
+when the server is started without `EMBERDECK_API_KEY`; that mode disables
+authentication and treats every request as an administrator. The HTML, CSS, and
+JavaScript console shell are public; API data is private. When a key is used, the
+browser retains it in local storage and reuses it after a reload. Use HTTPS
+through a TLS reverse proxy for remote access. The native listener is
 loopback-only by default and does not terminate TLS itself.
 
 Optional Prometheus metrics are served from `/metrics` on the separately
@@ -52,7 +54,7 @@ other routes.
 
 | Request | Response | Errors |
 | --- | --- | --- |
-| No body. | `200` with the caller's `id`, `name`, `role`, and worker `driver_ids`. | `401` missing or invalid bearer key. |
+| No body. | `200` with the caller's `id`, `name`, `role`, worker `driver_ids`, and `authentication_required`. When authentication is disabled, this returns the implicit `local-admin` identity with `authentication_required: false`. | `401` missing or invalid bearer key when authentication is enabled. |
 
 A worker's response contains only its assigned IDs:
 
@@ -61,7 +63,8 @@ A worker's response contains only its assigned IDs:
   "id": "0123456789abcdef0123456789abcdef",
   "name": "bench worker",
   "role": "worker",
-  "driver_ids": ["bench"]
+  "driver_ids": ["bench"],
+  "authentication_required": true
 }
 ```
 
@@ -123,9 +126,10 @@ only its SHA-256 hash is persisted. Existing jobs, profiles, and projects are
 left in place. This behavior makes an existing single-key installation continue
 to authenticate after upgrade. Once `credentials.json` exists, the server uses
 only credentials in that store: the environment variable is not an authentication
-fallback and changing it does not rotate or replace a key. The CLI still requires
-`EMBERDECK_API_KEY` at startup; for local-worker deployments it must name an
-active admin key because the local worker shares that configured key.
+fallback and changing it does not rotate or replace a key. The CLI starts without
+`EMBERDECK_API_KEY`, but then authentication is disabled and stored credentials
+are not enforced. For local-worker deployments with authentication enabled, the
+configured key must name an active admin key because the local worker shares it.
 
 For rotation, while authenticated as an admin, create a replacement credential
 of the intended role and deliver its one-time key to its user/device. Verify
