@@ -747,6 +747,41 @@
 
   function milli(value) { return Math.round(value * 1000); }
 
+  function floorMm(value) { return Math.floor(value * 1000) / 1000; }
+
+  // New designs should start with visible geometry and machine settings that
+  // the selected profile can actually run. A fixed 30 x 20 mm shape is tiny on
+  // a large bed, and a fixed 600 mm/min feed is invalid on a slow profile.
+  function defaultDesignLengthMm(total, fraction, availableMm = total, minimumMm = 10) {
+    const available = floorMm(availableMm);
+    if (!(total > 0) || !(available > 0)) return 0;
+    return Math.min(Math.max(floorMm(total * fraction), Math.min(minimumMm, available)), available);
+  }
+
+  function defaultDesignPositionMm(total, length) {
+    if (!(total > 0) || !(length > 0)) return 0;
+    return floorMm((total - length) / 2);
+  }
+
+  function defaultOperationFeed(profile) {
+    const minimum = Number(profile?.min_feed_mm_min);
+    const maximum = Number(profile?.max_feed_mm_min);
+    if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || maximum < minimum) return 600;
+    return Math.min(Math.max(600, minimum), maximum);
+  }
+
+  function defaultOperationPower(profile) {
+    const maximum = Number(profile?.max_power_percent);
+    const maximumS = Number(profile?.max_s);
+    if (!Number.isFinite(maximum) || maximum <= 0) return 25;
+    let power = Math.min(25, maximum);
+    if (Number.isFinite(maximumS) && maximumS > 0) {
+      // The lowest percentage that still rounds to a nonzero spindle value.
+      power = Math.max(power, Math.ceil((50 / maximumS) * 1000) / 1000);
+    }
+    return Math.min(power, maximum);
+  }
+
   function projectValidation() {
     const profile = selectedProfile();
     if (!profile) return { _form: "Select or create a declared profile first." };
@@ -854,13 +889,20 @@
     $("#project-form").hidden = false;
     $("#project-form-title").textContent = project ? `Edit ${project.name}` : "New rectangle project";
     $(projectFields.name).value = project ? project.name : "Untitled rectangle";
-    const rect = project ? project.rectangle : { x_mm: 10, y_mm: 20, width_mm: 30, height_mm: 20 };
+    const profile = selectedProfile();
+    const defaultWidth = defaultDesignLengthMm(Number(profile?.width_mm), 0.4);
+    const defaultHeight = defaultDesignLengthMm(Number(profile?.height_mm), 0.4);
+    const rect = project ? project.rectangle : {
+      x_mm: defaultDesignPositionMm(Number(profile?.width_mm), defaultWidth),
+      y_mm: defaultDesignPositionMm(Number(profile?.height_mm), defaultHeight),
+      width_mm: defaultWidth, height_mm: defaultHeight,
+    };
     $(projectFields.x_mm).value = String(rect.x_mm);
     $(projectFields.y_mm).value = String(rect.y_mm);
     $(projectFields.width_mm).value = String(rect.width_mm);
     $(projectFields.height_mm).value = String(rect.height_mm);
-    $(projectFields.feed_mm_min).value = String(project ? project.operation.feed_mm_min : 600);
-    $(projectFields.power_percent).value = String(project ? project.operation.power_percent : 25);
+    $(projectFields.feed_mm_min).value = String(project ? project.operation.feed_mm_min : defaultOperationFeed(profile));
+    $(projectFields.power_percent).value = String(project ? project.operation.power_percent : defaultOperationPower(profile));
     projectDraftBaseline = projectFormState();
     $("#delete-project").hidden = !project;
     $("#stale-profile-warning").hidden = true;
@@ -1568,7 +1610,8 @@
     vectorObjects.forEach((object) => {
       if (objectKind(object) === "text") object.textGeometry = newTextGeometryState();
     });
-    vectorOperations = project ? project.operations.map((operation) => ({ ...operation })) : [{ id: vectorID("operation"), type: "vector-engrave", feed_mm_min: 600, power_percent: 25 }];
+    const profile = selectedProfile();
+    vectorOperations = project ? project.operations.map((operation) => ({ ...operation })) : [{ id: vectorID("operation"), type: "vector-engrave", feed_mm_min: defaultOperationFeed(profile), power_percent: defaultOperationPower(profile) }];
     selectedVectorObject = vectorObjects[0]?.id || "";
     selectedVectorObjects = new Set(selectedVectorObject ? [selectedVectorObject] : []);
     $("#vector-align-status").textContent = "";
@@ -1626,9 +1669,10 @@
   async function addVectorShape(type) {
     const profile = selectedProfile();
     if (!profile) return;
-    const x = Math.min(10 + vectorObjects.length * 5, Math.max(0, profile.width_mm - 20));
-    const y = Math.min(10 + vectorObjects.length * 5, Math.max(0, profile.height_mm - 20));
-    const width = Math.min(30, profile.width_mm - x), height = Math.min(20, profile.height_mm - y);
+    const width = defaultDesignLengthMm(profile.width_mm, 0.25);
+    const height = defaultDesignLengthMm(profile.height_mm, 0.25);
+    const x = Math.min(defaultDesignPositionMm(profile.width_mm, width) + vectorObjects.length * 5, Math.max(0, profile.width_mm - width));
+    const y = Math.min(defaultDesignPositionMm(profile.height_mm, height) + vectorObjects.length * 5, Math.max(0, profile.height_mm - height));
     const closed = type !== "line";
     const object = type === "text"
       ? { id: vectorID("text"), kind: "text", text: { content: "EMBER", font: "emberdeck-stick-v1", size_mm: 10, x_mm: x, y_mm: y }, subpaths: [] }
@@ -1936,7 +1980,8 @@
     } catch (error) { setDesignerError(error.message); }
   });
   $("#add-operation").addEventListener("click", () => {
-    const operation = { id: vectorID("operation"), type: "vector-engrave", feed_mm_min: 600, power_percent: 25 };
+    const profile = selectedProfile();
+    const operation = { id: vectorID("operation"), type: "vector-engrave", feed_mm_min: defaultOperationFeed(profile), power_percent: defaultOperationPower(profile) };
     vectorOperations.push(operation);
     renderVectorEditor();
     recordVectorHistory();

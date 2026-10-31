@@ -29,10 +29,18 @@ test('keyboard multi-selection aligns transformed shapes and persists the new pl
   await page.getByRole('button', { name: 'New vector project' }).click();
   await page.locator('#vector-name').fill(projectName);
   await page.getByRole('button', { name: 'Add rectangle' }).click();
+  await page.locator('#vector-x').fill('10');
+  await page.locator('#vector-y').fill('10');
+  await page.locator('#vector-width').fill('30');
+  await page.locator('#vector-height').fill('20');
   const alignLeft = page.getByRole('button', { name: 'Align left' });
   await expect(alignLeft).toBeVisible({ timeout: 2000 });
   await expect(alignLeft).toBeDisabled();
   await page.getByRole('button', { name: 'Add ellipse' }).click();
+  await page.locator('#vector-x').fill('15');
+  await page.locator('#vector-y').fill('15');
+  await page.locator('#vector-width').fill('30');
+  await page.locator('#vector-height').fill('20');
   await expect(alignLeft).toBeDisabled();
 
   // Rotate the second shape so alignment must use its actual transformed bounds.

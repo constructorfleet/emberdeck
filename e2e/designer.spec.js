@@ -535,10 +535,11 @@ test('multi-path vector project saves, reopens, generates mixed operations, and 
   await expect(page.getByRole('button', { name: '2. Ellipse' })).toBeVisible();
   await expect(page.locator('#vector-operation-list li')).toHaveCount(2);
   await expect(page.locator('#generate-vector-project')).toBeEnabled();
+  const savedWidth = await page.locator('#vector-width').inputValue();
   await page.locator('#vector-width').fill('0');
   await expect(page.locator('#vector-validation')).toBeVisible();
   await expect(page.locator('#generate-vector-project')).toBeDisabled();
-  await page.locator('#vector-width').fill('30');
+  await page.locator('#vector-width').fill(savedWidth);
   await expect(page.locator('#vector-validation')).toBeHidden();
   await expect(page.locator('#generate-vector-project')).toBeEnabled();
   for (const width of [1440, 1024, 900, 800, 768, 761, 760, 390]) {
