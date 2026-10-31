@@ -985,6 +985,21 @@
 
   function objectKind(object) { return object.kind || "path"; }
 
+  function vectorKindLabel(kind) {
+    return { rectangle: "Rectangle", ellipse: "Ellipse", line: "Line", text: "Text", path: "Path" }[kind] || "Shape";
+  }
+
+  function formatMillimetres(value) {
+    return Number.isFinite(value) ? Number(value.toFixed(3)).toString() : "—";
+  }
+
+  function vectorShapeDetails(object) {
+    const text = objectKind(object) === "text" && object.text?.content ? `“${object.text.content}” · ` : "";
+    if (!object.subpaths.some((path) => path.points.length)) return objectKind(object) === "text" ? "Generating strokes…" : "No geometry";
+    const box = transformedBounds(object);
+    return `${text}${formatMillimetres(box.right - box.left)} × ${formatMillimetres(box.top - box.bottom)} mm · X ${formatMillimetres(box.left)} · Y ${formatMillimetres(box.bottom)}`;
+  }
+
   function newTextGeometryState() { return { pending: false, error: "", requestID: 0 }; }
 
   function textGeometryState(object) {
@@ -1067,6 +1082,8 @@
   function renderVectorObjectList() {
     const list = $("#vector-object-list");
     list.replaceChildren();
+    $("#vector-shape-count").textContent = String(vectorObjects.length);
+    $("#vector-object-empty").hidden = vectorObjects.length > 0;
     vectorObjects.forEach((object, index) => {
       const row = document.createElement("li");
       row.className = object.id === selectedVectorObject ? "selected" : "";
@@ -1094,25 +1111,35 @@
         if (!selectedVectorObjects.has(object.id)) selectedVectorObjects = new Set([object.id]);
         renderVectorEditor();
       });
+      const details = document.createElement("span");
+      details.className = "vector-shape-details";
+      details.textContent = vectorShapeDetails(object);
       const assigned = vectorOperations.find((operation) => operation.id === object.operation_id);
       const detail = document.createElement("span");
-      detail.textContent = assigned ? assigned.type.replace("vector-", "") : "Unassigned";
-      const remove = button("Remove", "button button-small button-danger", () => {
+      detail.className = `vector-shape-layer ${assigned ? (assigned.type === "vector-cut" ? "is-cut" : "is-engrave") : "is-unassigned"}`;
+      detail.textContent = assigned ? (assigned.type === "vector-cut" ? "Cut" : "Engrave") : "Unassigned";
+      const remove = button("Remove", "button button-small button-danger vector-remove", () => {
         vectorObjects = vectorObjects.filter((candidate) => candidate.id !== object.id);
         selectedVectorObjects.delete(object.id);
         selectedVectorObject = vectorObjects[0]?.id || "";
         renderVectorEditor();
       }, `Remove shape ${index + 1}`);
-      row.append(checkbox, select, detail, remove);
+      row.append(checkbox, select, details, detail, remove);
       list.append(row);
     });
     renderVectorAlignmentControls();
     const object = vectorObjects.find((candidate) => candidate.id === selectedVectorObject);
     $("#vector-geometry").hidden = !object;
     $("#vector-transform").hidden = !object;
+    $("#vector-inspector-empty").hidden = Boolean(object);
+    $("#vector-inspector-summary").textContent = object ? `${vectorKindLabel(objectKind(object))} ${vectorObjects.indexOf(object) + 1}` : "None";
     if (!object) return;
-    const bounds = boundsFor(object);
+    const bounds = object.subpaths.some((path) => path.points.length) ? boundsFor(object) : { x: 0, y: 0, width: 0, height: 0 };
     const textObject = objectKind(object) === "text";
+    $("#vector-position-heading").textContent = textObject ? "Position" : "Position and size";
+    $("#vector-position-note").textContent = textObject
+      ? "Text stays anchored at this origin; use the text height to change the stroke size."
+      : "Width and height scale the shape around its lower-left corner. Drag the corner handle on the canvas for quick resizing.";
     $("#vector-text-fields").hidden = !textObject;
     $("#vector-width").closest("label").hidden = textObject;
     $("#vector-height").closest("label").hidden = textObject;
@@ -1152,6 +1179,7 @@
 
   function renderVectorAlignmentControls() {
     const canAlign = selectedVectorObjects.size >= 2;
+    $("#vector-align-controls").hidden = vectorObjects.length === 0;
     document.querySelectorAll("[data-align]").forEach((control) => { control.disabled = !canAlign; });
   }
 
@@ -1181,9 +1209,19 @@
     renderVectorEditor();
   }
 
+  function layerField(labelText, control, className) {
+    const field = document.createElement("label");
+    field.className = `layer-field ${className}`;
+    const label = document.createElement("span");
+    label.textContent = labelText;
+    field.append(label, control);
+    return field;
+  }
+
   function renderVectorOperations() {
     const list = $("#vector-operation-list");
     list.replaceChildren();
+    $("#vector-layer-empty").hidden = vectorOperations.length > 0;
     vectorOperations.forEach((operation, index) => {
       const row = document.createElement("li");
       row.className = "layer-row";
@@ -1204,15 +1242,21 @@
       power.setAttribute("aria-label", `Operation ${index + 1} power (%)`);
       power.addEventListener("input", () => { operation.power_percent = Number(power.value); updateVectorValidation(); });
       const up = button("↑", "button button-small", () => moveVectorOperation(index, -1), `Move operation ${index + 1} up`);
+      up.classList.add("layer-move-up");
       up.disabled = index === 0;
       const down = button("↓", "button button-small", () => moveVectorOperation(index, 1), `Move operation ${index + 1} down`);
+      down.classList.add("layer-move-down");
       down.disabled = index === vectorOperations.length - 1;
       const remove = button("×", "button button-small button-danger", () => {
         const removed = vectorOperations.splice(index, 1)[0];
         vectorObjects.forEach((object) => { if (object.operation_id === removed.id) delete object.operation_id; });
         renderVectorEditor();
       }, `Delete operation ${index + 1}`);
-      row.append(number, type, feed, power, up, down, remove);
+      remove.classList.add("layer-remove");
+      type.classList.add("layer-type-control");
+      feed.classList.add("layer-feed-control");
+      power.classList.add("layer-power-control");
+      row.append(number, layerField("Type", type, "layer-type"), layerField("Feed mm/min", feed, "layer-feed"), layerField("Power %", power, "layer-power"), up, down, remove);
       list.append(row);
     });
   }
@@ -1229,6 +1273,8 @@
     content.replaceChildren();
     const W = Number(profile?.width_mm), H = Number(profile?.height_mm);
     vectorPreviewMap = null;
+    $("#vector-profile-summary").textContent = profile ? `${profile.name} · ${W} × ${H} mm · r${profile.revision}` : "No declared profile selected";
+    $("#vector-canvas-empty").hidden = vectorObjects.length > 0;
     if (!(W > 0 && H > 0)) return;
     const scale = Math.min(550 / W, 290 / H), left = 35, bottom = 325;
     vectorPreviewMap = { scale, left, bottom };
@@ -1257,7 +1303,7 @@
         }));
       }
     });
-    content.append(svgElement("text", { x: left, y: 349 }, "Engrave · green   Cut · red dashed   Unassigned · gray dotted"));
+    content.append(svgElement("text", { x: left, y: bottom + 16, class: "workspace-origin" }, "0,0 origin"));
   }
 
   function vectorPointerPoint(event) {
@@ -1400,12 +1446,15 @@
     const error = vectorValidation();
     const stale = Boolean(openVectorProject && profile && (openVectorProject.profile_id !== profile.id || openVectorProject.profile_revision !== profile.revision));
     const warning = $("#vector-validation");
-    warning.textContent = stale ? "Profile revision changed. Review this project against the current declared workspace and save it before generating." : error;
+    const advisoryOnly = error === "Add at least one shape." || error === "Select or create a declared profile first.";
+    const showError = Boolean(error) && !advisoryOnly;
+    warning.textContent = stale ? "Profile revision changed. Review this project against the current declared workspace and save it before generating." : (showError ? error : "");
     warning.setAttribute("role", stale ? "status" : "alert");
     warning.classList.toggle("warning", stale);
-    warning.hidden = !stale && !error;
+    warning.hidden = !stale && !showError;
     const saveButton = $("#vector-form").querySelector('button[type="submit"]');
-    const complete = vectorObjects.every((object) => object.operation_id && vectorOperations.some((operation) => operation.id === object.operation_id));
+    const unassigned = vectorObjects.filter((object) => !object.operation_id || !vectorOperations.some((operation) => operation.id === object.operation_id));
+    const complete = unassigned.length === 0;
     const dirty = vectorDraftIsDirty(profile);
     const hasRemoteUpdate = Boolean(openVectorProject && pendingVectorProjectUpdate && pendingVectorProjectUpdate.revision > openVectorProject.revision);
     const remoteNotice = $("#vector-remote-change");
@@ -1415,10 +1464,14 @@
       : "";
     saveButton.disabled = Boolean(error) || !$("#profile-form").hidden || hasRemoteUpdate;
     const vectorSaveHint = $("#vector-save-hint");
-    vectorSaveHint.hidden = !dirty && Boolean(openVectorProject);
-    vectorSaveHint.textContent = !openVectorProject && !dirty
-      ? "Save the project to enable generation"
-      : "Save changes before generating. Generation only queues a job; use the existing explicit Start control after reviewing it.";
+    let saveHint = "";
+    if (!openVectorProject) saveHint = "Save the project to enable generation";
+    else if (dirty) saveHint = "Save changes before generating. Generation only queues a job; use the existing explicit Start control after reviewing it.";
+    else if (hasRemoteUpdate) saveHint = "Reload the newer revision or continue as a separate project before generating.";
+    else if (stale) saveHint = "Save the project against the changed profile before generating.";
+    else if (!complete) saveHint = `Assign ${unassigned.length === 1 ? "the remaining shape" : `${unassigned.length} remaining shapes`} to an operation layer to generate.`;
+    vectorSaveHint.hidden = !saveHint;
+    vectorSaveHint.textContent = saveHint;
     $("#generate-vector-project").disabled = Boolean(error) || !openVectorProject || stale || dirty || !complete || !$("#profile-form").hidden || hasRemoteUpdate;
     renderVectorPreview(profile);
   }
@@ -1442,9 +1495,10 @@
     selectedVectorObject = vectorObjects[0]?.id || "";
     selectedVectorObjects = new Set(selectedVectorObject ? [selectedVectorObject] : []);
     $("#vector-align-status").textContent = "";
+    $("#vector-svg-file-name").textContent = "";
     $("#vector-form").hidden = false;
     $("#vector-name").value = project ? project.name : "Untitled vector design";
-    $("#vector-form-title").textContent = project ? `Edit ${project.name}` : "New multi-path vector project";
+    $("#vector-form-title").textContent = project ? `Edit ${project.name}` : "New vector project";
     $("#delete-vector-project").hidden = !project;
     vectorDraftBaseline = vectorFormState(selectedProfile());
     renderVectorEditor();
@@ -1614,9 +1668,15 @@
     savedProjects.forEach((project) => {
       const row = document.createElement("li");
       row.dataset.profileId = project.profile_id;
-      const label = document.createElement("strong");
+      const label = document.createElement("div");
+      label.className = "vector-project-label";
+      const name = document.createElement("strong");
+      name.textContent = project.name;
       const profile = profiles.find((candidate) => candidate.id === project.profile_id);
-      label.textContent = `${project.name} · ${profile?.name || "Missing profile"} · r${project.profile_revision} · ${project.objects.length} shapes`;
+      const meta = document.createElement("span");
+      meta.className = "vector-project-meta";
+      meta.textContent = `${profile?.name || "Missing profile"} · r${project.profile_revision} · ${project.objects.length} shape${project.objects.length === 1 ? "" : "s"}`;
+      label.append(name, meta);
       if (project.profile_stale || !profile || profile.revision !== project.profile_revision) {
         const stale = document.createElement("span");
         stale.className = "stale-badge";
@@ -1759,6 +1819,7 @@
     event.target.value = "";
     if (!file) return;
     if (!connected || $("#vector-form").hidden) { notify("warning", "Open a vector project before importing SVG geometry."); return; }
+    $("#vector-svg-file-name").textContent = file.name;
     try {
       let response;
       try {
@@ -1786,6 +1847,7 @@
       vectorObjects.push(...objects);
       selectedVectorObject = objects[0]?.id || selectedVectorObject;
       selectedVectorObjects = new Set(objects.length ? [objects[0].id] : []);
+      $("#vector-svg-file-name").textContent = `Imported ${file.name}`;
       renderVectorEditor();
       notify("success", `Imported ${objects.length} editable SVG path${objects.length === 1 ? "" : "s"}. Assign each path to an operation layer; no machine settings were imported.`);
     } catch (error) { setDesignerError(error.message); }

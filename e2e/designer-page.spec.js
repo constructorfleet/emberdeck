@@ -21,6 +21,47 @@ async function createProfile(page, name) {
   await expect(page.locator('#notice .notice-message')).toContainText('Profile saved');
 }
 
+test('designer only shows shape inputs for a selected shape and guides an empty project', async ({ page }) => {
+  const attempt = `${test.info().repeatEachIndex}-${Date.now()}`;
+  await page.goto('/designer');
+  await connect(page);
+  await createProfile(page, `Empty designer profile ${attempt}`);
+  await page.getByRole('button', { name: 'New vector project' }).click();
+
+  await expect(page.locator('#vector-inspector-empty')).toBeVisible();
+  await expect(page.locator('#vector-inspector-empty')).toContainText(/select a shape/i);
+  await expect(page.locator('#vector-object-empty')).toBeVisible();
+  await expect(page.locator('#vector-shape-count')).toHaveText('0');
+  await expect(page.locator('#vector-geometry')).toBeHidden();
+  await expect(page.locator('#vector-transform')).toBeHidden();
+  await expect(page.locator('#vector-text-fields')).toBeHidden();
+  await expect(page.locator('#vector-validation')).toBeHidden();
+
+  await page.getByRole('button', { name: 'Add rectangle' }).click();
+  await expect(page.locator('#vector-shape-count')).toHaveText('1');
+  await expect(page.locator('#vector-object-empty')).toBeHidden();
+  await expect(page.locator('#vector-inspector-empty')).toBeHidden();
+  await expect(page.locator('#vector-geometry')).toBeVisible();
+  await expect(page.locator('#vector-transform')).toBeVisible();
+  await expect(page.locator('#vector-text-fields')).toBeHidden();
+  await expect(page.locator('#vector-object-list li')).toContainText(/mm/);
+
+  await page.getByRole('button', { name: 'Add text' }).click();
+  await expect(page.locator('#vector-shape-count')).toHaveText('2');
+  await expect(page.locator('#vector-text-fields')).toBeVisible();
+  await expect(page.locator('label:has(#vector-width)')).toBeHidden();
+  await expect(page.locator('label:has(#vector-height)')).toBeHidden();
+
+  await page.getByRole('button', { name: '1. rectangle' }).click();
+  await expect(page.locator('#vector-text-fields')).toBeHidden();
+  await expect(page.locator('label:has(#vector-width)')).toBeVisible();
+  await expect(page.locator('#vector-inspector-summary')).toContainText(/rectangle/i);
+
+  await expect(page.locator('#vector-operation-list .layer-feed')).toContainText(/feed mm\/min/i);
+  await expect(page.locator('#vector-operation-list .layer-power')).toContainText(/power %/i);
+  await expect(page.locator('#vector-operation-list .layer-type')).toContainText(/type/i);
+});
+
 test('designer has its own page and supports selecting, dragging, and scaling a shape on the workspace', async ({ page }) => {
   const attempt = `${test.info().repeatEachIndex}-${Date.now()}`;
   let savedPayload;
@@ -48,6 +89,7 @@ test('designer has its own page and supports selecting, dragging, and scaling a 
 
   const shape = page.locator('#vector-preview-content .vector-path').first();
   const originalD = await shape.getAttribute('d');
+  await shape.scrollIntoViewIfNeeded();
   const start = await shape.evaluate(element => {
     const point = element.getPointAtLength(0);
     const screen = new DOMPoint(point.x, point.y).matrixTransform(element.ownerSVGElement.getScreenCTM());
