@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/constructorfleet/emberdeck/compare/v0.20.0...v0.21.0) (2026-10-31)
+
+
+### Features
+
+* persist API keys and allow keyless local servers ([#182](https://github.com/constructorfleet/emberdeck/issues/182)) ([26d7b1a](https://github.com/constructorfleet/emberdeck/commit/26d7b1a29c2a4b40471df5045e192beed062118b))
+
 ## [0.20.0](https://github.com/constructorfleet/emberdeck/compare/v0.19.0...v0.20.0) (2026-10-31)
 
 
