@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/constructorfleet/emberdeck/compare/v0.19.0...v0.20.0) (2026-10-31)
+
+
+### Features
+
+* make the designer selection-aware and easier to use ([#180](https://github.com/constructorfleet/emberdeck/issues/180)) ([cec03bf](https://github.com/constructorfleet/emberdeck/commit/cec03bfb4ce70078765fa3c9bfb37c8a4e54f074))
+
 ## [0.19.0](https://github.com/constructorfleet/emberdeck/compare/v0.18.0...v0.19.0) (2026-10-30)
 
 
