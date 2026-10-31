@@ -32,6 +32,10 @@ test('selected vector object transform is previewed, saved, reopened, and applie
   await page.getByRole('button', { name: 'New vector project' }).click();
   await page.locator('#vector-name').fill(projectName);
   await page.getByRole('button', { name: 'Add rectangle' }).click();
+  await page.locator('#vector-x').fill('10');
+  await page.locator('#vector-y').fill('10');
+  await page.locator('#vector-width').fill('30');
+  await page.locator('#vector-height').fill('20');
   const preview = page.locator('#vector-preview-content .vector-path').first();
   const originalPath = await preview.getAttribute('d');
   await page.getByLabel('Translate X (mm)').fill('5');

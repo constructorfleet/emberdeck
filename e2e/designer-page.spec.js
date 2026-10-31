@@ -62,6 +62,43 @@ test('designer only shows shape inputs for a selected shape and guides an empty 
   await expect(page.locator('#vector-operation-list .layer-type')).toContainText(/type/i);
 });
 
+test('new projects start with work-area-sized shapes and profile-valid operation defaults', async ({ page }) => {
+  const attempt = `${test.info().repeatEachIndex}-${Date.now()}`;
+  await page.goto('/designer');
+  await connect(page);
+  await page.getByRole('button', { name: 'New profile' }).click();
+  await page.locator('#profile-name').fill(`Sized defaults profile ${attempt}`);
+  await page.locator('#profile-width').fill('300');
+  await page.locator('#profile-height').fill('200');
+  await page.locator('#profile-max-s').fill('1000');
+  await page.locator('#profile-min-feed').fill('1200');
+  await page.locator('#profile-max-feed').fill('1800');
+  await page.locator('#profile-max-power').fill('60');
+  await page.getByRole('button', { name: 'Save profile' }).click();
+  await expect(page.locator('#notice .notice-message')).toContainText('Profile saved');
+
+  await page.getByRole('button', { name: 'New rectangle project' }).click();
+  await expect(page.locator('#rect-x')).toHaveValue('90');
+  await expect(page.locator('#rect-y')).toHaveValue('60');
+  await expect(page.locator('#rect-width')).toHaveValue('120');
+  await expect(page.locator('#rect-height')).toHaveValue('80');
+  await expect(page.locator('#operation-feed')).toHaveValue('1200');
+  await expect(page.locator('#operation-power')).toHaveValue('25');
+  await expect(page.locator('#project-validation')).toBeHidden();
+  await page.getByRole('button', { name: 'Close editor' }).click();
+
+  await page.getByRole('button', { name: 'New vector project' }).click();
+  await expect(page.getByLabel('Operation 1 feed (mm/min)')).toHaveValue('1200');
+  await expect(page.getByLabel('Operation 1 power (%)')).toHaveValue('25');
+  await expect(page.locator('#vector-validation')).toBeHidden();
+  await page.getByRole('button', { name: 'Add rectangle' }).click();
+  await expect(page.locator('#vector-x')).toHaveValue('112.5');
+  await expect(page.locator('#vector-y')).toHaveValue('75');
+  await expect(page.locator('#vector-width')).toHaveValue('75');
+  await expect(page.locator('#vector-height')).toHaveValue('50');
+  await expect(page.locator('#vector-validation')).toBeHidden();
+});
+
 test('designer undo and redo restore shapes, text geometry, and operation layers', async ({ page }) => {
   const attempt = `${test.info().repeatEachIndex}-${Date.now()}`;
   await page.goto('/designer');
@@ -175,15 +212,16 @@ test('designer has its own page and supports selecting, dragging, and scaling a 
   await handle.scrollIntoViewIfNeeded();
   const handleBox = await handle.boundingBox();
   const beforeScale = await shape.getAttribute('d');
-  const rotatedLocalDrag = await page.locator('#vector-preview').evaluate(svg => {
+  const shapeWidthMm = Number(await page.locator('#vector-width').inputValue());
+  const rotatedLocalDrag = await page.locator('#vector-preview').evaluate((svg, widthMm) => {
     const matrix = svg.getScreenCTM();
-    const distance = 10 * 1.45;
+    const distance = (widthMm / 3) * 1.45;
     const angle = Math.PI / 4;
     return {
       x: matrix.a * distance * Math.cos(angle) + matrix.c * -distance * Math.sin(angle),
       y: matrix.b * distance * Math.cos(angle) + matrix.d * -distance * Math.sin(angle),
     };
-  });
+  }, shapeWidthMm);
   await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
   await page.mouse.down();
   await page.mouse.move(handleBox.x + handleBox.width / 2 + rotatedLocalDrag.x, handleBox.y + handleBox.height / 2 + rotatedLocalDrag.y);

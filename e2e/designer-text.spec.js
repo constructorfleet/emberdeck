@@ -29,6 +29,8 @@ test('editable monoline text saves, reopens, generates engraving geometry, and d
   await page.locator('#vector-name').fill(projectName);
   await page.getByRole('button', { name: 'Add text' }).click();
   await expect(page.locator('#vector-text-content')).toHaveValue('EMBER');
+  await page.locator('#vector-x').fill('10');
+  await page.locator('#vector-y').fill('10');
   const punctuationGeometry = page.waitForResponse((response) => response.url().includes('/api/v1/designer/text-geometry') && response.request().method() === 'POST');
   await page.locator('#vector-text-content').fill('.');
   await punctuationGeometry;

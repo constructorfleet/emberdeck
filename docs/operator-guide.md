@@ -282,8 +282,13 @@ starting position is unknown, so the preview does not draw a travel path to the
 endpoint. Geometry outside the declared envelope, invalid feed or power, and
 values with more than three decimal places block saving and generation.
 The version 1 rectangle editor supports one rectangle and vector engraving.
-Version 2 supports multiple rectangle, ellipse, line, and monoline text objects,
-described below.
+New projects start with geometry sized to the declared work area: 40% of the
+width and height for a rectangle project, and 25% for each newly added vector
+shape, centered in the workspace. New operation layers default to 600 mm/min
+clamped to the selected profile's feed range and 25% power clamped to its power
+limit, so a new project does not open with an avoidable range error. Version 2
+supports multiple rectangle, ellipse, line, and monoline text objects, described
+below.
 The multi-path editor can import a bounded static SVG subset. It converts
 physical dimensions and the viewBox to editable millimetre paths. Supported
 `<text>` elements become open monoline strokes using the fixed
